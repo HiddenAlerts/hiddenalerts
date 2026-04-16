@@ -1,4 +1,4 @@
-import { Button, Input, Typography } from '@/components';
+import { Button, Input, Tag, Typography } from '@/components';
 import { ArrowRight, Mail, Search } from 'lucide-react';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
@@ -52,6 +52,55 @@ export default function DesignSystemPage() {
               Caption — labels and timestamps
             </Typography>
             <Typography variant="footer">Footer — fine print</Typography>
+          </div>
+        </Section>
+
+        <Section title="Tag · types · round">
+          <p className="text-muted mb-3 text-sm">Pill shape with optional leading dot.</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Tag title="Gray" type="gray" shape="round" />
+            <Tag title="Gray light" type="grayLight" shape="round" />
+            <Tag title="Primary" type="primary" shape="round" />
+            <Tag title="Info" type="info" shape="round" />
+            <Tag title="Success" type="success" shape="round" />
+            <Tag title="Warning" type="warning" shape="round" />
+            <Tag title="Danger" type="danger" shape="round" />
+          </div>
+        </Section>
+
+        <Section title="Tag · types · square">
+          <p className="text-muted mb-3 text-sm">
+            Subtle radius; dot is omitted for square (pill-only).
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Tag title="Gray" type="gray" shape="square" />
+            <Tag title="Gray light" type="grayLight" shape="square" />
+            <Tag title="Primary" type="primary" shape="square" />
+            <Tag title="Info" type="info" shape="square" />
+            <Tag title="Success" type="success" shape="square" />
+            <Tag title="Warning" type="warning" shape="square" />
+            <Tag title="Danger" type="danger" shape="square" />
+          </div>
+        </Section>
+
+        <Section title="Tag · sizes & shapes">
+          <div className="flex flex-col gap-6">
+            <div>
+              <p className="text-muted mb-3 text-sm font-medium">Round</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <Tag title="Small" size="sm" shape="round" type="success" />
+                <Tag title="Large" size="lg" shape="round" type="success" />
+                <Tag title="No dot" dot={false} shape="round" type="success" />
+              </div>
+            </div>
+            <div>
+              <p className="text-muted mb-3 text-sm font-medium">Square</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <Tag title="Small" size="sm" shape="square" type="info" />
+                <Tag title="Large" size="lg" shape="square" type="info" />
+                <Tag title="No dot" dot={false} shape="square" type="info" />
+              </div>
+            </div>
           </div>
         </Section>
 
