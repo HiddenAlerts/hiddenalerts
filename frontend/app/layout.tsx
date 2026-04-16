@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Figtree, Manrope } from 'next/font/google';
 
 import './globals.css';
+import { Toaster } from 'sonner';
 
 const manrope = Manrope({
   subsets: ['latin'],
@@ -33,6 +34,7 @@ export default function RootLayout({
     >
       <body className={`${manrope.className} flex min-h-full flex-col`}>
         {children}
+        <Toaster />
       </body>
     </html>
   );
