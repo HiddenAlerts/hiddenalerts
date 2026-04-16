@@ -1,4 +1,4 @@
-import { Button, Input } from '@/components';
+import { Button, Input, Typography } from '@/components';
 import { ArrowRight, Mail, Search } from 'lucide-react';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
@@ -31,6 +31,30 @@ export default function DesignSystemPage() {
       </header>
 
       <div className="mt-10 space-y-12">
+        <Section title="Typography · scale">
+          <div className="flex max-w-3xl flex-col gap-4">
+            <Typography variant="h1">Heading 1</Typography>
+            <Typography variant="h2">Heading 2</Typography>
+            <Typography variant="h3">Heading 3</Typography>
+            <Typography variant="h4">Heading 4</Typography>
+            <Typography variant="h5">Heading 5</Typography>
+            <Typography variant="h6">Heading 6</Typography>
+            <Typography variant="body1">
+              Body large — intelligence alerts
+            </Typography>
+            <Typography variant="body2">
+              Body default — supporting copy for the dashboard.
+            </Typography>
+            <Typography variant="body3">
+              Body small — meta and dense UI.
+            </Typography>
+            <Typography variant="caption">
+              Caption — labels and timestamps
+            </Typography>
+            <Typography variant="footer">Footer — fine print</Typography>
+          </div>
+        </Section>
+
         <Section title="Button · variants">
           <div className="flex flex-wrap items-center gap-3">
             <Button variant="default">Default</Button>

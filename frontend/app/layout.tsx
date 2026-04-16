@@ -29,6 +29,7 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${manrope.variable} ${figtree.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
       <body className={`${manrope.className} flex min-h-full flex-col`}>
         {children}
