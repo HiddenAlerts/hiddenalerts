@@ -1,10 +1,9 @@
 import { cn } from '@/lib/utils';
 import { type VariantProps } from 'class-variance-authority';
 import { Loader2 } from 'lucide-react';
-
+import * as React from 'react';
 
 import { buttonSpinnerSize, buttonVariants } from './button.styles';
-import { forwardRef } from 'react';
 
 export interface ButtonProps
   extends
@@ -15,7 +14,7 @@ export interface ButtonProps
   rightIcon?: React.ReactNode;
 }
 
-const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (
     {
       className,

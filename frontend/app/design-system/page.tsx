@@ -1,5 +1,5 @@
-import { Button } from '@/components';
-import { ArrowRight, Mail } from 'lucide-react';
+import { Button, Input } from '@/components';
+import { ArrowRight, Mail, Search } from 'lucide-react';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 
@@ -86,6 +86,59 @@ export default function DesignSystemPage() {
             <Button variant="link" disabled>
               Disabled
             </Button>
+          </div>
+        </Section>
+
+        <Section title="Input · sizes">
+          <div className="flex max-w-md flex-col gap-3">
+            <Input placeholder="Extra small" inputSize="xs" />
+            <Input placeholder="Small" inputSize="sm" />
+            <Input placeholder="Medium (default)" inputSize="md" />
+            <Input placeholder="Large" inputSize="lg" />
+          </div>
+        </Section>
+
+        <Section title="Input · states">
+          <div className="flex max-w-md flex-col gap-3">
+            <Input placeholder="Default" />
+            <Input placeholder="With value" defaultValue="hiddenalerts.io" />
+            <Input
+              placeholder="Error"
+              isError
+              errorMessage="This field has an error."
+            />
+            <Input placeholder="Disabled" disabled />
+          </div>
+        </Section>
+
+        <Section title="Input · label & password">
+          <div className="flex max-w-md flex-col gap-3">
+            <Input
+              name="email"
+              label="Email"
+              type="email"
+              placeholder="you@example.com"
+              required
+              addAsterisk
+            />
+            <Input
+              name="password"
+              label="Password"
+              type="password"
+              placeholder="••••••••"
+              passwordWithIcon
+            />
+          </div>
+        </Section>
+
+        <Section title="Input · with left icon">
+          <div className="flex max-w-md flex-col gap-3">
+            <Input
+              type="search"
+              placeholder="Search…"
+              leftIcon={<Search />}
+              aria-label="Search"
+            />
           </div>
         </Section>
       </div>
