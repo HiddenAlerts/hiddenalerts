@@ -1,4 +1,4 @@
-import { Button, Input, Tag, Typography } from '@/components';
+import { Avatar, Button, Input, Tag, Typography } from '@/components';
 import { ArrowRight, Mail, Search } from 'lucide-react';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
@@ -52,6 +52,68 @@ export default function DesignSystemPage() {
               Caption — labels and timestamps
             </Typography>
             <Typography variant="footer">Footer — fine print</Typography>
+          </div>
+        </Section>
+
+        <Section title="Avatar · sizes (rounded)">
+          <p className="text-muted mb-3 text-sm">
+            Default image when <code className="text-foreground">src</code> is omitted.
+          </p>
+          <div className="flex flex-wrap items-end gap-6">
+            {(
+              [
+                'xs',
+                'sm',
+                'md',
+                'lg',
+                'xl',
+                '2xl',
+                '3xl',
+                '4xl',
+              ] as const
+            ).map((size) => (
+              <div key={size} className="flex flex-col items-center gap-2">
+                <Avatar size={size} alt={`Avatar ${size}`} />
+                <span className="text-muted text-xs">{size}</span>
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        <Section title="Avatar · shape">
+          <div className="flex flex-wrap items-center gap-8">
+            <div className="flex flex-col items-center gap-2">
+              <Avatar size="lg" type="rounded" alt="Rounded avatar" />
+              <span className="text-muted text-xs">Rounded</span>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <Avatar size="lg" type="rectangle" alt="Rectangle avatar" />
+              <span className="text-muted text-xs">Rectangle</span>
+            </div>
+          </div>
+        </Section>
+
+        <Section title="Avatar · custom src & fallback">
+          <p className="text-muted mb-3 text-sm">
+            Explicit URL and invalid URL (falls back to default placeholder).
+          </p>
+          <div className="flex flex-wrap items-end gap-8">
+            <div className="flex flex-col items-center gap-2">
+              <Avatar
+                size="md"
+                src="/images/user-avatar.png"
+                alt="Custom src"
+              />
+              <span className="text-muted text-xs">Custom src</span>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <Avatar
+                size="md"
+                src="/images/does-not-exist-404.png"
+                alt="Broken image fallback"
+              />
+              <span className="text-muted text-xs">Broken → fallback</span>
+            </div>
           </div>
         </Section>
 
