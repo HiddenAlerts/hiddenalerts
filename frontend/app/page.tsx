@@ -1,4 +1,16 @@
+"use client";
+import { useState } from "react";
+
 export default function Home() {
+  const [email, setEmail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = () => {
+    if (!email) return;
+    console.log("Captured email:", email); // temporary
+    setSubmitted(true);
+  };
+
   return (
     <div className="min-h-screen bg-black text-white">
 
@@ -15,13 +27,38 @@ export default function Home() {
         <h1 className="text-5xl font-bold mb-6 leading-tight">
           Real-Time Fraud Intelligence — Not Just News
         </h1>
-        <p className="text-lg text-zinc-400 mb-8 max-w-2xl">
+
+        <p className="text-lg text-zinc-400 mb-4 max-w-2xl">
           AI-filtered, risk-scored alerts from FBI, SEC, DOJ and more — so you
           can identify threats before they escalate.
         </p>
-        <button className="bg-red-600 px-6 py-3 rounded-lg font-semibold hover:bg-red-700">
-          Get Early Access
-        </button>
+
+        <p className="text-sm text-red-500 mb-8">
+          Most fraud signals are missed in the first 24 hours.
+        </p>
+
+        {/* EMAIL CAPTURE */}
+        {!submitted ? (
+          <div className="flex flex-col sm:flex-row gap-3 max-w-md">
+            <input
+              type="email"
+              placeholder="Enter your email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="flex-1 px-4 py-3 rounded-md bg-zinc-900 border border-zinc-700 text-white focus:outline-none"
+            />
+            <button
+              onClick={handleSubmit}
+              className="bg-red-600 px-6 py-3 rounded-md font-semibold hover:bg-red-700"
+            >
+              Get Early Access
+            </button>
+          </div>
+        ) : (
+          <p className="text-green-500 font-semibold">
+            You’re on the list. Early access coming soon.
+          </p>
+        )}
       </section>
 
       {/* ALERT PREVIEW */}
@@ -32,70 +69,30 @@ export default function Home() {
 
           <div className="bg-zinc-900 p-6 rounded-lg border border-zinc-800">
             <div className="flex justify-between mb-2">
-              <span className="text-sm text-zinc-400">DOJ</span>
+              <span className="text-sm text-zinc-400">DOJ • 2 hours ago</span>
               <span className="text-red-500 text-sm font-semibold">HIGH RISK</span>
             </div>
             <h3 className="text-lg font-semibold mb-2">
               $19M WIC Fraud Scheme — Multi-State Operation
             </h3>
             <p className="text-zinc-400 text-sm">
-              Why it matters: Organized fraud network exploiting federal assistance programs.
+              Why it matters: Indicates coordinated fraud ring likely expanding across states.
             </p>
           </div>
 
           <div className="bg-zinc-900 p-6 rounded-lg border border-zinc-800">
             <div className="flex justify-between mb-2">
-              <span className="text-sm text-zinc-400">SEC</span>
+              <span className="text-sm text-zinc-400">SEC • 5 hours ago</span>
               <span className="text-yellow-500 text-sm font-semibold">MEDIUM RISK</span>
             </div>
             <h3 className="text-lg font-semibold mb-2">
               Investment Scam Targeting Retirees
             </h3>
             <p className="text-zinc-400 text-sm">
-              Why it matters: Increasing pattern of targeted financial exploitation.
+              Why it matters: Pattern of targeted financial exploitation increasing.
             </p>
           </div>
 
-        </div>
-      </section>
-
-      {/* DIFFERENTIATION */}
-      <section className="px-8 py-16 bg-zinc-950">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-3xl font-bold mb-6">Not News. Intelligence.</h2>
-
-          <div className="grid md:grid-cols-3 gap-8 text-zinc-400">
-
-            <div>
-              <h3 className="text-white font-semibold mb-2">Filtered Signals</h3>
-              <p>No noise. Only high-relevance fraud events.</p>
-            </div>
-
-            <div>
-              <h3 className="text-white font-semibold mb-2">Risk Scoring</h3>
-              <p>Every alert prioritized by severity and impact.</p>
-            </div>
-
-            <div>
-              <h3 className="text-white font-semibold mb-2">Pattern Detection</h3>
-              <p>Identify trends across agencies before they surface publicly.</p>
-            </div>
-
-          </div>
-        </div>
-      </section>
-
-      {/* PATTERN EXAMPLE */}
-      <section className="px-8 py-16 max-w-5xl mx-auto">
-        <h2 className="text-2xl font-semibold mb-6">Emerging Threat Patterns</h2>
-
-        <div className="bg-zinc-900 p-6 rounded-lg border border-zinc-800">
-          <p className="text-zinc-300">
-            3 federal agencies reported similar crypto laundering activity within the past 72 hours.
-          </p>
-          <p className="text-sm text-zinc-500 mt-2">
-            Cross-source intelligence signal detected
-          </p>
         </div>
       </section>
 
@@ -107,10 +104,6 @@ export default function Home() {
         <p className="text-zinc-400 mb-6">
           Join early users getting access to real-time fraud intelligence.
         </p>
-
-        <button className="bg-red-600 px-8 py-3 rounded-lg font-semibold hover:bg-red-700">
-          Subscribe for Full Access
-        </button>
       </section>
 
     </div>
