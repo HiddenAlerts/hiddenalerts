@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% set active_page = "dashboard" %}
+
+{% block title %}Alert Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-0 fw-bold">
+            <i class="bi bi-bell-fill me-2 text-danger"></i>Fraud Intelligence Alerts
+        </h2>
+        <small class="text-muted">
+            {{ stats.total_relevant }} relevant alerts total —
+            {{ stats.processed_today }} processed today
+        </small>
+    </div>
+    <div class="d-flex gap-2">
+        <!-- Trigger processing button -->
+        <button class="btn btn-outline-primary btn-sm" id="triggerBtn" onclick="triggerProcessing()">
+            <i class="bi bi-lightning-charge me-1"></i>Process Now
+        </button>
+        <!-- Refresh page -->
+        <a href="/dashboard" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+        </a>
+    </div>
+</div>
+
+<!-- Stats row -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card border-danger">
+            <div class="card-body py-2 text-center">
+                <div class="fs-3 fw-bold text-danger">{{ stats.high_count }}</div>
+                <div class="text-muted small">HIGH Risk</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-warning">
+            <div class="card-body py-2 text-center">
+                <div class="fs-3 fw-bold text-warning">{{ stats.medium_count }}</div>
+                <div class="text-muted small">MEDIUM Risk</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-secondary">
+            <div class="card-body py-2 text-center">
+                <div class="fs-3 fw-bold text-secondary">{{ stats.low_count }}</div>
+                <div class="text-muted small">LOW Risk</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body py-2 text-center">
+                <div class="fs-3 fw-bold text-primary">{{ stats.total_events }}</div>
+                <div class="text-muted small">Active Events</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Category filter -->
+<div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
+    <span class="text-muted small">Filter:</span>
+    {% for cat in categories %}
+    <a href="/dashboard?category={{ cat }}"
+       class="btn btn-sm {% if current_filter == cat %}btn-dark{% else %}btn-outline-secondary{% endif %}">
+        {{ cat }}
+    </a>
+    {% endfor %}
+    {% if current_filter %}
+    <a href="/dashboard" class="btn btn-sm btn-outline-danger">
+        <i class="bi bi-x me-1"></i>Clear
+    </a>
+    {% endif %}
+</div>
+
+<!-- 3-Panel layout: HIGH / MEDIUM / LOW -->
+<div class="row g-3">
+    <!-- HIGH RISK panel -->
+    <div class="col-lg-4">
+        <div class="card panel-high">
+            <div class="card-header panel-header-high d-flex justify-content-between align-items-center py-2">
+                <span class="fw-bold">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i>HIGH RISK
+                </span>
+                <span class="badge bg-danger">{{ high_alerts | length }}</span>
+            </div>
+            <div class="card-body p-2" style="max-height: 70vh; overflow-y: auto;">
+                {% if high_alerts %}
+                {% for alert in high_alerts %}
+                {{ _render_alert_card(alert) }}
+                {% endfor %}
+                {% else %}
+                <p class="text-muted text-center py-3 small">No high-risk alerts</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- MEDIUM RISK panel -->
+    <div class="col-lg-4">
+        <div class="card panel-medium">
+            <div class="card-header panel-header-medium d-flex justify-content-between align-items-center py-2">
+                <span class="fw-bold">
+                    <i class="bi bi-exclamation-circle-fill me-1"></i>MEDIUM RISK
+                </span>
+                <span class="badge" style="background-color: #fd7e14;">{{ medium_alerts | length }}</span>
+            </div>
+            <div class="card-body p-2" style="max-height: 70vh; overflow-y: auto;">
+                {% if medium_alerts %}
+                {% for alert in medium_alerts %}
+                {{ _render_alert_card(alert) }}
+                {% endfor %}
+                {% else %}
+                <p class="text-muted text-center py-3 small">No medium-risk alerts</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- LOW RISK panel -->
+    <div class="col-lg-4">
+        <div class="card panel-low">
+            <div class="card-header panel-header-low d-flex justify-content-between align-items-center py-2">
+                <span class="fw-bold">
+                    <i class="bi bi-info-circle-fill me-1"></i>LOW RISK
+                </span>
+                <span class="badge bg-secondary">{{ low_alerts | length }}</span>
+            </div>
+            <div class="card-body p-2" style="max-height: 70vh; overflow-y: auto;">
+                {% if low_alerts %}
+                {% for alert in low_alerts %}
+                {{ _render_alert_card(alert) }}
+                {% endfor %}
+                {% else %}
+                <p class="text-muted text-center py-3 small">No low-risk alerts</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pagination -->
+<div class="d-flex justify-content-between align-items-center mt-4">
+    <small class="text-muted">
+        Showing {{ offset + 1 }}–{{ offset + (high_alerts|length + medium_alerts|length + low_alerts|length) }}
+        of {{ stats.total_relevant }} relevant alerts
+    </small>
+    <div class="btn-group btn-group-sm">
+        {% if offset > 0 %}
+        <a href="/dashboard?offset={{ [offset - limit, 0]|max }}&limit={{ limit }}{% if current_filter %}&category={{ current_filter }}{% endif %}"
+           class="btn btn-outline-secondary">
+            <i class="bi bi-chevron-left"></i> Previous
+        </a>
+        {% endif %}
+        {% if (offset + limit) < stats.total_relevant %}
+        <a href="/dashboard?offset={{ offset + limit }}&limit={{ limit }}{% if current_filter %}&category={{ current_filter }}{% endif %}"
+           class="btn btn-outline-secondary">
+            Next <i class="bi bi-chevron-right"></i>
+        </a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% macro _render_alert_card(alert) %}
+<a href="/dashboard/alerts/{{ alert.id }}" class="text-decoration-none">
+    <div class="card mb-2 alert-card">
+        <div class="card-body p-2">
+            <div class="d-flex justify-content-between align-items-start mb-1">
+                <small class="fw-semibold text-dark" style="line-height: 1.3;">
+                    {{ alert.title | truncate(80) if alert.title else "Untitled" }}
+                </small>
+                {% if alert.signal_score_total %}
+                <span class="score-badge ms-2 flex-shrink-0">[{{ alert.signal_score_total }}]</span>
+                {% endif %}
+            </div>
+            <div class="d-flex flex-wrap gap-1 mb-1">
+                {% if alert.source_name %}
+                <span class="badge bg-dark" style="font-size: 0.65rem;">{{ alert.source_name }}</span>
+                {% endif %}
+                {% if alert.primary_category %}
+                <span class="badge bg-secondary" style="font-size: 0.65rem;">{{ alert.primary_category }}</span>
+                {% endif %}
+            </div>
+            {% if alert.matched_keywords %}
+            <div>
+                {% for kw in alert.matched_keywords[:3] %}
+                <span class="keyword-chip">{{ kw }}</span>
+                {% endfor %}
+                {% if alert.matched_keywords | length > 3 %}
+                <span class="keyword-chip text-muted">+{{ alert.matched_keywords | length - 3 }} more</span>
+                {% endif %}
+            </div>
+            {% endif %}
+            <div class="mt-1">
+                <small class="text-muted">{{ alert.processed_at.strftime('%b %d, %H:%M') if alert.processed_at else '' }}</small>
+            </div>
+        </div>
+    </div>
+</a>
+{% endmacro %}
+
+{% block extra_scripts %}
+<script>
+async function triggerProcessing() {
+    const btn = document.getElementById('triggerBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Processing...';
+    try {
+        const resp = await fetch('/api/v1/alerts/process', {method: 'POST'});
+        if (resp.status === 202) {
+            btn.className = 'btn btn-success btn-sm';
+            btn.innerHTML = '<i class="bi bi-check me-1"></i>Started!';
+            setTimeout(() => location.reload(), 3000);
+        } else if (resp.status === 409) {
+            btn.className = 'btn btn-warning btn-sm';
+            btn.innerHTML = '<i class="bi bi-hourglass me-1"></i>Already running';
+            setTimeout(() => { btn.disabled = false; btn.className = 'btn btn-outline-primary btn-sm'; btn.innerHTML = '<i class="bi bi-lightning-charge me-1"></i>Process Now'; }, 3000);
+        } else {
+            throw new Error('Unexpected status: ' + resp.status);
+        }
+    } catch (e) {
+        btn.className = 'btn btn-danger btn-sm';
+        btn.innerHTML = '<i class="bi bi-x me-1"></i>Error';
+        setTimeout(() => { btn.disabled = false; btn.className = 'btn btn-outline-primary btn-sm'; btn.innerHTML = '<i class="bi bi-lightning-charge me-1"></i>Process Now'; }, 3000);
+    }
+}
+</script>
+{% endblock %}
