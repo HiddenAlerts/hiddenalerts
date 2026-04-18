@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16
+    container_name: hiddenalerts_db
+    environment:
+      POSTGRES_USER: hiddenalerts
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: hiddenalerts
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hiddenalerts"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

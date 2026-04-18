@@ -1,0 +1,94 @@
+"""Pydantic schemas for processed alerts, events, and reviews."""
+from __future__ import annotations
+
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
+
+
+class ProcessedAlertRead(BaseModel):
+    """Summary view of a processed alert — used in list endpoints."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    raw_item_id: int
+    # Joined fields from raw_item / source (populated by API layer)
+    title: str | None = None
+    source_name: str | None = None
+    item_url: str | None = None
+    # Core alert fields
+    risk_level: str | None
+    primary_category: str | None
+    signal_score_total: int | None
+    # Normalized 0.0–1.0 score for frontend convenience (signal_score_total / 25)
+    relevance_score: float | None = None
+    matched_keywords: list[str] | None
+    is_relevant: bool
+    processed_at: datetime
+
+
+class ProcessedAlertDetail(ProcessedAlertRead):
+    """Full detail view — includes AI outputs and score breakdown."""
+
+    summary: str | None = None
+    secondary_category: str | None = None
+    entities_json: dict | None = None
+    # AI raw outputs (for audit/recalculation)
+    financial_impact_estimate: str | None = None
+    victim_scale_raw: str | None = None
+    ai_model: str | None = None
+    # Score breakdown
+    score_source_credibility: int | None = None
+    score_financial_impact: int | None = None
+    score_victim_scale: int | None = None
+    score_cross_source: int | None = None
+    score_trend_acceleration: int | None = None
+    # Event linkage (populated by API layer)
+    event_id: int | None = None
+    event_title: str | None = None
+    # Latest review status (populated by API layer)
+    review_status: str | None = None
+
+
+class AlertReviewCreate(BaseModel):
+    """Request body for submitting a review action."""
+
+    review_status: str  # "approved" | "false_positive" | "edited"
+    edited_summary: str | None = None
+    adjusted_risk_level: str | None = None
+
+
+class AlertReviewRead(BaseModel):
+    """Response after creating a review."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    alert_id: int | None
+    user_id: int | None
+    review_status: str | None
+    edited_summary: str | None = None
+    adjusted_risk_level: str | None = None
+    reviewed_at: datetime
+
+
+class EventRead(BaseModel):
+    """Summary view of a grouped event."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    risk_level: str | None
+    category: str | None
+    primary_entity: str | None
+    first_detected_at: datetime
+    last_updated_at: datetime
+    source_count: int = 0  # Computed: len(event_sources)
+
+
+class EventDetail(EventRead):
+    """Full event detail with linked alerts."""
+
+    alerts: list[ProcessedAlertRead] = []

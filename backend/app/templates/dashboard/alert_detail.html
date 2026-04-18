@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+{% set active_page = "dashboard" %}
+
+{% block title %}Alert #{{ alert.id }}{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb -->
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/dashboard">Alerts</a></li>
+        <li class="breadcrumb-item active">Alert #{{ alert.id }}</li>
+    </ol>
+</nav>
+
+<div class="row g-4">
+    <!-- Left column: main alert info -->
+    <div class="col-lg-8">
+
+        <!-- Title card -->
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <h4 class="card-title mb-1">{{ alert.title or "Untitled Article" }}</h4>
+                    {% if alert.risk_level == 'high' %}
+                    <span class="badge bg-danger fs-6 ms-2">HIGH</span>
+                    {% elif alert.risk_level == 'medium' %}
+                    <span class="badge fs-6 ms-2" style="background-color: #fd7e14;">MEDIUM</span>
+                    {% else %}
+                    <span class="badge bg-secondary fs-6 ms-2">LOW</span>
+                    {% endif %}
+                </div>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    {% if alert.source_name %}
+                    <span class="badge bg-dark">{{ alert.source_name }}</span>
+                    {% endif %}
+                    {% if alert.primary_category %}
+                    <span class="badge bg-secondary">{{ alert.primary_category }}</span>
+                    {% endif %}
+                    {% if alert.secondary_category %}
+                    <span class="badge bg-light text-dark">{{ alert.secondary_category }}</span>
+                    {% endif %}
+                    {% if alert.signal_score_total %}
+                    <span class="score-badge">Score: {{ alert.signal_score_total }}/25</span>
+                    {% endif %}
+                </div>
+                {% if alert.item_url %}
+                <div class="mt-2">
+                    <a href="{{ alert.item_url }}" target="_blank" rel="noopener noreferrer"
+                       class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>View Original Source
+                    </a>
+                </div>
+                {% endif %}
+                <div class="mt-2">
+                    <small class="text-muted">
+                        Processed: {{ alert.processed_at.strftime('%B %d, %Y at %H:%M UTC') if alert.processed_at else 'Unknown' }}
+                        {% if alert.ai_model %} · AI model: {{ alert.ai_model }}{% endif %}
+                    </small>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Summary -->
+        {% if alert.summary %}
+        <div class="card mb-3">
+            <div class="card-header py-2 fw-semibold">
+                <i class="bi bi-file-text me-1"></i>AI Summary
+            </div>
+            <div class="card-body">
+                <p class="mb-0">{{ alert.summary }}</p>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Signal Score Breakdown -->
+        {% if alert.signal_score_total %}
+        <div class="card mb-3">
+            <div class="card-header py-2 fw-semibold">
+                <i class="bi bi-bar-chart me-1"></i>Signal Score Breakdown
+                <span class="float-end text-muted">Total: {{ alert.signal_score_total }}/25</span>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Factor</th>
+                            <th class="text-center">Score</th>
+                            <th>Details</th>
+                            <th style="width: 30%;">Progress</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Source Credibility</td>
+                            <td class="text-center fw-bold">{{ alert.score_source_credibility or '–' }}/5</td>
+                            <td><small class="text-muted">{{ alert.source_name }}</small></td>
+                            <td>
+                                {% if alert.score_source_credibility %}
+                                <div class="score-bar-container">
+                                    <div class="score-bar" style="width: {{ (alert.score_source_credibility / 5 * 100)|int }}%;"></div>
+                                </div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Financial Impact</td>
+                            <td class="text-center fw-bold">{{ alert.score_financial_impact or '–' }}/5</td>
+                            <td><small class="text-muted">{{ alert.financial_impact_estimate or 'Unknown' }}</small></td>
+                            <td>
+                                {% if alert.score_financial_impact %}
+                                <div class="score-bar-container">
+                                    <div class="score-bar" style="width: {{ (alert.score_financial_impact / 5 * 100)|int }}%;"></div>
+                                </div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Victim Scale</td>
+                            <td class="text-center fw-bold">{{ alert.score_victim_scale or '–' }}/5</td>
+                            <td><small class="text-muted">{{ alert.victim_scale_raw or 'Unknown' }}</small></td>
+                            <td>
+                                {% if alert.score_victim_scale %}
+                                <div class="score-bar-container">
+                                    <div class="score-bar" style="width: {{ (alert.score_victim_scale / 5 * 100)|int }}%;"></div>
+                                </div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Cross-Source</td>
+                            <td class="text-center fw-bold">{{ alert.score_cross_source or '–' }}/5</td>
+                            <td><small class="text-muted">
+                                {% if alert.event_id %}Linked to event #{{ alert.event_id }}{% else %}Single source{% endif %}
+                            </small></td>
+                            <td>
+                                {% if alert.score_cross_source %}
+                                <div class="score-bar-container">
+                                    <div class="score-bar" style="width: {{ (alert.score_cross_source / 5 * 100)|int }}%;"></div>
+                                </div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Trend Acceleration</td>
+                            <td class="text-center fw-bold">{{ alert.score_trend_acceleration or '–' }}/5</td>
+                            <td><small class="text-muted">Based on keyword frequency</small></td>
+                            <td>
+                                {% if alert.score_trend_acceleration %}
+                                <div class="score-bar-container">
+                                    <div class="score-bar" style="width: {{ (alert.score_trend_acceleration / 5 * 100)|int }}%;"></div>
+                                </div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </tbody>
+                    <tfoot class="table-secondary">
+                        <tr>
+                            <td colspan="2" class="fw-bold">Total Score</td>
+                            <td colspan="2" class="fw-bold">
+                                {{ alert.signal_score_total }}/25 →
+                                <span class="{% if alert.risk_level == 'high' %}text-danger{% elif alert.risk_level == 'medium' %}text-warning{% else %}text-secondary{% endif %} fw-bold">
+                                    {{ alert.risk_level|upper if alert.risk_level else 'UNKNOWN' }}
+                                </span>
+                            </td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Entities & Keywords -->
+        <div class="row g-3 mb-3">
+            {% if alert.entities_json and alert.entities_json.get('names') %}
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header py-2 fw-semibold">
+                        <i class="bi bi-person-badge me-1"></i>Extracted Entities
+                    </div>
+                    <div class="card-body">
+                        {% for entity in alert.entities_json.get('names', []) %}
+                        <span class="entity-chip">{{ entity }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            {% if alert.matched_keywords %}
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header py-2 fw-semibold">
+                        <i class="bi bi-tags me-1"></i>Matched Keywords
+                    </div>
+                    <div class="card-body">
+                        {% for kw in alert.matched_keywords %}
+                        <span class="keyword-chip">{{ kw }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+    </div>
+
+    <!-- Right column: actions + event + history -->
+    <div class="col-lg-4">
+
+        <!-- Review actions -->
+        <div class="card mb-3">
+            <div class="card-header py-2 fw-semibold">
+                <i class="bi bi-pencil-square me-1"></i>Admin Review
+                {% if alert.review_status %}
+                <span class="badge
+                    {% if alert.review_status == 'approved' %}bg-success
+                    {% elif alert.review_status == 'false_positive' %}bg-warning text-dark
+                    {% else %}bg-info text-dark{% endif %}
+                    ms-1">{{ alert.review_status | replace('_', ' ') | title }}</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <form method="POST" action="/dashboard/alerts/{{ alert.id }}/review">
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Review Status</label>
+                        <select class="form-select form-select-sm" name="review_status" required>
+                            <option value="">— Select action —</option>
+                            <option value="approved">✓ Approve for report</option>
+                            <option value="false_positive">✗ Mark false positive</option>
+                            <option value="edited">✎ Edit &amp; approve</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Override Risk Level (optional)</label>
+                        <select class="form-select form-select-sm" name="adjusted_risk_level">
+                            <option value="">— No change —</option>
+                            <option value="high">HIGH</option>
+                            <option value="medium">MEDIUM</option>
+                            <option value="low">LOW</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Edit Summary (optional)</label>
+                        <textarea class="form-control form-control-sm"
+                                  name="edited_summary"
+                                  rows="3"
+                                  placeholder="Leave blank to keep AI summary">{{ alert.summary or '' }}</textarea>
+                    </div>
+                    <button type="submit" class="btn btn-dark btn-sm w-100">
+                        <i class="bi bi-check2 me-1"></i>Submit Review
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Related event -->
+        {% if alert.event_id %}
+        <div class="card mb-3">
+            <div class="card-header py-2 fw-semibold">
+                <i class="bi bi-diagram-3 me-1"></i>Related Event
+            </div>
+            <div class="card-body">
+                <p class="mb-1 fw-semibold">{{ alert.event_title }}</p>
+                <small class="text-muted">Event #{{ alert.event_id }}</small>
+                <div class="mt-2">
+                    <a href="/api/v1/events/{{ alert.event_id }}" target="_blank"
+                       class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-arrow-right me-1"></i>View Event API
+                    </a>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Review history -->
+        {% if reviews %}
+        <div class="card mb-3">
+            <div class="card-header py-2 fw-semibold">
+                <i class="bi bi-clock-history me-1"></i>Review History
+            </div>
+            <div class="list-group list-group-flush">
+                {% for review in reviews %}
+                <div class="list-group-item py-2 px-3">
+                    <div class="d-flex justify-content-between">
+                        <span class="badge
+                            {% if review.review_status == 'approved' %}bg-success
+                            {% elif review.review_status == 'false_positive' %}bg-warning text-dark
+                            {% else %}bg-info text-dark{% endif %}">
+                            {{ review.review_status | replace('_', ' ') | title }}
+                        </span>
+                        <small class="text-muted">{{ review.reviewed_at.strftime('%m/%d %H:%M') }}</small>
+                    </div>
+                    {% if review.adjusted_risk_level %}
+                    <small class="text-muted">Risk overridden → {{ review.adjusted_risk_level | upper }}</small>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+{% endblock %}
