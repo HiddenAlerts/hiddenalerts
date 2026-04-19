@@ -46,8 +46,11 @@ export const Sidebar: FC<SidebarProps> = ({
     >
       <div
         className={cn(
-          'border-border flex h-14 shrink-0 items-center border-b px-3',
-          collapsed ? 'justify-center lg:justify-center' : 'justify-between gap-2',
+          'border-border flex shrink-0 items-center border-b px-3',
+          'h-14 gap-2',
+          collapsed
+            ? 'justify-center lg:h-auto lg:min-h-14 lg:flex-col lg:justify-center lg:gap-2 lg:px-1 lg:py-2.5'
+            : 'justify-between',
         )}
       >
         <Link
@@ -55,7 +58,7 @@ export const Sidebar: FC<SidebarProps> = ({
           onClick={onCloseMobile}
           className={cn(
             'text-foreground inline-flex min-w-0 items-center gap-2 font-semibold',
-            collapsed && 'lg:justify-center',
+            collapsed && 'lg:w-full lg:min-w-0 lg:justify-center',
           )}
         >
           <span className="bg-primary-500/15 text-primary-500 inline-flex size-9 shrink-0 items-center justify-center rounded-md">
