@@ -1,13 +1,43 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 
 import type { AvatarProps } from './Avatar.types';
 import { avatarImgSizeMap, avatarRadiusMap, avatarSizeMap } from './avatarData';
 
 /** Served from `public/images/user-avatar.png` */
 const DEFAULT_AVATAR_SRC = '/images/user-avatar.png';
+
+type AvatarImageProps = {
+  alt?: string;
+  canonicalSrc: string;
+  imgStyles?: string;
+  avatarImgSize: { width: number; height: number };
+};
+
+function AvatarImage({
+  alt,
+  canonicalSrc,
+  imgStyles,
+  avatarImgSize,
+}: AvatarImageProps) {
+  const [useFallback, setUseFallback] = useState(false);
+  const src = useFallback ? DEFAULT_AVATAR_SRC : canonicalSrc;
+
+  return (
+    // Remount when the requested image changes so error state resets.
+    <img
+      key={canonicalSrc}
+      alt={alt || 'avatar'}
+      className={cn('aspect-square h-full w-full object-cover', imgStyles)}
+      height={avatarImgSize.height}
+      width={avatarImgSize.width}
+      src={src}
+      onError={() => setUseFallback(true)}
+    />
+  );
+}
 
 const Avatar: React.FC<AvatarProps> = ({
   className,
@@ -18,18 +48,7 @@ const Avatar: React.FC<AvatarProps> = ({
   type = 'rounded',
 }) => {
   const avatarSize = avatarSizeMap[size];
-  const [imgSrc, setImgSrc] = useState<string>(src ?? DEFAULT_AVATAR_SRC);
-  const [hasError, setHasError] = useState(false);
-
-  useEffect(() => {
-    if (src) {
-      setImgSrc(src);
-      setHasError(false);
-    } else {
-      setImgSrc(DEFAULT_AVATAR_SRC);
-      setHasError(false);
-    }
-  }, [src]);
+  const canonicalSrc = src ?? DEFAULT_AVATAR_SRC;
 
   const avatarRadius =
     type === 'rectangle' ? avatarRadiusMap[size] : 'rounded-full';
@@ -44,18 +63,11 @@ const Avatar: React.FC<AvatarProps> = ({
         avatarRadius,
       )}
     >
-      <img
-        alt={alt || 'avatar'}
-        className={cn('aspect-square h-full w-full object-cover', imgStyles)}
-        height={avatarImgSize.height}
-        width={avatarImgSize.width}
-        src={imgSrc}
-        onError={() => {
-          if (!hasError) {
-            setImgSrc(DEFAULT_AVATAR_SRC);
-            setHasError(true);
-          }
-        }}
+      <AvatarImage
+        alt={alt}
+        canonicalSrc={canonicalSrc}
+        imgStyles={imgStyles}
+        avatarImgSize={avatarImgSize}
       />
     </div>
   );

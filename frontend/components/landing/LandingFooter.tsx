@@ -1,5 +1,3 @@
-import Link from 'next/link';
-
 import { LandingLogo } from './LandingLogo';
 
 export function LandingFooter() {
