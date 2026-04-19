@@ -1,3 +1,10 @@
+import {
+  LandingDashboardPreview,
+  LandingFAQ,
+  LandingFooter,
+  LandingHeader,
+  LandingHero,
+} from '@/components/landing';
 import { useState } from 'react';
 
 export default function Home() {
@@ -11,9 +18,14 @@ export default function Home() {
   };
 
   return (
-    <div className="flex flex-col">
-      <h1 className="font-figtree">Hello World Figtree</h1>
-      <h1 className="font-manrope">Hello World Figtree</h1>
-    </div>
+    <>
+      <LandingHeader />
+      <main className="flex flex-1 flex-col">
+        <LandingHero />
+        <LandingDashboardPreview />
+        <LandingFAQ />
+      </main>
+      <LandingFooter />
+    </>
   );
 }
