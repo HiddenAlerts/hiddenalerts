@@ -1,8 +1,7 @@
-import { Building2, ShieldAlert, Webhook } from 'lucide-react';
-import type { ReactNode } from 'react';
-
 import Tag from '@/components/ui/Tag/Tag';
 import { cn } from '@/lib/utils';
+import { Building2, ShieldAlert, Webhook } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 type RowProps = {
   icon: ReactNode;
@@ -24,7 +23,9 @@ function PreviewRow({ icon, title, description, tag }: RowProps) {
         </span>
         <div className="min-w-0">
           <p className="text-article-foreground font-medium">{title}</p>
-          <p className="text-muted mt-0.5 text-sm leading-snug">{description}</p>
+          <p className="text-muted mt-0.5 text-sm leading-snug">
+            {description}
+          </p>
         </div>
       </div>
       <Tag
@@ -67,15 +68,11 @@ export function LandingDashboardPreview() {
       aria-label="Product preview"
     >
       <div className="mx-auto max-w-2xl">
-        <p className="text-muted mb-4 text-center text-sm">
-          Example alert feed—MVP focuses on clarity and exploration, not full
-          automation.
-        </p>
-        <div className="shadow-md rounded-xl border border-border bg-surface-muted/50 p-1 sm:rounded-2xl">
+        <div className="border-border bg-surface-muted/50 rounded-xl border p-1 shadow-md sm:rounded-2xl">
           <div className="bg-surface-muted flex items-center gap-2 rounded-[10px] px-3 py-2 sm:rounded-[14px]">
-            <span className="size-2.5 rounded-full bg-danger" aria-hidden />
-            <span className="size-2.5 rounded-full bg-warning" aria-hidden />
-            <span className="size-2.5 rounded-full bg-success" aria-hidden />
+            <span className="bg-danger size-2.5 rounded-full" aria-hidden />
+            <span className="bg-warning size-2.5 rounded-full" aria-hidden />
+            <span className="bg-success size-2.5 rounded-full" aria-hidden />
             <span className="text-muted ml-2 truncate text-xs">Alerts</span>
           </div>
           <div className="bg-article-bg text-article-foreground mt-1 overflow-hidden rounded-[10px] shadow-sm sm:mt-1.5 sm:rounded-[14px]">
@@ -84,7 +81,7 @@ export function LandingDashboardPreview() {
               <span className="text-muted text-xs">Sample data</span>
             </div>
             <div>
-              {rows.map((row) => (
+              {rows.map(row => (
                 <PreviewRow key={row.title} {...row} />
               ))}
             </div>
