@@ -1,6 +1,6 @@
-import { LayoutGrid } from 'lucide-react';
-
 import { cn } from '@/lib/utils';
+
+const LOGO_SRC = '/images/logo-symbol.png';
 
 type LandingLogoProps = {
   className?: string;
@@ -17,11 +17,18 @@ export function LandingLogo({
     <span className={cn('inline-flex items-center gap-2', className)}>
       <span
         className={cn(
-          'bg-primary-500/15 text-primary-500 inline-flex size-9 items-center justify-center rounded-md',
+          'inline-flex size-9 items-center justify-center overflow-hidden rounded-md p-0.5',
           iconClassName,
         )}
       >
-        <LayoutGrid className="size-5 shrink-0" strokeWidth={2} aria-hidden />
+        <img
+          src={LOGO_SRC}
+          alt=""
+          width={36}
+          height={36}
+          className="size-full object-contain"
+          decoding="async"
+        />
       </span>
       <span
         className={cn(

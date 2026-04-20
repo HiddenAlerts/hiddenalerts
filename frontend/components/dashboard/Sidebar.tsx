@@ -3,10 +3,9 @@
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
-  LayoutGrid,
   MonitorDot,
-  PanelLeftClose,
   PanelLeft,
+  PanelLeftClose,
   Settings,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -61,8 +60,15 @@ export const Sidebar: FC<SidebarProps> = ({
             collapsed && 'lg:w-full lg:min-w-0 lg:justify-center',
           )}
         >
-          <span className="bg-primary-500/15 text-primary-500 inline-flex size-9 shrink-0 items-center justify-center rounded-md">
-            <LayoutGrid className="size-5" strokeWidth={2} aria-hidden />
+          <span className="bg-primary-500/15 text-primary-500 inline-flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md p-0.5">
+            <img
+              src="/images/logo-symbol.png"
+              alt=""
+              width={36}
+              height={36}
+              className="size-full object-contain"
+              decoding="async"
+            />
           </span>
           <span
             className={cn(
@@ -93,8 +99,7 @@ export const Sidebar: FC<SidebarProps> = ({
 
       <nav className="flex flex-1 flex-col gap-1 p-2">
         {nav.map(({ href, label, icon: Icon }) => {
-          const active =
-            pathname === href || pathname.startsWith(`${href}/`);
+          const active = pathname === href || pathname.startsWith(`${href}/`);
           return (
             <Link
               key={href}
