@@ -31,7 +31,7 @@ export const AlertsScreen: FC = () => {
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2 sm:justify-end">
+        {/* <div className="flex flex-wrap gap-2 sm:justify-end">
           <FilterDropdown
             id="alert-category"
             label="Category"
@@ -46,7 +46,7 @@ export const AlertsScreen: FC = () => {
             options={sortOptions}
             onChange={(v) => list.setSort(v as 'recent' | 'oldest')}
           />
-        </div>
+        </div> */}
       </div>
 
       <div className="space-y-2">
@@ -54,7 +54,7 @@ export const AlertsScreen: FC = () => {
           Category
         </p>
         <div className="flex flex-wrap gap-2">
-          {ALERT_CATEGORY_OPTIONS.map((opt) => {
+          {ALERT_CATEGORY_OPTIONS.map(opt => {
             const selected = list.category === opt.value;
             return (
               <button
