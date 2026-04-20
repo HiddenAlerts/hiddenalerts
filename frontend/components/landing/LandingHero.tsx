@@ -15,11 +15,11 @@ export function LandingHero() {
 
       <div className="mx-auto max-w-2xl text-center">
         <h1 className="font-heading text-foreground text-3xl leading-tight font-semibold tracking-tight sm:text-4xl lg:text-[2.75rem]">
-          Signals before the headlines.
+          Detect fraud signals before they become headlines
         </h1>
         <p className="text-muted mx-auto mt-4 max-w-lg text-base sm:text-lg">
-          Early fraud, scam, and financial threat signals from curated
-          sources—for analysts and fincrime teams validating risk early.
+          AI-filtered signals from DOJ, SEC, FBI and more — ranked by risk so
+          users can act early.
         </p>
         <div className="mt-8">
           <WaitlistForm />
