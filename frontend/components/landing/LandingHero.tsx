@@ -1,4 +1,9 @@
-import { WaitlistForm } from './WaitlistForm';
+// import { WaitlistForm } from './WaitlistForm';
+
+import { buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+
+const NEWSLETTER_URL = 'https://hiddenalerts.beehiiv.com';
 
 export function LandingHero() {
   return (
@@ -21,8 +26,22 @@ export function LandingHero() {
           AI-filtered signals from DOJ, SEC, FBI and more — ranked by risk so
           users can act early.
         </p>
-        <div className="mt-8">
-          <WaitlistForm />
+        <div
+          id="waitlist"
+          className="mx-auto mt-8 flex w-full max-w-md flex-col items-center scroll-mt-24"
+        >
+          <a
+            href={NEWSLETTER_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={cn(
+              buttonVariants({ variant: 'default', size: 'md' }),
+              'inline-flex h-11 min-w-[200px] items-center justify-center py-0 sm:min-w-[220px]',
+            )}
+          >
+            Subscribe to newsletter
+          </a>
+          {/* <WaitlistForm /> */}
         </div>
       </div>
     </section>
