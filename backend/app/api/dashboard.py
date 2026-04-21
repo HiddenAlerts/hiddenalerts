@@ -68,6 +68,14 @@ async def login_submit(
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
+    if user.role != "admin":
+        return templates.TemplateResponse(
+            request,
+            "auth/login.html",
+            context={"error": "Admin access only. Use the API for subscriber login."},
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
     token = create_access_token({"sub": str(user.id)})
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
     response.set_cookie(
@@ -105,6 +113,9 @@ async def dashboard_index(
     try:
         current_user = await get_current_user(request, db)
     except HTTPException:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    if current_user.role != "admin":
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
     # Base query for relevant alerts
@@ -225,6 +236,9 @@ async def dashboard_alert_detail(
     except HTTPException:
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
+    if current_user.role != "admin":
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
     result = await db.execute(
         select(ProcessedAlert)
         .where(ProcessedAlert.id == alert_id)
@@ -308,6 +322,9 @@ async def dashboard_submit_review(
     except HTTPException:
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
+    if current_user.role != "admin":
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
     # Verify alert exists
     alert_result = await db.execute(
         select(ProcessedAlert).where(ProcessedAlert.id == alert_id)
@@ -350,6 +367,9 @@ async def dashboard_monitoring(
     try:
         current_user = await get_current_user(request, db)
     except HTTPException:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    if current_user.role != "admin":
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
     # Get all sources

@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     admin_email: str = ""
     admin_password: str = ""  # plain-text; hashed at migration time
 
+    # Subscriber test user seeding — optional, development only (Milestone 3)
+    test_subscriber_email: str = ""
+    test_subscriber_password: str = ""
+    test_subscriber_full_name: str = "Test Subscriber"
+
     # AI processing controls (Milestone 2)
     ai_processing_enabled: bool = True
     ai_max_retries: int = 3

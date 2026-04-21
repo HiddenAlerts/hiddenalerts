@@ -1,7 +1,8 @@
 """Authentication utilities — JWT tokens + bcrypt password hashing.
 
-Single-user admin authentication for M2 admin dashboard.
-JWT stored in HTTP-only cookie ('access_token').
+Supports HTTP-only cookie auth (primary) and Authorization: Bearer token (fallback).
+JWT stored in HTTP-only cookie ('access_token') for browser sessions.
+Bearer token accepted for API integrations and cross-domain frontend use.
 """
 from __future__ import annotations
 
@@ -79,7 +80,7 @@ def decode_access_token(token: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# FastAPI dependency
+# FastAPI dependencies
 # ---------------------------------------------------------------------------
 
 
@@ -87,15 +88,22 @@ async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """FastAPI dependency: validate JWT from HTTP-only cookie and return User.
+    """FastAPI dependency: resolve JWT from cookie (primary) or Bearer header (fallback).
 
-    Used by both API routes (raises 401) and dashboard routes (raises 401;
-    dashboard routes catch this and redirect to /login in the route handler).
+    Cookie takes priority. If no cookie, checks Authorization: Bearer <token>.
+    Used by both API routes and dashboard routes. Dashboard routes catch the
+    HTTPException and redirect to /login.
 
     Raises:
-        HTTPException 401 if token is missing, invalid, or user not found.
+        HTTPException 401 if token is missing, invalid, or user not found/inactive.
     """
+    # Cookie first, Bearer header fallback
     token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -136,11 +144,47 @@ async def get_current_user(
     return user
 
 
+async def get_current_active_user(
+    user: User = Depends(get_current_user),
+) -> User:
+    """Dependency: require an authenticated, active user (any role)."""
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive account",
+        )
+    return user
+
+
+async def require_admin(
+    user: User = Depends(get_current_active_user),
+) -> User:
+    """Dependency: require an authenticated admin user. Raises 403 for other roles."""
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return user
+
+
+async def require_subscriber_or_admin(
+    user: User = Depends(get_current_active_user),
+) -> User:
+    """Dependency: require an authenticated admin or subscriber user."""
+    if user.role not in ("admin", "subscriber"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+    return user
+
+
 async def authenticate_user(email: str, password: str, db: AsyncSession) -> User | None:
     """Verify email + password against the users table.
 
     Returns:
-        User if credentials are valid, None otherwise.
+        User if credentials are valid and account is active, None otherwise.
     """
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
