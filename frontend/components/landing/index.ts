@@ -1,4 +1,4 @@
-export { LandingDashboardPreview } from './LandingDashboardPreview';
+export { LandingContentSections } from './LandingContentSections';
 export { LandingFAQ } from './LandingFAQ';
 export { LandingFooter } from './LandingFooter';
 export { LandingHeader } from './LandingHeader';

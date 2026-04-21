@@ -1,5 +1,5 @@
 import {
-  LandingDashboardPreview,
+  LandingContentSections,
   LandingFAQ,
   LandingFooter,
   LandingHeader,
@@ -22,7 +22,7 @@ export default function Home() {
       <LandingHeader />
       <main className="flex flex-1 flex-col">
         <LandingHero />
-        <LandingDashboardPreview />
+        <LandingContentSections />
         <LandingFAQ />
       </main>
       <LandingFooter />
