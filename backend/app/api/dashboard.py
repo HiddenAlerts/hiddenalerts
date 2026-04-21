@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.alerts import publish_alert
 from app.auth import COOKIE_NAME, authenticate_user, create_access_token, get_current_user
 from app.database import get_db
 from app.models.event import Event, EventSource
@@ -118,14 +119,18 @@ async def dashboard_index(
     if current_user.role != "admin":
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
-    # Base query for relevant alerts
+    # Base query for relevant alerts — unpublished first so review queue surfaces at top
     base_stmt = (
         select(ProcessedAlert)
         .where(ProcessedAlert.is_relevant.is_(True))
         .options(
             selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source)
         )
-        .order_by(ProcessedAlert.signal_score_total.desc().nullsfirst(), ProcessedAlert.processed_at.desc())
+        .order_by(
+            ProcessedAlert.is_published.asc(),  # unpublished (False) before published (True)
+            ProcessedAlert.signal_score_total.desc().nullsfirst(),
+            ProcessedAlert.processed_at.desc(),
+        )
     )
 
     if category:
@@ -346,6 +351,10 @@ async def dashboard_submit_review(
         alert.summary = edited_summary.strip()
     if adjusted_risk_level:
         alert.risk_level = adjusted_risk_level.lower()
+
+    # Publish on approval — only if alert is relevant and not already published
+    if review_status == "approved" and alert.is_relevant and not alert.is_published:
+        publish_alert(alert, user_id=current_user.id)
 
     await db.commit()
     return RedirectResponse(

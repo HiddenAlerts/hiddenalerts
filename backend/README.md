@@ -85,7 +85,8 @@ hiddenalerts/
 │       ├── 0002_signal_scoring.py      # credibility_score + 6 scoring fields
 │       ├── 0003_fix_source_urls.py     # Correct RSS URLs; FTC/FinCEN → HTML
 │       ├── 0004_ai_fields_and_admin_seed.py  # 3 AI columns + admin user seed
-│       └── 0005_user_roles.py         # M3: role, full_name, email prefs, last_login_at
+│       ├── 0005_user_roles.py         # M3: role, full_name, email prefs, last_login_at
+│       └── 0006_alert_publication.py  # M3: is_published, published_at, published_by_user_id
 ├── app/
 │   ├── main.py                         # FastAPI app + lifespan + static mount
 │   ├── config.py                       # Pydantic settings (loaded from .env)
@@ -131,6 +132,7 @@ hiddenalerts/
 │   │   ├── raw_items.py                # Query + stats endpoints
 │   │   ├── alerts.py                   # M2: alerts + events REST API
 │   │   ├── auth.py                     # M3: JSON auth endpoints (login, me, change-password)
+│   │   ├── client_alerts.py           # M3: subscriber-safe published alert feed
 │   │   └── dashboard.py               # M2: Jinja2 HTML routes (admin-only)
 │   ├── templates/                      # Jinja2 HTML templates
 │   │   ├── base.html                   # Bootstrap 5 layout + navbar
@@ -308,6 +310,7 @@ alembic revision --autogenerate -m "description"
 | `0003` | Fix source URLs — correct SEC/FBI RSS URLs; FTC and FinCEN converted to HTML scrapers |
 | `0004` | AI columns — adds `financial_impact_estimate`, `victim_scale_raw`, `ai_model`; seeds admin user |
 | `0005` | User roles — adds `role`, `full_name`, email preference flags, `last_login_at`; sets existing admin to `role='admin'` |
+| `0006` | Alert publication — adds `is_published`, `published_at`, `published_by_user_id` to processed_alerts; partial index on published rows |
 
 ---
 
@@ -474,6 +477,13 @@ Authenticated endpoints accept either a valid `access_token` cookie **or** an `A
 | `GET` | `/api/v1/auth/me` | Yes | Current user profile (cookie or Bearer) |
 | `POST` | `/api/v1/auth/change-password` | Yes | Update password (validates current first) |
 
+### Client — Subscriber-Safe Feed (M3)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/client/alerts` | Subscriber or Admin | Published alert feed — filters: risk_level, category, source, limit, offset |
+| `GET` | `/api/v1/client/alerts/{id}` | Subscriber or Admin | Published alert detail; 404 if unpublished |
+
 Full interactive docs at `http://localhost:8000/docs`.
 
 ---
@@ -515,8 +525,8 @@ pytest tests/ -v
 | `test_event_grouper.py` | 6 | Event creation, entity overlap matching, 7-day window, cross-source recalculation |
 | `test_health.py` | 5 | API health, sources, raw-items, stats smoke tests |
 | `test_auth.py` | 24 | Password/JWT utilities; JSON login (admin + subscriber); Bearer + cookie auth; change-password; role enforcement; inactive user; backwards compat |
-| `test_alerts_api.py` | 8 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation |
-| **Total** | **104** | |
+| `test_alerts_api.py` | 21 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation; publication state; approval publish; client feed access control |
+| **Total** | **117** | |
 
 ---
 
@@ -618,7 +628,8 @@ curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit
 | **M1** | Source ingestion (10 sources), raw storage, deduplication, run logging, REST API | ✅ Complete |
 | **M2** | Keyword filtering, AI analysis (GPT-4o-mini), 5-factor signal scoring, event grouping, admin dashboard | ✅ Complete |
 | **M3 — Slice 1** | Role-aware auth foundation (admin/subscriber roles, Bearer token support, JSON auth endpoints) | ✅ Complete |
-| **M3 — Slice 2** | Auto-publish workflow (`is_published`) — unblocks frontend | 🔄 Next |
+| **M3 — Slice 2** | Alert publication workflow — Tier 1 auto-publish, Tier 2 admin review, subscriber-safe client feed | ✅ Complete |
+| **M3 — Slice 3** | Signal score recalibration (fix 80% HIGH distribution) | 🔄 Next |
 | **M3 — Slice 3** | Signal score recalibration (fix 80% HIGH distribution) | Planned |
 | **M3 — Slice 4** | Email alerts — HIGH immediate + MEDIUM daily digest | Planned |
 | **M3 — Slice 5** | Weekly fraud intelligence report generation | Planned |
