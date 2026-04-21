@@ -37,6 +37,12 @@ class ProcessedAlert(Base):
     financial_impact_estimate: Mapped[str | None] = mapped_column(String(200), nullable=True)
     victim_scale_raw: Mapped[str | None] = mapped_column(String(50), nullable=True)
     ai_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Publication fields (Milestone 3)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     __table_args__ = (
         Index("idx_processed_alerts_risk", "risk_level"),
@@ -50,6 +56,9 @@ class ProcessedAlert(Base):
         "EventSource", back_populates="alert"
     )
     reviews: Mapped[list["AlertReview"]] = relationship("AlertReview", back_populates="alert")  # noqa: F821
+    published_by: Mapped["User | None"] = relationship(  # noqa: F821
+        "User", foreign_keys=[published_by_user_id]
+    )
 
     def __repr__(self) -> str:
-        return f"<ProcessedAlert id={self.id} risk={self.risk_level!r}>"
+        return f"<ProcessedAlert id={self.id} risk={self.risk_level!r} published={self.is_published}>"

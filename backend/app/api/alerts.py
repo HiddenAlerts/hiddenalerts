@@ -13,7 +13,7 @@ Routes:
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import Text, or_, select
@@ -39,6 +39,24 @@ from app.schemas.alert import (
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["alerts"])
+
+
+# ---------------------------------------------------------------------------
+# Shared publish helper — used by both API review and dashboard review flows
+# ---------------------------------------------------------------------------
+
+
+def publish_alert(alert: ProcessedAlert, user_id: int) -> None:
+    """Mark an alert as published. Idempotent — safe to call if already published.
+
+    Sets is_published=True, records published_at (if not already set), and
+    records the user who triggered publication. Caller must commit the session.
+    """
+    alert.is_published = True
+    if alert.published_at is None:
+        alert.published_at = datetime.now(timezone.utc)
+    if alert.published_by_user_id is None:
+        alert.published_by_user_id = user_id
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +95,8 @@ def _alert_to_read(alert: ProcessedAlert) -> ProcessedAlertRead:
         matched_keywords=alert.matched_keywords,
         is_relevant=alert.is_relevant,
         processed_at=alert.processed_at,
+        is_published=alert.is_published,
+        published_at=alert.published_at,
     )
 
 
@@ -121,6 +141,7 @@ async def list_alerts(
     since: datetime | None = Query(None, alias="start_date", description="Only alerts processed after this datetime (alias: start_date)"),
     end_date: datetime | None = Query(None, description="Only alerts processed before this datetime"),
     is_relevant: bool | None = Query(None, description="Filter by relevance flag"),
+    is_published: bool | None = Query(None, description="Filter by publication state (admin convenience)"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -149,6 +170,8 @@ async def list_alerts(
         stmt = stmt.where(ProcessedAlert.processed_at <= end_date)
     if is_relevant is not None:
         stmt = stmt.where(ProcessedAlert.is_relevant == is_relevant)
+    if is_published is not None:
+        stmt = stmt.where(ProcessedAlert.is_published == is_published)
     if source_id is not None:
         stmt = stmt.where(RawItem.source_id == source_id)
     if source is not None:
@@ -281,6 +304,10 @@ async def submit_review(
     # If risk level override provided, update the alert
     if payload.adjusted_risk_level:
         alert.risk_level = payload.adjusted_risk_level.lower()
+
+    # Publish on approval — only if alert is relevant and not already published
+    if payload.review_status == "approved" and alert.is_relevant and not alert.is_published:
+        publish_alert(alert, user_id=user.id)
 
     await db.commit()
     await db.refresh(review)

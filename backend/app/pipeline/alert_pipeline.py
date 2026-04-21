@@ -208,6 +208,15 @@ async def _process_single_item(
     )
 
     # --- Step 4: Create ProcessedAlert ---
+    # Tier 1 auto-publish: relevant + score >= 16 + source credibility >= 4.
+    # Uses source.credibility_score directly (authoritative) rather than the
+    # derived score_source_credibility field which maps the same value 1-5.
+    _now = datetime.now(timezone.utc)
+    tier1 = (
+        score_result.signal_score_total >= 16
+        and (source.credibility_score or 0) >= 4
+    )
+
     alert = ProcessedAlert(
         raw_item_id=raw_item.id,
         summary=ai_result.summary,
@@ -220,13 +229,15 @@ async def _process_single_item(
         victim_scale_raw=ai_result.victim_scale,
         ai_model=ai_result.ai_model,
         is_relevant=True,
-        processed_at=datetime.now(timezone.utc),
+        processed_at=_now,
         score_source_credibility=score_result.score_source_credibility,
         score_financial_impact=score_result.score_financial_impact,
         score_victim_scale=score_result.score_victim_scale,
         score_cross_source=score_result.score_cross_source,
         score_trend_acceleration=score_result.score_trend_acceleration,
         signal_score_total=score_result.signal_score_total,
+        is_published=tier1,
+        published_at=_now if tier1 else None,
     )
     session.add(alert)
     await session.flush()  # Get alert.id for event grouping

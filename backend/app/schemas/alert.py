@@ -26,6 +26,9 @@ class ProcessedAlertRead(BaseModel):
     matched_keywords: list[str] | None
     is_relevant: bool
     processed_at: datetime
+    # Publication state (M3)
+    is_published: bool = False
+    published_at: datetime | None = None
 
 
 class ProcessedAlertDetail(ProcessedAlertRead):
@@ -92,3 +95,35 @@ class EventDetail(EventRead):
     """Full event detail with linked alerts."""
 
     alerts: list[ProcessedAlertRead] = []
+
+
+# ---------------------------------------------------------------------------
+# Subscriber-safe schemas (M3 — client endpoints only)
+# ---------------------------------------------------------------------------
+
+
+class ClientAlertRead(BaseModel):
+    """Subscriber-safe alert summary — only published alerts are served via client endpoints."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str | None = None
+    source_name: str | None = None
+    item_url: str | None = None
+    risk_level: str | None
+    primary_category: str | None
+    signal_score_total: int | None
+    summary: str | None = None
+    processed_at: datetime
+    published_at: datetime | None = None
+    matched_keywords: list[str] | None = None
+
+
+class ClientAlertDetail(ClientAlertRead):
+    """Subscriber-safe alert detail — adds category and entities."""
+
+    secondary_category: str | None = None
+    # Normalised entity list — extracted from entities_json for stable frontend consumption.
+    # Internal format {"names": [...]} is unwrapped to a plain list here.
+    entities: list[str] = []
