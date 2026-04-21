@@ -393,12 +393,14 @@ Each processed alert receives five independent scores (1–5 each):
 | Factor | Rule |
 |--------|------|
 | Source Credibility | Inherited from `sources.credibility_score` — SEC/FBI/DOJ=5, FTC/FinCEN/IC3=4, Krebs/Bleeping=3 |
-| Financial Impact | `<$1M`→1, `$1M–$10M`→3, `>$10M`→5; unknown/none→1 |
-| Victim Scale | `single`→1, `multiple`→3, `nationwide`→5 |
+| Financial Impact | `<$1M`→1, `$1M–$10M`→2, `$10M–$100M`→3, `>$100M`→5; unknown/none→1 |
+| Victim Scale | `single`→1, `multiple`→2, `nationwide`→4 |
 | Cross-Source | 1 source→1, 2 sources→3, 3+→5 (updated as events gain more sources) |
 | Trend Acceleration | Compare keyword matches last 7d vs prior 7d — stable→1, 25–99% increase→3, 100%+ surge→5 |
 
-**Risk level:** total ≤ 6 → `low` — total 7–12 → `medium` — total ≥ 13 → `high`
+**Risk level (M3 Slice 3):** total ≤ 8 → `low` — total 9–15 → `medium` — total ≥ 16 → `high`
+
+**Tier 1 auto-publish threshold:** `signal_score_total ≥ 16` AND `source.credibility_score ≥ 4`
 
 ---
 
@@ -428,6 +430,10 @@ The dashboard is a Jinja2 HTML interface for reviewing fraud alerts:
 
 Base URL: `http://localhost:8000`  
 Authenticated endpoints accept either a valid `access_token` cookie **or** an `Authorization: Bearer <token>` header. Cookie takes priority when both are present.
+
+> **Subscriber vs internal endpoints:**  
+> `/api/v1/client/alerts` and `/api/v1/client/alerts/{id}` are the **subscriber-safe** published feed — use these in the frontend.  
+> `/api/v1/alerts` and `/api/v1/alerts/{id}` are **internal/admin** endpoints — they return all alerts regardless of publication state and expose internal review and scoring fields.
 
 ### System
 
@@ -520,13 +526,13 @@ pytest tests/ -v
 |------|-------|---------------|
 | `test_normalizer.py` | 13 | URL normalization, SHA-256 hashing, text extraction, date parsing |
 | `test_keyword_filter.py` | 13 | Word boundary matching, case sensitivity, multi-word phrases, deduplication |
-| `test_signal_scorer.py` | 22 | All 5 scoring factors, dollar parsing edge cases, risk level bucketing |
 | `test_ai_processor.py` | 5 | Mock OpenAI, rate-limit retry, max retries exhaustion, short text skip |
 | `test_event_grouper.py` | 6 | Event creation, entity overlap matching, 7-day window, cross-source recalculation |
 | `test_health.py` | 5 | API health, sources, raw-items, stats smoke tests |
 | `test_auth.py` | 24 | Password/JWT utilities; JSON login (admin + subscriber); Bearer + cookie auth; change-password; role enforcement; inactive user; backwards compat |
 | `test_alerts_api.py` | 21 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation; publication state; approval publish; client feed access control |
-| **Total** | **117** | |
+| `test_signal_scorer.py` | 33 | All 5 scoring factors; new M3 thresholds; boundary tests; recalibrated victim/financial buckets; realistic alert scenarios |
+| **Total** | **128** | |
 
 ---
 
@@ -629,9 +635,8 @@ curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit
 | **M2** | Keyword filtering, AI analysis (GPT-4o-mini), 5-factor signal scoring, event grouping, admin dashboard | ✅ Complete |
 | **M3 — Slice 1** | Role-aware auth foundation (admin/subscriber roles, Bearer token support, JSON auth endpoints) | ✅ Complete |
 | **M3 — Slice 2** | Alert publication workflow — Tier 1 auto-publish, Tier 2 admin review, subscriber-safe client feed | ✅ Complete |
-| **M3 — Slice 3** | Signal score recalibration (fix 80% HIGH distribution) | 🔄 Next |
-| **M3 — Slice 3** | Signal score recalibration (fix 80% HIGH distribution) | Planned |
-| **M3 — Slice 4** | Email alerts — HIGH immediate + MEDIUM daily digest | Planned |
+| **M3 — Slice 3** | Signal score recalibration — stricter HIGH threshold, recalibrated victim/financial buckets, re-scoring script | ✅ Complete |
+| **M3 — Slice 4** | Email alerts — HIGH immediate + MEDIUM daily digest | 🔄 Next |
 | **M3 — Slice 5** | Weekly fraud intelligence report generation | Planned |
 | **M3 — Slice 6** | Full-text search across alerts | Planned |
 | **M3 — Slice 7** | QA + VPS deployment handoff | Planned |
