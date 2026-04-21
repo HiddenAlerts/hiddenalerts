@@ -59,9 +59,13 @@ class AIArticleAnalysis(BaseModel):
     )
     victim_scale: Literal["single", "multiple", "nationwide"] = Field(
         description=(
-            "single = one company or individual targeted; "
-            "multiple = several victims or organizations; "
-            "nationwide = broad public, entire sector, or national-scale impact."
+            "single = one company or individual is the primary target; "
+            "multiple = a defined group of specific victims (e.g. dozens of investors, "
+            "a specific set of affected companies or individuals); "
+            "nationwide = explicitly described as affecting large numbers of consumers "
+            "nationwide, an entire industry sector, or millions of people. "
+            "Do NOT use nationwide for routine enforcement actions even from federal agencies. "
+            "When in doubt, prefer single or multiple over nationwide."
         )
     )
     is_relevant: bool = Field(
