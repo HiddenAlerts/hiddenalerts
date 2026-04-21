@@ -84,12 +84,13 @@ hiddenalerts/
 │       ├── 0001_initial_schema.py      # All tables + seed 10 sources
 │       ├── 0002_signal_scoring.py      # credibility_score + 6 scoring fields
 │       ├── 0003_fix_source_urls.py     # Correct RSS URLs; FTC/FinCEN → HTML
-│       └── 0004_ai_fields_and_admin_seed.py  # 3 AI columns + admin user seed
+│       ├── 0004_ai_fields_and_admin_seed.py  # 3 AI columns + admin user seed
+│       └── 0005_user_roles.py         # M3: role, full_name, email prefs, last_login_at
 ├── app/
 │   ├── main.py                         # FastAPI app + lifespan + static mount
 │   ├── config.py                       # Pydantic settings (loaded from .env)
 │   ├── database.py                     # Async engine + session factory
-│   ├── auth.py                         # JWT + bcrypt utilities + get_current_user
+│   ├── auth.py                         # JWT + bcrypt utilities; cookie + Bearer auth; role dependencies
 │   ├── models/
 │   │   ├── base.py                     # DeclarativeBase
 │   │   ├── source.py                   # SOURCES table
@@ -104,7 +105,8 @@ hiddenalerts/
 │   │   ├── source.py                   # SourceRead, SourceUpdate
 │   │   ├── raw_item.py                 # RawItemRead, RawItemDetail
 │   │   ├── run_log.py                  # RunLogRead
-│   │   └── alert.py                    # ProcessedAlertRead/Detail, EventRead/Detail
+│   │   ├── alert.py                    # ProcessedAlertRead/Detail, EventRead/Detail
+│   │   └── auth.py                     # M3: LoginRequest, TokenResponse, UserRead, ChangePasswordRequest
 │   ├── sources/                        # Source adapters (10 total — unchanged from M1)
 │   │   ├── base.py
 │   │   ├── rss_adapter.py
@@ -128,7 +130,8 @@ hiddenalerts/
 │   │   ├── sources.py                  # CRUD + trigger endpoints
 │   │   ├── raw_items.py                # Query + stats endpoints
 │   │   ├── alerts.py                   # M2: alerts + events REST API
-│   │   └── dashboard.py               # M2: Jinja2 HTML routes
+│   │   ├── auth.py                     # M3: JSON auth endpoints (login, me, change-password)
+│   │   └── dashboard.py               # M2: Jinja2 HTML routes (admin-only)
 │   ├── templates/                      # Jinja2 HTML templates
 │   │   ├── base.html                   # Bootstrap 5 layout + navbar
 │   │   ├── auth/login.html             # Login page
@@ -247,6 +250,9 @@ http://localhost:8000/docs           → Swagger UI (all endpoints)
 | `JWT_EXPIRE_MINUTES` | `43200` | Token lifetime (30 days) |
 | `ADMIN_EMAIL` | _(empty)_ | Admin user email — set before first migration |
 | `ADMIN_PASSWORD` | _(empty)_ | Admin user password (plain-text; hashed at migration time) |
+| `TEST_SUBSCRIBER_EMAIL` | _(empty)_ | Optional test subscriber seed (M3, dev only) |
+| `TEST_SUBSCRIBER_PASSWORD` | _(empty)_ | Test subscriber password (plain-text) |
+| `TEST_SUBSCRIBER_FULL_NAME` | `Test Subscriber` | Test subscriber display name |
 
 ---
 
@@ -263,7 +269,7 @@ http://localhost:8000/docs           → Swagger UI (all endpoints)
 | `events` | Grouped fraud events across multiple sources |
 | `event_sources` | Links events to their contributing alerts |
 | `alert_reviews` | Human review decisions on alerts |
-| `users` | Admin users for dashboard access |
+| `users` | Admin and subscriber users — role-aware (`admin` / `subscriber`) |
 | `weekly_reports` | Generated weekly intelligence reports (Milestone 3) |
 
 ### `processed_alerts` — Key Columns (M2)
@@ -301,6 +307,7 @@ alembic revision --autogenerate -m "description"
 | `0002` | Signal scoring — `credibility_score` on sources, 6 scoring fields on processed_alerts |
 | `0003` | Fix source URLs — correct SEC/FBI RSS URLs; FTC and FinCEN converted to HTML scrapers |
 | `0004` | AI columns — adds `financial_impact_estimate`, `victim_scale_raw`, `ai_model`; seeds admin user |
+| `0005` | User roles — adds `role`, `full_name`, email preference flags, `last_login_at`; sets existing admin to `role='admin'` |
 
 ---
 
@@ -404,7 +411,7 @@ The dashboard is a Jinja2 HTML interface for reviewing fraud alerts:
 | `/dashboard/alerts/{id}` | Alert detail — summary, score breakdown, entities, review form |
 | `/dashboard/monitoring` | Source health table + last 50 run logs |
 
-**Authentication:** HTTP-only JWT cookie (`access_token`), 30-day expiry.
+**Authentication:** HTTP-only JWT cookie (`access_token`), 30-day expiry. Admin-only — subscribers are redirected to `/login`.
 
 **Review workflow:** On each alert detail page, reviewers can:
 - Approve the alert as accurate
@@ -417,7 +424,7 @@ The dashboard is a Jinja2 HTML interface for reviewing fraud alerts:
 ## API Endpoints
 
 Base URL: `http://localhost:8000`  
-All endpoints under `/api/v1/` require a valid `access_token` cookie except `/api/v1/health`.
+Authenticated endpoints accept either a valid `access_token` cookie **or** an `Authorization: Bearer <token>` header. Cookie takes priority when both are present.
 
 ### System
 
@@ -459,6 +466,14 @@ All endpoints under `/api/v1/` require a valid `access_token` cookie except `/ap
 | `GET` | `/api/v1/events` | Yes | List fraud events with source counts |
 | `GET` | `/api/v1/events/{id}` | Yes | Event detail with linked alerts |
 
+### Auth (M3)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/auth/login` | No | JSON login — returns JWT + sets cookie; works for both roles |
+| `GET` | `/api/v1/auth/me` | Yes | Current user profile (cookie or Bearer) |
+| `POST` | `/api/v1/auth/change-password` | Yes | Update password (validates current first) |
+
 Full interactive docs at `http://localhost:8000/docs`.
 
 ---
@@ -489,7 +504,7 @@ Tests use an in-memory SQLite database — no PostgreSQL or OpenAI key required.
 pytest tests/ -v
 ```
 
-**90 tests, 0 failures.** Test breakdown:
+**104 tests, 0 failures.** Test breakdown:
 
 | File | Tests | What it covers |
 |------|-------|---------------|
@@ -499,9 +514,9 @@ pytest tests/ -v
 | `test_ai_processor.py` | 5 | Mock OpenAI, rate-limit retry, max retries exhaustion, short text skip |
 | `test_event_grouper.py` | 6 | Event creation, entity overlap matching, 7-day window, cross-source recalculation |
 | `test_health.py` | 5 | API health, sources, raw-items, stats smoke tests |
-| `test_auth.py` | 10 | Password hash/verify, JWT encode/decode, expiry, login endpoint |
+| `test_auth.py` | 24 | Password/JWT utilities; JSON login (admin + subscriber); Bearer + cookie auth; change-password; role enforcement; inactive user; backwards compat |
 | `test_alerts_api.py` | 8 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation |
-| **Total** | **90** | |
+| **Total** | **104** | |
 
 ---
 
@@ -602,4 +617,10 @@ curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit
 |-----------|-------|--------|
 | **M1** | Source ingestion (10 sources), raw storage, deduplication, run logging, REST API | ✅ Complete |
 | **M2** | Keyword filtering, AI analysis (GPT-4o-mini), 5-factor signal scoring, event grouping, admin dashboard | ✅ Complete |
-| **M3** | Email alerts (HIGH immediate, MEDIUM digest), weekly report generation, VPS deployment handoff | Planned |
+| **M3 — Slice 1** | Role-aware auth foundation (admin/subscriber roles, Bearer token support, JSON auth endpoints) | ✅ Complete |
+| **M3 — Slice 2** | Auto-publish workflow (`is_published`) — unblocks frontend | 🔄 Next |
+| **M3 — Slice 3** | Signal score recalibration (fix 80% HIGH distribution) | Planned |
+| **M3 — Slice 4** | Email alerts — HIGH immediate + MEDIUM daily digest | Planned |
+| **M3 — Slice 5** | Weekly fraud intelligence report generation | Planned |
+| **M3 — Slice 6** | Full-text search across alerts | Planned |
+| **M3 — Slice 7** | QA + VPS deployment handoff | Planned |
