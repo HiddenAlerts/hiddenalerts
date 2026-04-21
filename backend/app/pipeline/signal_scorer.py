@@ -7,8 +7,9 @@ Computes a structured risk score for each processed alert based on:
   4. Cross-Source Confirmation (count of sources reporting same event)
   5. Trend Acceleration (keyword frequency comparison: last 7d vs prior 7d)
 
-Score range: 5-25 (each factor 1-5)
-Risk levels: ≤6 → low, 7-12 → medium, ≥13 → high
+Score range: 5–24 (source/cross/trend 1–5; financial 1/2/3/5; victim 1/2/4)
+Risk levels: ≤8 → low, 9–15 → medium, ≥16 → high
+Tier 1 auto-publish threshold (M3 Slice 2): ≥16 — aligned with HIGH threshold.
 """
 from __future__ import annotations
 
@@ -73,14 +74,16 @@ def compute_financial_impact_score(financial_impact_estimate: str) -> int:
         if "hundreds of thousands" in text_lower or "hundreds of million" in text_lower:
             return 1
         if "millions" in text_lower or "multi-million" in text_lower:
-            return 3
+            return 2  # vague "millions" — moderate, not exceptional
         log.warning(f"Could not parse financial impact: {financial_impact_estimate!r}, defaulting to 1")
         return 1
 
-    if amount >= 10_000_000:
+    if amount >= 100_000_000:  # > $100M → exceptional impact
         return 5
-    elif amount >= 1_000_000:
+    elif amount >= 10_000_000:  # $10M – $100M → meaningful but not exceptional
         return 3
+    elif amount >= 1_000_000:   # $1M – $10M → moderate
+        return 2
     else:
         return 1
 
@@ -119,18 +122,22 @@ def _parse_dollar_amount(text_lower: str) -> float | None:
 
 
 def compute_victim_scale_score(victim_scale: str) -> int:
-    """Map AI's victim_scale output to 1/3/5.
+    """Map AI's victim_scale output to 1/2/4.
 
-    single → 1, multiple → 3, nationwide → 5, unknown → 1 (defensive default).
+    single → 1, multiple → 2, nationwide → 4, unknown → 1 (defensive default).
+
+    Reduced from 1/3/5 (M2) to prevent routine enforcement actions from
+    inflating scores into HIGH solely via the common "multiple" default.
+    The AI prompt also instructs the model to be conservative with "nationwide".
     """
     if not victim_scale:
         return 1
 
     normalized = victim_scale.lower().strip()
     if normalized == "nationwide":
-        return 5
+        return 4
     elif normalized == "multiple":
-        return 3
+        return 2
     elif normalized == "single":
         return 1
     else:
@@ -154,11 +161,12 @@ def compute_cross_source_score(event_source_count: int) -> int:
 def derive_risk_level(signal_score_total: int) -> str:
     """Derive risk level from total signal score.
 
-    ≤6 → low, 7-12 → medium, ≥13 → high.
+    ≤8 → low, 9–15 → medium, ≥16 → high.
+    Aligned with Tier 1 auto-publish threshold (≥16) from M3 Slice 2.
     """
-    if signal_score_total >= 13:
+    if signal_score_total >= 16:
         return "high"
-    elif signal_score_total >= 7:
+    elif signal_score_total >= 9:
         return "medium"
     else:
         return "low"
