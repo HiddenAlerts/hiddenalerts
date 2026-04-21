@@ -19,7 +19,7 @@ export function LandingHeader() {
           href="#waitlist"
           className={cn(buttonVariants({ variant: 'default', size: 'sm' }))}
         >
-          Join waitlist
+          Get Early Access
         </Link>
       </div>
     </header>
