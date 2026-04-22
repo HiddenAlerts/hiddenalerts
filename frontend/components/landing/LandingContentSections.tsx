@@ -1,3 +1,5 @@
+import { buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import {
   BellRing,
   BriefcaseBusiness,
@@ -11,8 +13,7 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
-import { buttonVariants } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+
 // import { WaitlistForm } from './WaitlistForm';
 
 type AlertCardProps = {
@@ -51,7 +52,13 @@ function SectionBlock({
   );
 }
 
-function AlertCard({ level, source, timeAgo, title, description }: AlertCardProps) {
+function AlertCard({
+  level,
+  source,
+  timeAgo,
+  title,
+  description,
+}: AlertCardProps) {
   const isHigh = level === 'HIGH';
 
   return (
@@ -59,7 +66,9 @@ function AlertCard({ level, source, timeAgo, title, description }: AlertCardProp
       <div className="text-muted flex flex-wrap items-center justify-between gap-2 text-sm">
         <p className="flex items-center gap-2 font-medium">
           <span aria-hidden>{isHigh ? '🔴' : '🟠'}</span>
-          <span className={isHigh ? 'text-danger' : 'text-warning'}>{level}</span>
+          <span className={isHigh ? 'text-danger' : 'text-warning'}>
+            {level}
+          </span>
           <span>— {source}</span>
           <span>— {timeAgo}</span>
         </p>
@@ -79,7 +88,8 @@ const solutionBullets = [
 const sourceBullets = [
   {
     title: 'DOJ enforcement actions',
-    description: 'Case filings, charges, and outcomes tied to fraud enforcement.',
+    description:
+      'Case filings, charges, and outcomes tied to fraud enforcement.',
     icon: Landmark,
   },
   {
@@ -104,12 +114,14 @@ const sourceCards = [
   },
   {
     title: 'SEC filings',
-    description: 'Regulatory disclosures, investigations, and market risk clues.',
+    description:
+      'Regulatory disclosures, investigations, and market risk clues.',
     icon: FileSearch,
   },
   {
     title: 'Public sources',
-    description: 'Open records and trusted databases that reveal early patterns.',
+    description:
+      'Open records and trusted databases that reveal early patterns.',
     icon: DatabaseZap,
   },
 ] as const;
@@ -128,16 +140,16 @@ export function LandingContentSections() {
           <p className="text-body text-center text-base leading-relaxed sm:text-lg">
             By the time fraud reaches the news, the damage is already done.
             <br />
-            Critical signals appear hours or days earlier — scattered across filings,
-            enforcement actions, and obscure sources.
+            Critical signals appear hours or days earlier — scattered across
+            filings, enforcement actions, and obscure sources.
           </p>
           <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-3">
-            {sourceCards.map((card) => {
+            {sourceCards.map(card => {
               const Icon = card.icon;
               return (
                 <article
                   key={card.title}
-                  className="border-border bg-[linear-gradient(165deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] rounded-xl border px-4 py-4 text-left shadow-[0_4px_22px_rgba(0,0,0,0.22)]"
+                  className="border-border rounded-xl border bg-[linear-gradient(165deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] px-4 py-4 text-left shadow-[0_4px_22px_rgba(0,0,0,0.22)]"
                 >
                   <div className="bg-primary-500/14 text-primary-300 mb-3 inline-flex size-9 items-center justify-center rounded-lg border border-white/10">
                     <Icon className="size-4" aria-hidden />
@@ -161,12 +173,15 @@ export function LandingContentSections() {
         sectionTone="bg-[linear-gradient(180deg,rgba(15,23,42,0.58),rgba(15,23,42,0.32))]"
       >
         <ul className="mx-auto max-w-2xl space-y-6">
-          {solutionBullets.map((item) => (
+          {solutionBullets.map(item => (
             <li
               key={item}
               className="border-border bg-surface/45 text-body flex items-start gap-3 rounded-lg border px-4 py-3"
             >
-              <ShieldCheck className="text-primary-400 mt-0.5 size-4 shrink-0" aria-hidden />
+              <ShieldCheck
+                className="text-primary-400 mt-0.5 size-4 shrink-0"
+                aria-hidden
+              />
               <span>{item}</span>
             </li>
           ))}
@@ -206,10 +221,10 @@ export function LandingContentSections() {
             HiddenAlerts monitors signals from:
           </p>
           <ul className="mx-auto mt-6 grid max-w-3xl grid-cols-1 gap-6 sm:grid-cols-3">
-            {sourceBullets.map((source) => (
+            {sourceBullets.map(source => (
               <li
                 key={source.title}
-                className="border-border bg-[linear-gradient(165deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] rounded-xl border px-4 py-4 text-left shadow-[0_4px_22px_rgba(0,0,0,0.22)]"
+                className="border-border rounded-xl border bg-[linear-gradient(165deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] px-4 py-4 text-left shadow-[0_4px_22px_rgba(0,0,0,0.22)]"
               >
                 <div className="bg-primary-500/14 text-primary-300 mb-3 inline-flex size-9 items-center justify-center rounded-lg border border-white/10">
                   <source.icon className="size-4" aria-hidden />
@@ -237,7 +252,7 @@ export function LandingContentSections() {
         </p>
       </SectionBlock>
 
-      <section className="border-border-subtle bg-[linear-gradient(180deg,rgba(30,41,59,0.38),rgba(15,23,42,0.32))] border-t px-4 py-16 md:px-6">
+      <section className="border-border-subtle border-t bg-[linear-gradient(180deg,rgba(30,41,59,0.38),rgba(15,23,42,0.32))] px-4 py-12 md:px-6">
         <div className="mx-auto max-w-5xl text-center">
           <div className="bg-primary-500/12 text-primary-300 mx-auto flex size-11 items-center justify-center rounded-full border border-white/10">
             <Sparkles className="size-5" aria-hidden />
