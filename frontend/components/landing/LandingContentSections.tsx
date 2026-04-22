@@ -36,13 +36,13 @@ function SectionBlock({
 }) {
   return (
     <section
-      className={`border-border-subtle border-t px-4 py-16 sm:px-6 sm:py-20 lg:px-8 ${sectionTone}`}
+      className={`border-border-subtle border-t px-4 py-16 md:px-6 ${sectionTone}`}
     >
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-5xl">
         <div className="bg-primary-500/12 text-primary-300 mx-auto flex size-11 items-center justify-center rounded-full border border-white/10">
           {icon}
         </div>
-        <h2 className="font-heading text-foreground mt-3 text-center text-2xl font-semibold tracking-tight sm:text-3xl">
+        <h2 className="font-heading text-foreground mt-4 text-center text-2xl font-semibold tracking-tight sm:text-3xl">
           {title}
         </h2>
         <div className="mt-4">{children}</div>
@@ -124,33 +124,35 @@ export function LandingContentSections() {
         title="Most fraud signals are missed early"
         sectionTone="bg-[radial-gradient(circle_at_15%_10%,rgba(59,130,246,0.14),transparent_38%),radial-gradient(circle_at_85%_90%,rgba(56,189,248,0.10),transparent_42%)]"
       >
-        <p className="text-body text-center text-base leading-relaxed sm:text-lg">
-          By the time fraud reaches the news, the damage is already done.
-          <br />
-          Critical signals appear hours or days earlier — scattered across filings,
-          enforcement actions, and obscure sources.
-        </p>
-        <div className="mt-7 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {sourceCards.map((card) => {
-            const Icon = card.icon;
-            return (
-              <article
-                key={card.title}
-                className="border-border bg-[linear-gradient(165deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] rounded-xl border px-4 py-4 text-left shadow-[0_4px_22px_rgba(0,0,0,0.22)]"
-              >
-                <div className="bg-primary-500/14 text-primary-300 mb-3 inline-flex size-9 items-center justify-center rounded-lg border border-white/10">
-                  <Icon className="size-4" aria-hidden />
-                </div>
-                <h3 className="text-foreground text-sm font-semibold sm:text-base">
-                  {card.title}
-                </h3>
-                <p className="text-body mt-1 text-xs leading-relaxed sm:text-sm">
-                  {card.description}
-                </p>
-              </article>
-            );
-          })}
-        </div>
+        <>
+          <p className="text-body text-center text-base leading-relaxed sm:text-lg">
+            By the time fraud reaches the news, the damage is already done.
+            <br />
+            Critical signals appear hours or days earlier — scattered across filings,
+            enforcement actions, and obscure sources.
+          </p>
+          <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-3">
+            {sourceCards.map((card) => {
+              const Icon = card.icon;
+              return (
+                <article
+                  key={card.title}
+                  className="border-border bg-[linear-gradient(165deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] rounded-xl border px-4 py-4 text-left shadow-[0_4px_22px_rgba(0,0,0,0.22)]"
+                >
+                  <div className="bg-primary-500/14 text-primary-300 mb-3 inline-flex size-9 items-center justify-center rounded-lg border border-white/10">
+                    <Icon className="size-4" aria-hidden />
+                  </div>
+                  <h3 className="text-foreground text-sm font-semibold sm:text-base">
+                    {card.title}
+                  </h3>
+                  <p className="text-body mt-1 text-xs leading-relaxed sm:text-sm">
+                    {card.description}
+                  </p>
+                </article>
+              );
+            })}
+          </div>
+        </>
       </SectionBlock>
 
       <SectionBlock
@@ -158,7 +160,7 @@ export function LandingContentSections() {
         title="HiddenAlerts surfaces early risk signals"
         sectionTone="bg-[linear-gradient(180deg,rgba(15,23,42,0.58),rgba(15,23,42,0.32))]"
       >
-        <ul className="mx-auto mt-1 max-w-2xl space-y-3">
+        <ul className="mx-auto max-w-2xl space-y-6">
           {solutionBullets.map((item) => (
             <li
               key={item}
@@ -176,7 +178,7 @@ export function LandingContentSections() {
         title="Live intelligence feed"
         sectionTone="bg-[radial-gradient(circle_at_85%_15%,rgba(59,130,246,0.10),transparent_36%)]"
       >
-        <div className="mx-auto max-w-2xl space-y-3">
+        <div className="mx-auto max-w-2xl space-y-4">
           <AlertCard
             level="HIGH"
             source="DOJ"
@@ -199,27 +201,29 @@ export function LandingContentSections() {
         title="Built from trusted sources"
         sectionTone="bg-[linear-gradient(180deg,rgba(30,41,59,0.46),rgba(30,41,59,0.22))]"
       >
-        <p className="text-body text-center text-base leading-relaxed sm:text-lg">
-          HiddenAlerts monitors signals from:
-        </p>
-        <ul className="mx-auto mt-7 grid max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3">
-          {sourceBullets.map((source) => (
-            <li
-              key={source.title}
-              className="border-border bg-[linear-gradient(165deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] rounded-xl border px-4 py-4 text-left shadow-[0_4px_22px_rgba(0,0,0,0.22)]"
-            >
-              <div className="bg-primary-500/14 text-primary-300 mb-3 inline-flex size-9 items-center justify-center rounded-lg border border-white/10">
-                <source.icon className="size-4" aria-hidden />
-              </div>
-              <h3 className="text-foreground text-sm font-semibold sm:text-base">
-                {source.title}
-              </h3>
-              <p className="text-body mt-1 text-xs leading-relaxed sm:text-sm">
-                {source.description}
-              </p>
-            </li>
-          ))}
-        </ul>
+        <>
+          <p className="text-body text-center text-base leading-relaxed sm:text-lg">
+            HiddenAlerts monitors signals from:
+          </p>
+          <ul className="mx-auto mt-6 grid max-w-3xl grid-cols-1 gap-6 sm:grid-cols-3">
+            {sourceBullets.map((source) => (
+              <li
+                key={source.title}
+                className="border-border bg-[linear-gradient(165deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))] rounded-xl border px-4 py-4 text-left shadow-[0_4px_22px_rgba(0,0,0,0.22)]"
+              >
+                <div className="bg-primary-500/14 text-primary-300 mb-3 inline-flex size-9 items-center justify-center rounded-lg border border-white/10">
+                  <source.icon className="size-4" aria-hidden />
+                </div>
+                <h3 className="text-foreground text-sm font-semibold sm:text-base">
+                  {source.title}
+                </h3>
+                <p className="text-body mt-1 text-xs leading-relaxed sm:text-sm">
+                  {source.description}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </>
       </SectionBlock>
 
       <SectionBlock
@@ -233,12 +237,12 @@ export function LandingContentSections() {
         </p>
       </SectionBlock>
 
-      <section className="border-border-subtle bg-[linear-gradient(180deg,rgba(30,41,59,0.38),rgba(15,23,42,0.32))] border-t px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-        <div className="mx-auto max-w-3xl text-center">
+      <section className="border-border-subtle bg-[linear-gradient(180deg,rgba(30,41,59,0.38),rgba(15,23,42,0.32))] border-t px-4 py-16 md:px-6">
+        <div className="mx-auto max-w-5xl text-center">
           <div className="bg-primary-500/12 text-primary-300 mx-auto flex size-11 items-center justify-center rounded-full border border-white/10">
             <Sparkles className="size-5" aria-hidden />
           </div>
-          <h2 className="font-heading text-foreground mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
+          <h2 className="font-heading text-foreground mt-4 text-2xl font-semibold tracking-tight sm:text-3xl">
             Stay ahead of financial threats
           </h2>
           <div className="mt-6">

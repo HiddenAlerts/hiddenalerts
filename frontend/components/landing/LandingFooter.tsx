@@ -4,8 +4,8 @@ export function LandingFooter() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="border-border-subtle bg-background mt-auto border-t px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-6 sm:flex-row sm:items-center">
+    <footer className="border-border-subtle bg-background mt-auto border-t px-4 py-8 md:px-6">
+      <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-6 sm:flex-row sm:items-center">
         <div className="flex flex-col items-center gap-2 sm:items-start">
           <LandingLogo />
           <p className="text-muted-foreground text-center text-sm sm:text-left">
