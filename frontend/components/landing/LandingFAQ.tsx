@@ -22,15 +22,15 @@ export function LandingFAQ() {
   return (
     <section
       id="faq"
-      className="border-border-subtle scroll-mt-20 border-t px-4 py-12 sm:px-6 sm:py-14 lg:px-8"
+      className="border-border-subtle scroll-mt-20 border-t px-4 py-16 md:px-6"
       aria-labelledby="faq-heading"
     >
-      <div className="mx-auto max-w-xl">
+      <div className="mx-auto max-w-5xl">
         <h2 id="faq-heading" className="font-heading text-foreground text-center text-2xl font-semibold tracking-tight sm:text-3xl">
           FAQ
         </h2>
 
-        <div className="mt-8 space-y-0">
+        <div className="mt-4 space-y-0">
           {items.map((item) => (
             <details
               key={item.question}
