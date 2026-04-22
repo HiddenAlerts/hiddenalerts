@@ -57,6 +57,7 @@ from app.api.alerts import router as alerts_router  # noqa: E402
 from app.api.auth import router as auth_router  # noqa: E402
 from app.api.client_alerts import router as client_alerts_router  # noqa: E402
 from app.api.dashboard import router as dashboard_router  # noqa: E402
+from app.api.public_alerts import router as public_alerts_router  # noqa: E402
 
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(sources_router, prefix="/api/v1")
@@ -65,3 +66,4 @@ app.include_router(alerts_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(client_alerts_router, prefix="/api/v1")
 app.include_router(dashboard_router)  # No prefix — /login, /dashboard, /logout routes
+app.include_router(public_alerts_router)  # No prefix — /api/alerts public feed

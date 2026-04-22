@@ -127,3 +127,36 @@ class ClientAlertDetail(ClientAlertRead):
     # Normalised entity list — extracted from entities_json for stable frontend consumption.
     # Internal format {"names": [...]} is unwrapped to a plain list here.
     entities: list[str] = []
+
+
+# ---------------------------------------------------------------------------
+# Public feed schemas (GET /api/alerts — no auth, frontend MVP)
+# ---------------------------------------------------------------------------
+
+
+class PublicAlertRead(BaseModel):
+    """Flat, frontend-safe schema for the unauthenticated public alerts feed.
+
+    Only returned by GET /api/alerts. Does NOT include internal review fields,
+    score breakdowns, moderation metadata, or raw AI structures.
+    """
+
+    id: int
+    title: str | None = None
+    summary: str | None = None
+    category: str | None = None
+    risk_level: str | None = None
+    signal_score: int | None = None
+    source_name: str | None = None
+    source_url: str | None = None
+    published_at: datetime | None = None
+
+
+class PublicAlertsResponse(BaseModel):
+    """Wrapper response for the public alerts feed.
+
+    Returns { "alerts": [...] } so the frontend has a stable named key
+    and the shape can be extended later (e.g. total count) without breaking clients.
+    """
+
+    alerts: list[PublicAlertRead]
