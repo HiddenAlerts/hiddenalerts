@@ -276,7 +276,7 @@ async def submit_review(
     valid_statuses = {"approved", "false_positive", "edited"}
     if payload.review_status not in valid_statuses:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"review_status must be one of: {', '.join(sorted(valid_statuses))}",
         )
 

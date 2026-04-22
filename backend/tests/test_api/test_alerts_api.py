@@ -97,7 +97,7 @@ async def test_list_alerts_empty_db(client, db_session):
 
     response = await client.get(
         "/api/v1/alerts",
-        cookies={"access_token": token},
+        headers={"Cookie": f"access_token={token}"},
     )
     assert response.status_code == 200
     assert response.json() == []
@@ -111,7 +111,7 @@ async def test_get_alert_not_found(client, db_session):
 
     response = await client.get(
         "/api/v1/alerts/9999",
-        cookies={"access_token": token},
+        headers={"Cookie": f"access_token={token}"},
     )
     assert response.status_code == 404
 
@@ -135,7 +135,7 @@ async def test_list_alerts_with_data(client, db_session):
     await db_session.commit()
 
     token = _make_token(user)
-    response = await client.get("/api/v1/alerts", cookies={"access_token": token})
+    response = await client.get("/api/v1/alerts", headers={"Cookie": f"access_token={token}"})
     assert response.status_code == 200
     data = response.json()
     assert len(data) >= 1
@@ -152,7 +152,7 @@ async def test_trigger_processing_returns_202(client, db_session):
     with patch("app.pipeline.alert_pipeline.is_processing", return_value=False):
         response = await client.post(
             "/api/v1/alerts/process",
-            cookies={"access_token": token},
+            headers={"Cookie": f"access_token={token}"},
         )
 
     assert response.status_code == 202
@@ -168,7 +168,7 @@ async def test_trigger_processing_returns_409_when_locked(client, db_session):
     with patch("app.pipeline.alert_pipeline.is_processing", return_value=True):
         response = await client.post(
             "/api/v1/alerts/process",
-            cookies={"access_token": token},
+            headers={"Cookie": f"access_token={token}"},
         )
 
     assert response.status_code == 409
@@ -199,7 +199,7 @@ async def test_submit_review_invalid_status(client, db_session):
     response = await client.post(
         f"/api/v1/alerts/{alert.id}/review",
         json={"review_status": "invalid_status"},
-        cookies={"access_token": token},
+        headers={"Cookie": f"access_token={token}"},
     )
     assert response.status_code == 422
 
@@ -230,7 +230,7 @@ async def test_published_alert_returns_is_published_true(client, db_session):
     token = _make_token(user)
     response = await client.get(
         f"/api/v1/alerts/{alert.id}",
-        cookies={"access_token": token},
+        headers={"Cookie": f"access_token={token}"},
     )
     assert response.status_code == 200
     assert response.json()["is_published"] is True
@@ -257,7 +257,7 @@ async def test_is_published_filter_admin(client, db_session):
     token = _make_token(user)
     response = await client.get(
         "/api/v1/alerts?is_published=true",
-        cookies={"access_token": token},
+        headers={"Cookie": f"access_token={token}"},
     )
     assert response.status_code == 200
     ids = [d["id"] for d in response.json()]
@@ -287,7 +287,7 @@ async def test_approve_review_publishes_alert(client, db_session):
     response = await client.post(
         f"/api/v1/alerts/{alert.id}/review",
         json={"review_status": "approved"},
-        cookies={"access_token": token},
+        headers={"Cookie": f"access_token={token}"},
     )
     assert response.status_code == 200
 
@@ -312,7 +312,7 @@ async def test_approve_review_sets_published_at(client, db_session):
     await client.post(
         f"/api/v1/alerts/{alert.id}/review",
         json={"review_status": "approved"},
-        cookies={"access_token": token},
+        headers={"Cookie": f"access_token={token}"},
     )
 
     await db_session.refresh(alert)
@@ -336,7 +336,7 @@ async def test_approve_review_sets_published_by_user_id(client, db_session):
     await client.post(
         f"/api/v1/alerts/{alert.id}/review",
         json={"review_status": "approved"},
-        cookies={"access_token": token},
+        headers={"Cookie": f"access_token={token}"},
     )
 
     await db_session.refresh(alert)
@@ -360,7 +360,7 @@ async def test_false_positive_review_does_not_publish(client, db_session):
     await client.post(
         f"/api/v1/alerts/{alert.id}/review",
         json={"review_status": "false_positive"},
-        cookies={"access_token": token},
+        headers={"Cookie": f"access_token={token}"},
     )
 
     await db_session.refresh(alert)
@@ -384,7 +384,7 @@ async def test_approve_irrelevant_alert_does_not_publish(client, db_session):
     await client.post(
         f"/api/v1/alerts/{alert.id}/review",
         json={"review_status": "approved"},
-        cookies={"access_token": token},
+        headers={"Cookie": f"access_token={token}"},
     )
 
     await db_session.refresh(alert)

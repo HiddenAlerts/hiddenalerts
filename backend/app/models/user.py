@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -18,8 +18,8 @@ class User(Base):
     wants_high_alert_email: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     wants_digest_email: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     wants_weekly_report_email: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    last_login_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    created_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
 
     __table_args__ = (UniqueConstraint("email", name="uq_users_email"),)
 
