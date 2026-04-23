@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
@@ -44,6 +45,16 @@ app = FastAPI(
     description="AI Fraud Intelligence Monitoring System",
     version="0.2.0",
     lifespan=lifespan,
+)
+
+# Allow any origin for the public read-only feed (no credentials involved).
+# Tighten allow_origins to the frontend domain once it's fixed.
+# TODO: Later tighten the allow_origin to a specific domain.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
 )
 
 # Static files (dashboard CSS, JS)
