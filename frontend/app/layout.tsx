@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Figtree, Manrope } from 'next/font/google';
 
 import './globals.css';
+import { QueryProvider } from '@/lib/query';
 import { Toaster } from 'sonner';
 
 const manrope = Manrope({
@@ -33,7 +34,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className={`${manrope.className} flex min-h-full flex-col`}>
-        {children}
+        <QueryProvider>{children}</QueryProvider>
         <Toaster />
       </body>
     </html>
