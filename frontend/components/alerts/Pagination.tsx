@@ -44,8 +44,8 @@ export const Pagination: FC<PaginationProps> = ({
         onClick={() => onPageChange(page - 1)}
         disabled={!canPrev}
         className={cn(
-          'text-body inline-flex h-9 items-center gap-1 rounded-md px-2 text-sm font-medium',
-          'hover:bg-surface transition-colors disabled:pointer-events-none disabled:opacity-40',
+          'text-body inline-flex h-9 cursor-pointer items-center gap-1 rounded-md px-2 text-sm font-medium',
+          'hover:bg-surface transition-colors disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-40',
         )}
       >
         <ChevronLeft className="size-4" aria-hidden />
@@ -63,7 +63,7 @@ export const Pagination: FC<PaginationProps> = ({
                 onClick={() => onPageChange(n)}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'h-9 min-w-9 rounded-md px-2 text-sm font-medium transition-colors',
+                  'h-9 min-w-9 cursor-pointer rounded-md px-2 text-sm font-medium transition-colors',
                   active
                     ? 'bg-primary-500 text-white'
                     : 'text-muted hover:bg-surface hover:text-foreground',
@@ -85,8 +85,8 @@ export const Pagination: FC<PaginationProps> = ({
         onClick={() => onPageChange(page + 1)}
         disabled={!canNext}
         className={cn(
-          'text-body inline-flex h-9 items-center gap-1 rounded-md px-2 text-sm font-medium',
-          'hover:bg-surface transition-colors disabled:pointer-events-none disabled:opacity-40',
+          'text-body inline-flex h-9 cursor-pointer items-center gap-1 rounded-md px-2 text-sm font-medium',
+          'hover:bg-surface transition-colors disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-40',
         )}
       >
         Next
