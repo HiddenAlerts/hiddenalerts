@@ -4,6 +4,7 @@ export function formatAlertDate(iso: string) {
 
   const day = d.getDate();
   const month = d.toLocaleString('en-GB', { month: 'short' });
+  const year = d.getFullYear();
   const time = d
     .toLocaleString('en-GB', {
       hour: 'numeric',
@@ -12,5 +13,5 @@ export function formatAlertDate(iso: string) {
     })
     .toLowerCase();
 
-  return `${day} ${month} — ${time}`;
+  return `${day} ${month} ${year} — ${time}`;
 }

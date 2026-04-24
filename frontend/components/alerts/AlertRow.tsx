@@ -1,9 +1,17 @@
+import Tag from '@/components/ui/Tag/Tag';
 import { formatAlertDate } from '@/lib/formatAlertDate';
 import { cn } from '@/lib/utils';
-import type { AlertItem } from '@/types/alert';
-import type { FC } from 'react';
+import type { AlertBadgeTone, AlertItem } from '@/types/alert';
+import type { ComponentProps, FC } from 'react';
 
-import { Badge } from './Badge';
+type TagType = NonNullable<ComponentProps<typeof Tag>['type']>;
+
+const sourceTagType: Record<AlertBadgeTone, TagType> = {
+  danger: 'danger',
+  success: 'success',
+  info: 'info',
+  warning: 'warning',
+};
 
 export type AlertRowProps = {
   alert: AlertItem;
@@ -27,7 +35,11 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => (
     </td>
     <td className="align-top px-4 py-4 lg:px-5">
       <div className="flex justify-center lg:justify-start">
-        <Badge tone={alert.badgeTone}>{alert.sourceLabel}</Badge>
+        <Tag
+          title={alert.sourceLabel}
+          type={sourceTagType[alert.badgeTone]}
+          dot={false}
+        />
       </div>
     </td>
     <td className="text-muted align-top whitespace-nowrap px-4 py-4 text-right text-sm lg:px-5">
