@@ -78,7 +78,7 @@ export const AlertsScreen: FC = () => {
                 type="button"
                 onClick={() => setCategoryAndResetPage(opt.value)}
                 className={cn(
-                  'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                  'cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
                   selected
                     ? 'bg-primary-500 text-white'
                     : 'bg-surface text-body hover:bg-surface-muted border border-transparent',
