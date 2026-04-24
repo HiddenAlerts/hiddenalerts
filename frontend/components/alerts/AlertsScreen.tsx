@@ -1,23 +1,56 @@
 'use client';
 
-import {
-  ALERT_CATEGORY_OPTIONS,
-  ALERT_SORT_OPTIONS,
-  MOCK_ALERTS,
-} from '@/data/mockAlerts';
-import { useAlertsList } from '@/hooks/useAlertsList';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { API_ALERT_CATEGORY_OPTIONS } from '@/data/apiAlertCategories';
+import { useAlertsPageQuery } from '@/hooks/useAlertsPageQuery';
+import { ALERTS_PAGE_SIZE } from '@/lib/api/alerts';
+import { mapApiAlertToAlertItem } from '@/lib/api/alerts';
+import type { HttpRequestError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
-import type { FC } from 'react';
+import { useCallback, useMemo, useState, type FC } from 'react';
 
 import { AlertTable } from './AlertTable';
-import { FilterDropdown } from './FilterDropdown';
 import { Pagination } from './Pagination';
 
-export const AlertsScreen: FC = () => {
-  const list = useAlertsList({ items: MOCK_ALERTS, pageSize: 5 });
+function getQueryErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const e = error as HttpRequestError;
+    if (typeof e.status === 'number') {
+      return `The server returned an error (${e.status}). ${e.message}`;
+    }
+    return error.message;
+  }
+  return 'Unable to load alerts. Please try again.';
+}
 
-  const categoryOptions = [...ALERT_CATEGORY_OPTIONS];
-  const sortOptions = [...ALERT_SORT_OPTIONS];
+export const AlertsScreen: FC = () => {
+  const [category, setCategory] = useState('all');
+  const [page, setPage] = useState(1);
+
+  const {
+    data,
+    isPending,
+    isError,
+    isFetching,
+    error,
+    refetch,
+  } = useAlertsPageQuery(page, category);
+
+  const isInitialLoading = isPending && !data;
+
+  const alerts = useMemo(
+    () => (data?.alerts ?? []).map(mapApiAlertToAlertItem),
+    [data?.alerts],
+  );
+
+  const hasNextPage = (data?.alerts.length ?? 0) === ALERTS_PAGE_SIZE;
+
+  const setCategoryAndResetPage = useCallback((value: string) => {
+    setCategory(value);
+    setPage(1);
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -30,23 +63,6 @@ export const AlertsScreen: FC = () => {
             Review intelligence signals and system activity.
           </p>
         </div>
-
-        {/* <div className="flex flex-wrap gap-2 sm:justify-end">
-          <FilterDropdown
-            id="alert-category"
-            label="Category"
-            value={list.category}
-            options={categoryOptions}
-            onChange={list.setCategory}
-          />
-          <FilterDropdown
-            id="alert-sort"
-            label="Sort"
-            value={list.sort}
-            options={sortOptions}
-            onChange={(v) => list.setSort(v as 'recent' | 'oldest')}
-          />
-        </div> */}
       </div>
 
       <div className="space-y-2">
@@ -54,13 +70,13 @@ export const AlertsScreen: FC = () => {
           Category
         </p>
         <div className="flex flex-wrap gap-2">
-          {ALERT_CATEGORY_OPTIONS.map(opt => {
-            const selected = list.category === opt.value;
+          {API_ALERT_CATEGORY_OPTIONS.map(opt => {
+            const selected = category === opt.value;
             return (
               <button
                 key={opt.value}
                 type="button"
-                onClick={() => list.setCategory(opt.value)}
+                onClick={() => setCategoryAndResetPage(opt.value)}
                 className={cn(
                   'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
                   selected
@@ -75,15 +91,39 @@ export const AlertsScreen: FC = () => {
         </div>
       </div>
 
-      <AlertTable alerts={list.pageItems} />
-
-      {list.totalCount > 0 ? (
-        <Pagination
-          page={list.page}
-          totalPages={list.totalPages}
-          onPageChange={list.setPage}
+      {isError ? (
+        <ErrorState
+          message={getQueryErrorMessage(error)}
+          onRetry={() => void refetch()}
         />
-      ) : null}
+      ) : isInitialLoading ? (
+        <LoadingState label="Loading alerts…" />
+      ) : (
+        <>
+          {alerts.length === 0 ? (
+            <EmptyState
+              title="No alerts"
+              description="There are no alerts for this filter on this page. Try another category or go to the previous page."
+            />
+          ) : (
+            <div
+              className={cn(
+                'transition-opacity',
+                isFetching ? 'opacity-70' : 'opacity-100',
+              )}
+            >
+              <AlertTable alerts={alerts} />
+            </div>
+          )}
+          {!isError && !isInitialLoading && (page > 1 || hasNextPage) ? (
+            <Pagination
+              page={page}
+              onPageChange={setPage}
+              hasNextPage={hasNextPage}
+            />
+          ) : null}
+        </>
+      )}
     </div>
   );
 };
