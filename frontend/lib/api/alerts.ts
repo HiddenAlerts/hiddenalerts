@@ -1,3 +1,7 @@
+import {
+  formatRiskLevelLabel,
+  simplifyAlertSourceName,
+} from '@/lib/alertDisplay';
 import type { AlertBadgeTone, AlertItem } from '@/types/alert';
 import type { AlertApiRecord, AlertsListResponse } from '@/types/alertsApi';
 
@@ -27,7 +31,10 @@ export function mapApiAlertToAlertItem(record: AlertApiRecord): AlertItem {
     title: record.title,
     description: record.summary,
     sourceLabel: record.source_name,
+    sourceDisplayLabel: simplifyAlertSourceName(record.source_name),
     badgeTone: riskLevelToBadge(record.risk_level),
+    riskLevelLabel: formatRiskLevelLabel(record.risk_level),
+    signalScore: record.signal_score,
     category: record.category,
     occurredAt: record.published_at,
   };
