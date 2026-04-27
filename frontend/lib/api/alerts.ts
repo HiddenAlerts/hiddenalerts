@@ -7,7 +7,7 @@ import type { AlertApiRecord, AlertsListResponse } from '@/types/alertsApi';
 
 import { apiGet } from './client';
 
-export const ALERTS_PAGE_SIZE = 15;
+export const ALERTS_PAGE_SIZE = 20;
 
 export type FetchAlertsParams = {
   limit: number;
@@ -35,6 +35,7 @@ export function mapApiAlertToAlertItem(record: AlertApiRecord): AlertItem {
     badgeTone: riskLevelToBadge(record.risk_level),
     riskLevelLabel: formatRiskLevelLabel(record.risk_level),
     signalScore: record.signal_score,
+    sourceUrl: record.source_url,
     category: record.category,
     occurredAt: record.published_at,
   };
