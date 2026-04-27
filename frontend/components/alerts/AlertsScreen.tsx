@@ -5,13 +5,14 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { API_ALERT_CATEGORY_OPTIONS } from '@/data/apiAlertCategories';
 import { useAlertsPageQuery } from '@/hooks/useAlertsPageQuery';
+import { scoreVisualTone } from '@/lib/alertDisplay';
+import { presentFeaturedSignalCopy } from '@/lib/featuredSignalPresentation';
 import { ALERTS_PAGE_SIZE } from '@/lib/api/alerts';
 import { mapApiAlertToAlertItem } from '@/lib/api/alerts';
-import { scoreVisualTone } from '@/lib/alertDisplay';
 import type { HttpRequestError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 import type { AlertItem } from '@/types/alert';
-import { useCallback, useMemo, useState, type FC } from 'react';
+import { type FC, useCallback, useMemo, useState } from 'react';
 
 import { AlertTable } from './AlertTable';
 import { Pagination } from './Pagination';
@@ -48,14 +49,8 @@ export const AlertsScreen: FC = () => {
   const [category, setCategory] = useState('all');
   const [page, setPage] = useState(1);
 
-  const {
-    data,
-    isPending,
-    isError,
-    isFetching,
-    error,
-    refetch,
-  } = useAlertsPageQuery(page, category);
+  const { data, isPending, isError, isFetching, error, refetch } =
+    useAlertsPageQuery(page, category);
 
   const isInitialLoading = isPending && !data;
 
@@ -67,6 +62,13 @@ export const AlertsScreen: FC = () => {
   const hasNextPage = (data?.alerts.length ?? 0) === ALERTS_PAGE_SIZE;
 
   const featuredSignal = useMemo(() => selectFeaturedSignal(alerts), [alerts]);
+
+  const featuredDisplay = useMemo(
+    () =>
+      featuredSignal ? presentFeaturedSignalCopy(featuredSignal) : null,
+    [featuredSignal],
+  );
+
   const gridAlerts = useMemo(
     () => alerts.filter(alert => alert.id !== featuredSignal?.id),
     [alerts, featuredSignal?.id],
@@ -81,7 +83,9 @@ export const AlertsScreen: FC = () => {
       .filter((score): score is number => typeof score === 'number');
     const averageScore =
       scores.length > 0
-        ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length)
+        ? Math.round(
+            scores.reduce((sum, score) => sum + score, 0) / scores.length,
+          )
         : null;
     const activeSources = Array.from(
       new Set(
@@ -186,10 +190,10 @@ export const AlertsScreen: FC = () => {
                         </span>
                       </div>
                       <h2 className="font-heading text-foreground line-clamp-2 text-2xl leading-tight font-semibold tracking-tight">
-                        {featuredSignal.title}
+                        {featuredDisplay?.title ?? featuredSignal.title}
                       </h2>
-                      <p className="text-body/95 mt-2 line-clamp-2 max-w-3xl text-sm leading-relaxed">
-                        {featuredSignal.description}
+                      <p className="text-body/95 mt-2 line-clamp-3 max-w-3xl text-sm leading-relaxed">
+                        {featuredDisplay?.description ?? featuredSignal.description}
                       </p>
                       {featuredSignal.sourceUrl ? (
                         <a
@@ -225,7 +229,7 @@ export const AlertsScreen: FC = () => {
               ) : null}
 
               <section className="space-y-3">
-                <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface/30 p-3">
+                <div className="border-border bg-surface/30 flex flex-col gap-3 rounded-lg border p-3">
                   <div className="flex flex-wrap items-center gap-2">
                     {API_ALERT_CATEGORY_OPTIONS.map(opt => {
                       const selected = category === opt.value;
@@ -246,7 +250,6 @@ export const AlertsScreen: FC = () => {
                       );
                     })}
                   </div>
-
                 </div>
 
                 <div
