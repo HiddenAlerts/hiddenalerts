@@ -3,6 +3,7 @@
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
+import { LandingLogo } from '@/components/landing/LandingLogo';
 import { API_ALERT_CATEGORY_OPTIONS } from '@/data/apiAlertCategories';
 import { useAlertsPageQuery } from '@/hooks/useAlertsPageQuery';
 import { scoreVisualTone } from '@/lib/alertDisplay';
@@ -12,9 +13,11 @@ import { mapApiAlertToAlertItem } from '@/lib/api/alerts';
 import type { HttpRequestError } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 import type { AlertItem } from '@/types/alert';
-import { type FC, useCallback, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { type FC, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { AlertTable } from './AlertTable';
+import { EarlyAccessModal } from './EarlyAccessModal';
 import { Pagination } from './Pagination';
 
 function getQueryErrorMessage(error: unknown): string {
@@ -45,12 +48,31 @@ const scoreTextColor: Record<ReturnType<typeof scoreVisualTone>, string> = {
   muted: 'text-body',
 };
 
+/** Relative phrasing for `dataUpdatedAt` (React Query, ms since epoch). */
+function formatRelativeLastUpdated(updatedAtMs: number, nowMs: number): string {
+  const sec = Math.max(0, Math.floor((nowMs - updatedAtMs) / 1000));
+  if (sec < 45) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return min <= 1 ? '1 minute ago' : `${min} minutes ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return hr === 1 ? '1 hour ago' : `${hr} hours ago`;
+  const days = Math.floor(hr / 24);
+  return days === 1 ? '1 day ago' : `${days} days ago`;
+}
+
 export const AlertsScreen: FC = () => {
   const [category, setCategory] = useState('all');
   const [page, setPage] = useState(1);
+  const [earlyAccessOpen, setEarlyAccessOpen] = useState(false);
 
-  const { data, isPending, isError, isFetching, error, refetch } =
+  const { data, isPending, isError, isFetching, error, refetch, dataUpdatedAt } =
     useAlertsPageQuery(page, category);
+
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const isInitialLoading = isPending && !data;
 
@@ -104,6 +126,30 @@ export const AlertsScreen: FC = () => {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Link
+          href="/dashboard"
+          className="text-foreground focus-visible:ring-primary-500 inline-flex min-w-0 max-w-full shrink-0 items-center rounded-md focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+        >
+          <LandingLogo
+            iconClassName="bg-primary-500/15 text-primary-500 inline-flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md p-0.5"
+            textClassName="text-base font-semibold"
+          />
+        </Link>
+        <button
+          type="button"
+          onClick={() => setEarlyAccessOpen(true)}
+          className="bg-danger hover:bg-danger/90 active:bg-danger/80 self-end rounded-md px-4 py-2.5 text-sm font-semibold text-white transition-colors sm:self-auto"
+        >
+          Get Early Access
+        </button>
+      </div>
+
+      <EarlyAccessModal
+        open={earlyAccessOpen}
+        onClose={() => setEarlyAccessOpen(false)}
+      />
+
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="font-heading text-foreground text-2xl font-semibold tracking-tight">
@@ -112,6 +158,11 @@ export const AlertsScreen: FC = () => {
           <p className="text-muted mt-1 text-sm">
             Review intelligence signals and system activity.
           </p>
+          {dataUpdatedAt > 0 ? (
+            <p className="text-muted/90 mt-1.5 text-xs tabular-nums">
+              Last updated: {formatRelativeLastUpdated(dataUpdatedAt, nowMs)}
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -178,18 +229,18 @@ export const AlertsScreen: FC = () => {
           ) : (
             <>
               {featuredSignal ? (
-                <article className="border-danger/45 from-danger/10 via-primary-900/20 to-surface/80 rounded-xl border bg-gradient-to-r px-5 py-4.5">
+                <article className="border-danger/60 from-danger/14 via-primary-900/30 to-surface/70 relative rounded-xl border-2 bg-gradient-to-r px-5 py-5 shadow-lg shadow-danger/15 ring-1 ring-danger/25">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="mb-2 flex items-center gap-2.5">
-                        <span className="border-danger/70 bg-danger/24 text-danger inline-flex items-center rounded-md border px-3 py-1 text-xs font-extrabold tracking-[0.09em] uppercase">
+                        <span className="border-danger/80 bg-danger/30 text-danger inline-flex items-center rounded-md border px-3 py-1 text-xs font-extrabold tracking-[0.09em] uppercase">
                           {featuredSignal.riskLevelLabel}
                         </span>
-                        <span className="text-muted/85 text-xs font-medium">
+                        <span className="text-foreground/90 text-xs font-semibold tracking-wide uppercase">
                           Featured Signal
                         </span>
                       </div>
-                      <h2 className="font-heading text-foreground line-clamp-2 text-2xl leading-tight font-semibold tracking-tight">
+                      <h2 className="font-heading text-foreground line-clamp-2 text-2xl leading-tight font-bold tracking-tight sm:text-[1.65rem]">
                         {featuredDisplay?.title ?? featuredSignal.title}
                       </h2>
                       <p className="text-body/95 mt-2 line-clamp-3 max-w-3xl text-sm leading-relaxed">
