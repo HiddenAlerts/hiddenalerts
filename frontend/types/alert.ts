@@ -13,7 +13,7 @@ export type AlertItem = {
   riskLevelLabel: string;
   /** From API when available */
   signalScore?: number;
-  /** External link for “View signal” (from API `source_url`). */
+  /** External link for “View Full Signal” (from API `source_url`). */
   sourceUrl?: string;
   /** Used for the category filter */
   category: string;

@@ -142,7 +142,7 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
               scoreToneClass,
             )}
           >
-            View Signal →
+            View Full Signal →
           </span>
         ) : null}
       </div>
