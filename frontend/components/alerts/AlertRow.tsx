@@ -1,9 +1,9 @@
 'use client';
 
 import {
+  type ScoreVisualTone,
   confidenceLabelFromRisk,
   scoreVisualTone,
-  type ScoreVisualTone,
   truncateSignalHeadline,
 } from '@/lib/alertDisplay';
 import { formatAlertDate, formatRelativeTime } from '@/lib/formatAlertDate';
@@ -20,50 +20,24 @@ const toneText: Record<ScoreVisualTone, string> = {
 
 function RiskBadge({ label }: { label: string }) {
   const base =
-    'inline-flex shrink-0 items-center rounded-md border px-3 py-1 text-xs font-extrabold uppercase tracking-[0.08em]';
+    'inline-flex shrink-0 items-center rounded px-3 py-1 text-xs font-extrabold uppercase tracking-[0.08em]';
   if (label === 'HIGH') {
     return (
-      <span
-        className={cn(
-          base,
-          'border-danger/70 bg-danger/26 text-danger',
-        )}
-      >
-        {label}
-      </span>
+      <span className={cn(base, 'bg-danger/15 text-danger')}>{label}</span>
     );
   }
   if (label === 'MEDIUM') {
     return (
-      <span
-        className={cn(
-          base,
-          'border-warning/70 bg-warning/28 text-warning',
-        )}
-      >
-        {label}
-      </span>
+      <span className={cn(base, 'bg-warning/15 text-warning')}>{label}</span>
     );
   }
   if (label === 'LOW') {
     return (
-      <span
-        className={cn(
-          base,
-          'border-success/50 bg-success/14 text-success',
-        )}
-      >
-        {label}
-      </span>
+      <span className={cn(base, 'bg-success/15 text-success')}>{label}</span>
     );
   }
   return (
-    <span
-      className={cn(
-        base,
-        'border-border bg-surface-muted/45 text-muted',
-      )}
-    >
+    <span className={cn(base, 'border-border bg-surface-muted/45 text-muted')}>
       {label}
     </span>
   );
@@ -115,39 +89,44 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
   );
 
   const inner = (
-    <>
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-          <RiskBadge label={alert.riskLevelLabel} />
-          <span
-            className="text-body text-sm font-medium"
-            title={absoluteTime}
-          >
-            {relativeTime}
-          </span>
-        </div>
-        <div className="shrink-0 text-right">
-          <div className="text-muted text-[0.7rem] font-semibold tracking-wide uppercase">
-            Score
+    <div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_112px] sm:gap-6">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+            <RiskBadge label={alert.riskLevelLabel} />
+            <span
+              className="text-body text-sm font-medium"
+              title={absoluteTime}
+            >
+              {relativeTime}
+            </span>
           </div>
-          <div
-            className={cn(
-              'mt-0.5 text-4xl leading-none font-bold tabular-nums tracking-tight',
-              scoreToneClass,
-            )}
-          >
-            {typeof alert.signalScore === 'number' ? alert.signalScore : '—'}
+
+          <h2 className="font-heading text-foreground mt-3 line-clamp-2 text-lg leading-snug font-semibold tracking-tight sm:text-[1.1rem]">
+            {headline}
+          </h2>
+
+          <p className="text-body mt-2 line-clamp-2 text-[0.98rem] leading-relaxed">
+            {summary}
+          </p>
+        </div>
+
+        <div className="flex items-end justify-between gap-3 p-4 pt-1 sm:min-h-full sm:flex-col sm:items-end sm:justify-start sm:pl-3">
+          <div className="shrink-0 text-right">
+            <div className="text-muted text-[0.7rem] font-semibold tracking-wide uppercase">
+              Score
+            </div>
+            <div
+              className={cn(
+                'mt-0.5 text-4xl leading-none font-bold tracking-tight tabular-nums',
+                scoreToneClass,
+              )}
+            >
+              {typeof alert.signalScore === 'number' ? alert.signalScore : '—'}
+            </div>
           </div>
         </div>
       </div>
-
-      <h2 className="font-heading text-foreground mt-3 line-clamp-2 text-lg leading-snug font-semibold tracking-tight sm:text-[1.1rem]">
-        {headline}
-      </h2>
-
-      <p className="text-body mt-2 line-clamp-2 text-[0.98rem] leading-relaxed">
-        {summary}
-      </p>
 
       <div className="border-border/70 mt-3 flex items-center justify-between gap-4 border-t pt-3">
         <p
@@ -167,7 +146,7 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
           </span>
         ) : null}
       </div>
-    </>
+    </div>
   );
 
   if (alert.sourceUrl) {

@@ -46,10 +46,6 @@ const scoreTextColor: Record<ReturnType<typeof scoreVisualTone>, string> = {
 
 export const AlertsScreen: FC = () => {
   const [category, setCategory] = useState('all');
-  const [sortBy, setSortBy] = useState<'latest' | 'highest-score'>('latest');
-  const [riskFilter, setRiskFilter] = useState<'all' | 'high-risk' | 'emerging'>(
-    'all',
-  );
   const [page, setPage] = useState(1);
 
   const {
@@ -120,41 +116,41 @@ export const AlertsScreen: FC = () => {
           Command Bar
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <article className="border-border bg-surface/45 rounded-lg border px-4 py-3">
+          <article className="border-border bg-surface/45 rounded-lg border px-4 py-3.5">
             <p className="text-muted text-[0.67rem] font-semibold tracking-[0.15em] uppercase">
               High-risk signals
             </p>
             <p className="text-danger mt-2 text-3xl leading-none font-bold tabular-nums">
               {commandStats.highRiskCount}
             </p>
-            <p className="text-muted mt-1 text-xs">Active now</p>
+            <p className="text-muted/75 mt-1 text-xs">Active now</p>
           </article>
-          <article className="border-border bg-surface/45 rounded-lg border px-4 py-3">
+          <article className="border-border bg-surface/45 rounded-lg border px-4 py-3.5">
             <p className="text-muted text-[0.67rem] font-semibold tracking-[0.15em] uppercase">
               New signals (24h)
             </p>
             <p className="text-info mt-2 text-3xl leading-none font-bold tabular-nums">
               {alerts.length}
             </p>
-            <p className="text-muted mt-1 text-xs">Latest batch</p>
+            <p className="text-muted/75 mt-1 text-xs">Latest batch</p>
           </article>
-          <article className="border-border bg-surface/45 rounded-lg border px-4 py-3">
+          <article className="border-border bg-surface/45 rounded-lg border px-4 py-3.5">
             <p className="text-muted text-[0.67rem] font-semibold tracking-[0.15em] uppercase">
               Avg signal score
             </p>
             <p className="text-success mt-2 text-3xl leading-none font-bold tabular-nums">
               {commandStats.averageScore ?? '—'}
             </p>
-            <p className="text-muted mt-1 text-xs">Current feed</p>
+            <p className="text-muted/75 mt-1 text-xs">Current feed</p>
           </article>
-          <article className="border-border bg-surface/45 rounded-lg border px-4 py-3">
+          <article className="border-border bg-surface/45 rounded-lg border px-4 py-3.5">
             <p className="text-muted text-[0.67rem] font-semibold tracking-[0.15em] uppercase">
               Active sources
             </p>
             <p className="text-foreground mt-2 line-clamp-1 text-lg leading-tight font-semibold">
               {commandStats.activeSources.slice(0, 3).join(' / ') || '—'}
             </p>
-            <p className="text-muted mt-1 text-xs">
+            <p className="text-muted/75 mt-1 text-xs">
               {commandStats.activeSources.length} sources online
             </p>
           </article>
@@ -178,21 +174,21 @@ export const AlertsScreen: FC = () => {
           ) : (
             <>
               {featuredSignal ? (
-                <article className="border-danger/45 from-danger/10 via-primary-900/25 to-surface/80 rounded-xl border bg-gradient-to-r px-5 py-4">
+                <article className="border-danger/45 from-danger/10 via-primary-900/20 to-surface/80 rounded-xl border bg-gradient-to-r px-5 py-4.5">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
-                      <div className="mb-2 flex items-center gap-2">
-                        <span className="border-danger/65 bg-danger/22 text-danger inline-flex items-center rounded-md border px-3 py-1 text-xs font-bold tracking-[0.08em] uppercase">
+                      <div className="mb-2 flex items-center gap-2.5">
+                        <span className="border-danger/70 bg-danger/24 text-danger inline-flex items-center rounded-md border px-3 py-1 text-xs font-extrabold tracking-[0.09em] uppercase">
                           {featuredSignal.riskLevelLabel}
                         </span>
-                        <span className="text-muted text-xs font-medium">
+                        <span className="text-muted/85 text-xs font-medium">
                           Featured Signal
                         </span>
                       </div>
                       <h2 className="font-heading text-foreground line-clamp-2 text-2xl leading-tight font-semibold tracking-tight">
                         {featuredSignal.title}
                       </h2>
-                      <p className="text-body mt-2 line-clamp-2 max-w-3xl text-sm leading-relaxed">
+                      <p className="text-body/95 mt-2 line-clamp-2 max-w-3xl text-sm leading-relaxed">
                         {featuredSignal.description}
                       </p>
                       {featuredSignal.sourceUrl ? (
@@ -207,7 +203,7 @@ export const AlertsScreen: FC = () => {
                       ) : null}
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-muted text-xs font-semibold tracking-[0.12em] uppercase">
+                      <p className="text-muted/80 text-xs font-semibold tracking-[0.12em] uppercase">
                         Score
                       </p>
                       <p
@@ -249,58 +245,8 @@ export const AlertsScreen: FC = () => {
                         </button>
                       );
                     })}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setRiskFilter(prev =>
-                          prev === 'high-risk' ? 'all' : 'high-risk',
-                        )
-                      }
-                      className={cn(
-                        'cursor-pointer rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
-                        riskFilter === 'high-risk'
-                          ? 'border-danger/60 bg-danger/20 text-danger'
-                          : 'border-border bg-surface text-body hover:bg-surface-muted',
-                      )}
-                    >
-                      High Risk
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setRiskFilter(prev =>
-                          prev === 'emerging' ? 'all' : 'emerging',
-                        )
-                      }
-                      className={cn(
-                        'cursor-pointer rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
-                        riskFilter === 'emerging'
-                          ? 'border-warning/60 bg-warning/20 text-warning'
-                          : 'border-border bg-surface text-body hover:bg-surface-muted',
-                      )}
-                    >
-                      Emerging
-                    </button>
                   </div>
 
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-muted text-xs uppercase">Signals</p>
-                    <label className="text-muted flex items-center gap-2 text-xs font-semibold tracking-wide uppercase">
-                      Sort
-                      <select
-                        value={sortBy}
-                        onChange={event =>
-                          setSortBy(
-                            event.target.value as 'latest' | 'highest-score',
-                          )
-                        }
-                        className="border-border bg-surface text-body rounded-md border px-2.5 py-1.5 text-xs"
-                      >
-                        <option value="latest">Latest</option>
-                        <option value="highest-score">Highest Score</option>
-                      </select>
-                    </label>
-                  </div>
                 </div>
 
                 <div
