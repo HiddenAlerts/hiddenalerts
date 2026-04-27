@@ -4,6 +4,7 @@ import {
   confidenceLabelFromRisk,
   scoreVisualTone,
   type ScoreVisualTone,
+  truncateSignalHeadline,
 } from '@/lib/alertDisplay';
 import { formatAlertDate, formatRelativeTime } from '@/lib/formatAlertDate';
 import { cn } from '@/lib/utils';
@@ -19,13 +20,13 @@ const toneText: Record<ScoreVisualTone, string> = {
 
 function RiskBadge({ label }: { label: string }) {
   const base =
-    'inline-flex shrink-0 items-center rounded-md border px-2.5 py-1 text-xs font-bold uppercase tracking-wide';
+    'inline-flex shrink-0 items-center rounded-md border px-3 py-1 text-xs font-extrabold uppercase tracking-[0.08em]';
   if (label === 'HIGH') {
     return (
       <span
         className={cn(
           base,
-          'border-danger/55 bg-danger/18 text-danger',
+          'border-danger/70 bg-danger/26 text-danger',
         )}
       >
         {label}
@@ -37,7 +38,7 @@ function RiskBadge({ label }: { label: string }) {
       <span
         className={cn(
           base,
-          'border-warning/55 bg-warning/18 text-warning',
+          'border-warning/70 bg-warning/28 text-warning',
         )}
       >
         {label}
@@ -90,25 +91,25 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
   const summary = alert.description;
   const relativeTime = formatRelativeTime(alert.occurredAt);
   const absoluteTime = formatAlertDate(alert.occurredAt);
-  const headline = alert.title.trim();
+  const headline = truncateSignalHeadline(alert.title, 10);
   const confidence = confidenceLabelFromRisk(alert.riskLevelLabel);
   const categoryLabel = formatCategoryLabel(alert.category);
   const tone = scoreVisualTone(alert.signalScore, alert.riskLevelLabel);
   const scoreToneClass = toneText[tone];
 
-  const metadataParts = [
+  const metadataLine = [
     sourceShort,
     relativeTime,
     categoryLabel,
-    `Confidence: ${confidence}`,
-  ];
+    `Confidence ${confidence}`,
+  ].join(' • ');
 
   const cardSurface = cn(
     'border-border bg-surface/42 rounded-lg border p-4',
     'border-l-2',
     cardAccentClass(alert.riskLevelLabel),
     'transition-all duration-200',
-    'hover:-translate-y-0.5 hover:border-primary-500/40 hover:bg-surface/58 hover:shadow-md',
+    'hover:-translate-y-1 hover:border-primary-500/45 hover:bg-surface/62 hover:shadow-lg hover:shadow-black/25',
     alert.sourceUrl &&
       'cursor-pointer focus-visible:ring-primary-500/35 focus-visible:ring-2 focus-visible:outline-none',
   );
@@ -140,7 +141,7 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
         </div>
       </div>
 
-      <h2 className="font-heading text-foreground mt-3 line-clamp-2 text-lg leading-snug font-semibold tracking-tight sm:text-xl">
+      <h2 className="font-heading text-foreground mt-3 line-clamp-2 text-lg leading-snug font-semibold tracking-tight sm:text-[1.1rem]">
         {headline}
       </h2>
 
@@ -148,17 +149,12 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
         {summary}
       </p>
 
-      <div className="border-border/70 mt-3 flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <div className="border-border/70 mt-3 flex items-center justify-between gap-4 border-t pt-3">
         <p
-          className="text-body min-w-0 flex-1 text-sm leading-relaxed tracking-[0.01em]"
-          title={metadataParts.join(' • ')}
+          className="text-body min-w-0 flex-1 truncate text-sm leading-relaxed tracking-[0.01em]"
+          title={metadataLine}
         >
-          {metadataParts.map((part, index) => (
-            <span key={`${part}-${index}`}>
-              {index > 0 ? <span className="mx-2.5 text-muted">•</span> : null}
-              {part}
-            </span>
-          ))}
+          {metadataLine}
         </p>
         {alert.sourceUrl ? (
           <span
