@@ -9,7 +9,10 @@ import {
 import { formatAlertDate, formatRelativeTime } from '@/lib/formatAlertDate';
 import { cn } from '@/lib/utils';
 import type { AlertItem } from '@/types/alert';
+import Link from 'next/link';
 import type { FC } from 'react';
+
+import { RiskBadge } from './RiskBadge';
 
 const toneText: Record<ScoreVisualTone, string> = {
   danger: 'text-danger',
@@ -17,31 +20,6 @@ const toneText: Record<ScoreVisualTone, string> = {
   success: 'text-success',
   muted: 'text-body',
 };
-
-function RiskBadge({ label }: { label: string }) {
-  const base =
-    'inline-flex shrink-0 items-center rounded px-3 py-1 text-xs font-extrabold uppercase tracking-[0.08em]';
-  if (label === 'HIGH') {
-    return (
-      <span className={cn(base, 'bg-danger/15 text-danger')}>{label}</span>
-    );
-  }
-  if (label === 'MEDIUM') {
-    return (
-      <span className={cn(base, 'bg-warning/15 text-warning')}>{label}</span>
-    );
-  }
-  if (label === 'LOW') {
-    return (
-      <span className={cn(base, 'bg-success/15 text-success')}>{label}</span>
-    );
-  }
-  return (
-    <span className={cn(base, 'border-border bg-surface-muted/45 text-muted')}>
-      {label}
-    </span>
-  );
-}
 
 function cardAccentClass(label: string) {
   if (label === 'HIGH') return 'border-l-danger';
@@ -84,8 +62,7 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
     cardAccentClass(alert.riskLevelLabel),
     'transition-all duration-200',
     'hover:-translate-y-1 hover:border-primary-500/45 hover:bg-surface/62 hover:shadow-lg hover:shadow-black/25',
-    alert.sourceUrl &&
-      'cursor-pointer focus-visible:ring-primary-500/35 focus-visible:ring-2 focus-visible:outline-none',
+    'cursor-pointer focus-visible:ring-primary-500/35 focus-visible:ring-2 focus-visible:outline-none',
   );
 
   const inner = (
@@ -135,32 +112,21 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
         >
           {metadataLine}
         </p>
-        {alert.sourceUrl ? (
-          <span
-            className={cn(
-              'shrink-0 text-[0.95rem] font-semibold whitespace-nowrap',
-              scoreToneClass,
-            )}
-          >
-            View Full Signal →
-          </span>
-        ) : null}
+        <span
+          className={cn(
+            'shrink-0 text-[0.95rem] font-semibold whitespace-nowrap',
+            scoreToneClass,
+          )}
+        >
+          View Details →
+        </span>
       </div>
     </div>
   );
 
-  if (alert.sourceUrl) {
-    return (
-      <a
-        href={alert.sourceUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={cn(cardSurface, className)}
-      >
-        {inner}
-      </a>
-    );
-  }
-
-  return <article className={cn(cardSurface, className)}>{inner}</article>;
+  return (
+    <Link href={`/alerts/${alert.id}`} className={cn(cardSurface, className)}>
+      {inner}
+    </Link>
+  );
 };
