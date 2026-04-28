@@ -1,6 +1,8 @@
 export {
   ALERTS_PAGE_SIZE,
+  buildAlertDetailPath,
   buildAlertsListPath,
+  fetchAlertDetail,
   fetchAlertsPage,
   mapApiAlertToAlertItem,
 } from './alerts';

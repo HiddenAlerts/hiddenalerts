@@ -8,6 +8,9 @@ export type AlertApiRecord = {
   source_name: string;
   source_url: string;
   published_at: string;
+  processed_at?: string;
+  secondary_category?: string | null;
+  entities?: string[];
 };
 
 export type AlertsListResponse = {

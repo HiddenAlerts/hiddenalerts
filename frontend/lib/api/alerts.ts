@@ -51,8 +51,16 @@ export function buildAlertsListPath(params: FetchAlertsParams) {
   return `/alerts?${search.toString()}`;
 }
 
+export function buildAlertDetailPath(alertId: string) {
+  return `/alerts/${encodeURIComponent(alertId)}`;
+}
+
 export async function fetchAlertsPage(
   params: FetchAlertsParams,
 ): Promise<AlertsListResponse> {
   return apiGet<AlertsListResponse>(buildAlertsListPath(params));
+}
+
+export async function fetchAlertDetail(alertId: string): Promise<AlertApiRecord> {
+  return apiGet<AlertApiRecord>(buildAlertDetailPath(alertId));
 }
