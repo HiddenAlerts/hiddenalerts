@@ -5,23 +5,18 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { useAlertDetailQuery } from '@/hooks';
 import { confidenceLabelFromRisk, formatRiskLevelLabel } from '@/lib/alertDisplay';
-import { formatAlertDate, formatRelativeTime } from '@/lib/formatAlertDate';
+import { formatRelativeTime } from '@/lib/formatAlertDate';
 import type { HttpRequestError } from '@/lib/api/client';
+import type { AlertApiRecord } from '@/types/alertsApi';
 import { RiskBadge } from './RiskBadge';
 import {
-  ArrowUpRight,
   Clock3,
   ExternalLink,
   Eye,
   MapPinned,
   MessageSquare,
   Newspaper,
-  Search,
-  Shield,
   ShieldAlert,
-  TriangleAlert,
-  TrendingUp,
-  UserX,
   Users,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -30,11 +25,11 @@ type AlertDetailScreenProps = {
   alertId: string;
 };
 
-type RelatedSignal = {
-  title: string;
-  score: string;
-  riskLabel: string;
-};
+// type RelatedSignal = {
+//   title: string;
+//   score: string;
+//   riskLabel: string;
+// };
 
 type SourceRow = {
   type: string;
@@ -53,81 +48,118 @@ function getQueryErrorMessage(error: unknown): string {
   return 'Unable to load alert detail. Please try again.';
 }
 
-function pickVictimCount(summary: string): string {
+function pickVictimCount(summary: string): string | null {
   const deathMatch = summary.match(/at least\s+(\d[\d,]*)\s+deaths?/i);
   if (deathMatch?.[1]) return deathMatch[1];
   const victimMatch = summary.match(/(\d[\d,]*)\+?\s+victims?/i);
   if (victimMatch?.[1]) return victimMatch[1];
-  return 'Not specified';
+  // return 'Not specified';
+  return null;
 }
 
-function inferScopeFromTitle(title: string): string {
+function inferScopeFromTitle(title: string): string | null {
   if (/democratic republic of the congo|drc/i.test(title)) {
     return 'Democratic Republic of the Congo';
   }
   if (/\bu\.?s\.?\b|united states/i.test(title)) {
     return 'United States';
   }
-  return 'Not specified';
+  // return 'Not specified';
+  return null;
 }
 
-function inferTrendLabel(riskLevel: string): string {
-  const risk = riskLevel.toUpperCase();
-  if (risk === 'HIGH') return 'Rising';
-  if (risk === 'MEDIUM') return 'Watch';
-  if (risk === 'LOW') return 'Stable';
-  return 'Unknown';
-}
+function buildWhyThisMattersLines(data: AlertApiRecord): string[] {
+  const items: string[] = [];
+  const summary = data.summary?.trim();
+  if (summary) {
+    const end = summary.indexOf('. ');
+    items.push(end > 0 ? summary.slice(0, end + 1).trim() : summary);
+  }
 
-function buildRelatedSignals(): RelatedSignal[] {
-  return [
-    {
-      title: 'Crypto Romance Scams Targeting Older Adults',
-      score: '18',
-      riskLabel: 'HIGH',
-    },
-    {
-      title: 'AI-Generated Deepfake Investment Scams Rising',
-      score: '17',
-      riskLabel: 'HIGH',
-    },
-    {
-      title: 'Business Email Compromise Campaigns Increase',
-      score: '14',
-      riskLabel: 'MEDIUM',
-    },
-  ];
-}
-
-function RelatedCard({
-  title,
-  score,
-  riskLabel,
-}: {
-  title: string;
-  score: string;
-  riskLabel: string;
-}) {
-  const scoreClass =
-    riskLabel === 'HIGH'
-      ? 'text-danger'
-      : riskLabel === 'MEDIUM'
-        ? 'text-warning'
-        : 'text-success';
-
-  return (
-    <article className="border-border bg-surface/60 hover:border-primary-500/45 rounded-sm border p-4 transition-colors">
-      <RiskBadge label={riskLabel} className="mb-2 px-2 py-0.5" />
-      <h3 className="text-foreground line-clamp-2 text-[1.45rem] leading-tight font-semibold tracking-tight">
-        {title}
-      </h3>
-      <p className="mt-3 text-lg font-semibold">
-        <span className="text-body/85">Score </span>
-        <span className={scoreClass}>{score}</span>
-      </p>
-    </article>
+  const entities = data.entities?.filter(
+    (e): e is string => typeof e === 'string' && e.trim().length > 0
   );
+  if (entities?.length) {
+    const max = 5;
+    const head = entities.slice(0, max).join(', ');
+    items.push(
+      entities.length > max
+        ? `Named parties include ${head} and ${entities.length - max} others—useful for attribution, screening, and coordinated response.`
+        : `Named parties include ${head}—useful for attribution, screening, and coordinated response.`
+    );
+  }
+
+  const sec = data.secondary_category?.trim();
+  if (sec) {
+    items.push(
+      `Secondary classification (${sec}) narrows how this signal is grouped with related cases and follow-up.`
+    );
+  } else if (data.category?.trim() && data.category.trim() !== 'Other') {
+    items.push(
+      `Filed under “${data.category.trim()}” so it can be compared with similar signals in your feed.`
+    );
+  }
+
+  return items;
 }
+
+// function inferTrendLabel(riskLevel: string): string {
+//   const risk = riskLevel.toUpperCase();
+//   if (risk === 'HIGH') return 'Rising';
+//   if (risk === 'MEDIUM') return 'Watch';
+//   if (risk === 'LOW') return 'Stable';
+//   return 'Unknown';
+// }
+
+// function buildRelatedSignals(): RelatedSignal[] {
+//   return [
+//     {
+//       title: 'Crypto Romance Scams Targeting Older Adults',
+//       score: '18',
+//       riskLabel: 'HIGH',
+//     },
+//     {
+//       title: 'AI-Generated Deepfake Investment Scams Rising',
+//       score: '17',
+//       riskLabel: 'HIGH',
+//     },
+//     {
+//       title: 'Business Email Compromise Campaigns Increase',
+//       score: '14',
+//       riskLabel: 'MEDIUM',
+//     },
+//   ];
+// }
+
+// function RelatedCard({
+//   title,
+//   score,
+//   riskLabel,
+// }: {
+//   title: string;
+//   score: string;
+//   riskLabel: string;
+// }) {
+//   const scoreClass =
+//     riskLabel === 'HIGH'
+//       ? 'text-danger'
+//       : riskLabel === 'MEDIUM'
+//         ? 'text-warning'
+//         : 'text-success';
+//
+//   return (
+//     <article className="border-border bg-surface/60 hover:border-primary-500/45 rounded-sm border p-4 transition-colors">
+//       <RiskBadge label={riskLabel} className="mb-2 px-2 py-0.5" />
+//       <h3 className="text-foreground line-clamp-2 text-[1.45rem] leading-tight font-semibold tracking-tight">
+//         {title}
+//       </h3>
+//       <p className="mt-3 text-lg font-semibold">
+//         <span className="text-body/85">Score </span>
+//         <span className={scoreClass}>{score}</span>
+//       </p>
+//     </article>
+//   );
+// }
 
 export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
   if (!alertId) {
@@ -175,31 +207,36 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
       label: sourceLabel,
       href: data.source_url || '#',
     },
-    { type: 'Supporting Source', label: 'DOJ Press Release', href: '#' },
-    { type: 'Supporting Source', label: 'FTC Consumer Alert - Crypto Scams', href: '#' },
+    // { type: 'Supporting Source', label: 'DOJ Press Release', href: '#' },
+    // { type: 'Supporting Source', label: 'FTC Consumer Alert - Crypto Scams', href: '#' },
   ];
 
-  const timeline = [
-    {
-      period: data.published_at ? formatAlertDate(data.published_at).split(' — ')[0] : '—',
-      event: data.title,
-    },
-    {
-      period: data.processed_at ? formatAlertDate(data.processed_at).split(' — ')[0] : '—',
-      event: 'Alert processed and published in intelligence feed',
-    },
-    { period: 'Ongoing', event: 'Monitoring continues as the situation develops' },
-  ];
+  // const timeline = [
+  //   {
+  //     period: data.published_at ? formatAlertDate(data.published_at).split(' — ')[0] : '—',
+  //     event: data.title,
+  //   },
+  //   {
+  //     period: data.processed_at ? formatAlertDate(data.processed_at).split(' — ')[0] : '—',
+  //     event: 'Alert processed and published in intelligence feed',
+  //   },
+  //   { period: 'Ongoing', event: 'Monitoring continues as the situation develops' },
+  // ];
 
-  const whyThisMatters = [
-    `${riskLabel} risk signal with score ${data.signal_score ?? '—'} indicates elevated threat potential.`,
-    `Category: ${data.category}${data.secondary_category ? ` / ${data.secondary_category}` : ''}.`,
-    data.entities?.length
-      ? `${data.entities.length} named entities identified in this alert.`
-      : 'Entity-level attribution is not available in this alert.',
-  ];
+  // const whyThisMatters = [
+  //   `${riskLabel} risk signal with score ${data.signal_score ?? '—'} indicates elevated threat potential.`,
+  //   `Category: ${data.category}${data.secondary_category ? ` / ${data.secondary_category}` : ''}.`,
+  //   data.entities?.length
+  //     ? `${data.entities.length} named entities identified in this alert.`
+  //     : 'Entity-level attribution is not available in this alert.',
+  // ];
 
-  const relatedSignals = buildRelatedSignals();
+  const victimCountLabel = pickVictimCount(data.summary);
+  const geographicScope = inferScopeFromTitle(data.title);
+  const affectedLabel = typeof data.affected === 'string' ? data.affected.trim() : '';
+  const whyThisMattersLines = buildWhyThisMattersLines(data);
+
+  // const relatedSignals = buildRelatedSignals();
 
   return (
     <div className="bg-background text-foreground min-h-screen px-6 py-8">
@@ -244,10 +281,16 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
             <Clock3 className="text-warning/90 size-4" aria-hidden="true" />
             Updated: {updatedRelative}
           </span>
-          <span className="inline-flex items-center gap-2">
+          {/* <span className="inline-flex items-center gap-2">
             <Users className="text-body/80 size-4" aria-hidden="true" />
             Affected: Not specified
-          </span>
+          </span> */}
+          {affectedLabel ? (
+            <span className="inline-flex items-center gap-2">
+              <Users className="text-body/80 size-4" aria-hidden="true" />
+              Affected: {affectedLabel}
+            </span>
+          ) : null}
         </div>
       </header>
 
@@ -260,21 +303,23 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
         </div>
       </section>
 
-      <section className="mb-6">
-        <div className="border-border bg-surface/55 rounded-sm border px-5 py-4">
-          <h2 className="text-muted mb-2 text-sm font-semibold tracking-[0.12em] uppercase">
-            Why This Matters
-          </h2>
-          <ul className="space-y-2">
-            {whyThisMatters.map(item => (
-              <li key={item} className="text-body/95 flex items-start gap-3 text-lg">
-                <span className="text-danger mt-1.5 text-sm leading-none">●</span>
-                <span className="text-base leading-relaxed">{item}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </section>
+      {whyThisMattersLines.length > 0 ? (
+        <section className="mb-6">
+          <div className="border-border bg-surface/55 rounded-sm border px-5 py-4">
+            <h2 className="text-muted mb-2 text-sm font-semibold tracking-[0.12em] uppercase">
+              Why This Matters
+            </h2>
+            <ul className="space-y-2">
+              {whyThisMattersLines.map((item, i) => (
+                <li key={`why-${i}`} className="text-body/95 flex items-start gap-3 text-lg">
+                  <span className="text-danger mt-1.5 text-sm leading-none">●</span>
+                  <span className="text-base leading-relaxed">{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      ) : null}
 
       <section className="mb-6">
         <div className="border-border bg-surface/55 rounded-sm border px-5 py-4">
@@ -282,57 +327,64 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
             Key Intelligence
           </h2>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <article className="border-border bg-surface/60 rounded-sm border px-4 py-3">
-              <div className="text-body/90 inline-flex items-center gap-2 text-sm font-semibold">
-                <Users className="text-info size-4" aria-hidden="true" />
-                Victims Identified
-              </div>
-              <p className="text-foreground mt-1 text-2xl leading-tight font-semibold tracking-tight">
-                {pickVictimCount(data.summary)}
-              </p>
-            </article>
+            {victimCountLabel != null ? (
+              <article className="border-border bg-surface/60 rounded-sm border px-4 py-3">
+                <div className="text-body/90 inline-flex items-center gap-2 text-sm font-semibold">
+                  <Users className="text-info size-4" aria-hidden="true" />
+                  Victims Identified
+                </div>
+                <p className="text-foreground mt-1 text-2xl leading-tight font-semibold tracking-tight">
+                  {victimCountLabel}
+                </p>
+              </article>
+            ) : null}
+            {/* <article>...</article> always rendered pickVictimCount; displayed empty / Not specified when unmatched */}
 
-            <article className="border-border bg-surface/60 rounded-sm border px-4 py-3">
-              <div className="text-body/90 inline-flex items-center gap-2 text-sm font-semibold">
-                <MapPinned className="text-success size-4" aria-hidden="true" />
-                Geographic Scope
-              </div>
-              <p className="text-success mt-1 text-2xl leading-tight font-semibold tracking-tight">
-                {inferScopeFromTitle(data.title)}
-              </p>
-            </article>
+            {geographicScope != null ? (
+              <article className="border-border bg-surface/60 rounded-sm border px-4 py-3">
+                <div className="text-body/90 inline-flex items-center gap-2 text-sm font-semibold">
+                  <MapPinned className="text-success size-4" aria-hidden="true" />
+                  Geographic Scope
+                </div>
+                <p className="text-success mt-1 text-2xl leading-tight font-semibold tracking-tight">
+                  {geographicScope}
+                </p>
+              </article>
+            ) : null}
+            {/* inferScopeFromTitle(...) previously defaulted to Not specified */}
 
-            <article className="border-border bg-surface/60 rounded-sm border px-4 py-3">
-              <div className="text-body/90 inline-flex items-center gap-2 text-sm font-semibold">
-                <ShieldAlert className="text-warning size-4" aria-hidden="true" />
-                Fraud Type
-              </div>
-              <p className="text-foreground mt-1 text-2xl leading-tight font-semibold tracking-tight">
-                {data.category || 'Not specified'}
-              </p>
-            </article>
+            {data.category?.trim() ? (
+              <article className="border-border bg-surface/60 rounded-sm border px-4 py-3">
+                <div className="text-body/90 inline-flex items-center gap-2 text-sm font-semibold">
+                  <ShieldAlert className="text-warning size-4" aria-hidden="true" />
+                  Fraud Type
+                </div>
+                <p className="text-foreground mt-1 text-2xl leading-tight font-semibold tracking-tight">
+                  {data.category}
+                  {/* data.category || 'Not specified' */}
+                </p>
+              </article>
+            ) : null}
 
-            <article className="border-border bg-surface/60 rounded-sm border px-4 py-3">
-              <div className="text-body/90 inline-flex items-center gap-2 text-sm font-semibold">
-                <MessageSquare className="text-info size-4" aria-hidden="true" />
-                Primary Channels
-              </div>
-              <p className="text-info mt-1 text-2xl leading-tight font-semibold tracking-tight">
-                {data.secondary_category || 'Not specified'}
-              </p>
-            </article>
+            {data.secondary_category?.trim() ? (
+              <article className="border-border bg-surface/60 rounded-sm border px-4 py-3">
+                <div className="text-body/90 inline-flex items-center gap-2 text-sm font-semibold">
+                  <MessageSquare className="text-info size-4" aria-hidden="true" />
+                  Primary Channels
+                </div>
+                <p className="text-info mt-1 text-2xl leading-tight font-semibold tracking-tight">
+                  {data.secondary_category}
+                  {/* secondary_category || 'Not specified' */}
+                </p>
+              </article>
+            ) : null}
 
-            <article className="border-border bg-surface/60 rounded-sm border px-4 py-3">
-              <div className="text-body/90 inline-flex items-center gap-2 text-sm font-semibold">
-                <UserX className="text-danger size-4" aria-hidden="true" />
-                Victim Awareness
-              </div>
-              <p className="text-danger mt-1 text-2xl leading-tight font-semibold tracking-tight">
-                Not specified
-              </p>
-            </article>
+            {/* <article>Victim Awareness — Not specified (no field on AlertApiRecord yet)
+              <UserX />
+            </article> */}
 
-            <article className="border-border bg-surface/60 rounded-sm border px-4 py-3">
+            {/* Dummy trend label (inferTrendLabel(risk)); restore when API provides trend */}
+            {/* <article className="border-border bg-surface/60 rounded-sm border px-4 py-3">
               <div className="text-body/90 inline-flex items-center gap-2 text-sm font-semibold">
                 <TrendingUp className="text-danger size-4" aria-hidden="true" />
                 Trend
@@ -340,7 +392,7 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
               <p className="text-foreground mt-1 text-2xl leading-tight font-semibold tracking-tight">
                 {inferTrendLabel(riskLabel)}
               </p>
-            </article>
+            </article> */}
           </div>
         </div>
       </section>
@@ -357,13 +409,15 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
                 {riskLabel}
               </p>
             </div>
-            <p className="text-body/95 text-[1.02rem] leading-relaxed">
+            {/* <p className="text-body/95 text-[1.02rem] leading-relaxed">{data.summary}</p> */}
+            <p className="text-body/95 text-[1.02rem] leading-relaxed line-clamp-2">
               {data.summary}
             </p>
           </div>
         </div>
       </section>
 
+      {/* Dummy static actionable tips — restore when sourced from API
       <section className="mb-6">
         <div className="border-border bg-surface/55 rounded-sm border px-5 py-4">
           <h2 className="text-muted mb-3 text-sm font-semibold tracking-[0.12em] uppercase">
@@ -391,6 +445,7 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
           </div>
         </div>
       </section>
+      */}
 
       <section className="mb-6">
         <div className="border-border bg-surface/55 rounded-sm border px-5 py-4">
@@ -423,6 +478,7 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
         </div>
       </section>
 
+      {/* Timeline mixes API dates with placeholder events — uncomment `timeline` above when modeled in API
       <section className="mb-6">
         <div className="border-border bg-surface/55 rounded-sm border px-5 py-4">
           <h2 className="text-muted mb-3 text-sm font-semibold tracking-[0.12em] uppercase">
@@ -441,7 +497,9 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
           </ul>
         </div>
       </section>
+      */}
 
+      {/* Related Signals: no API data yet — restore when endpoint provides related alerts
       <section className="mb-6">
         <div className="border-border bg-surface/55 rounded-sm border px-5 py-4">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -469,6 +527,7 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
           </div>
         </div>
       </section>
+      */}
     </div>
   );
 }

@@ -11,6 +11,8 @@ export type AlertApiRecord = {
   processed_at?: string;
   secondary_category?: string | null;
   entities?: string[];
+  /** When present, shown in the header “Affected” line; omitted from API until backend supplies it. */
+  affected?: string | null;
 };
 
 export type AlertsListResponse = {
