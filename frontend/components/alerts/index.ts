@@ -4,3 +4,4 @@ export { AlertTable } from './AlertTable';
 export { Badge } from './Badge';
 export { FilterDropdown } from './FilterDropdown';
 export { Pagination } from './Pagination';
+export { RiskBadge } from './RiskBadge';
