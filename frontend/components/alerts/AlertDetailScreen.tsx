@@ -6,7 +6,7 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { useAlertDetailQuery } from '@/hooks';
 import { confidenceLabelFromRisk, formatRiskLevelLabel } from '@/lib/alertDisplay';
 import { alertsListHrefFromReturnParam } from '@/lib/alertsUrlState';
-import { formatRelativeTime } from '@/lib/formatAlertDate';
+import { formatAlertDatePublished } from '@/lib/formatAlertDate';
 import type { HttpRequestError } from '@/lib/api/client';
 import type { AlertApiRecord } from '@/types/alertsApi';
 import { RiskBadge } from './RiskBadge';
@@ -207,7 +207,7 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
   const riskLabel = formatRiskLevelLabel(data.risk_level);
   const confidence = confidenceLabelFromRisk(riskLabel);
   const updatedAt = data.processed_at ?? data.published_at;
-  const updatedRelative = updatedAt ? formatRelativeTime(updatedAt) : '—';
+  const updatedLabel = updatedAt ? formatAlertDatePublished(updatedAt) : '—';
   const sourceLabel = data.source_name || 'Unknown';
 
   const sources: SourceRow[] = [
@@ -288,7 +288,7 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
           </span>
           <span className="inline-flex items-center gap-2">
             <Clock3 className="text-warning/90 size-4" aria-hidden="true" />
-            Updated: {updatedRelative}
+            Updated: {updatedLabel}
           </span>
           {/* <span className="inline-flex items-center gap-2">
             <Users className="text-body/80 size-4" aria-hidden="true" />
