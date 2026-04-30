@@ -1,3 +1,4 @@
+import { ComingSoon } from '@/components';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -6,13 +7,9 @@ export const metadata: Metadata = {
 
 export default function SettingsPage() {
   return (
-    <div className="space-y-4">
-      <h1 className="font-heading text-foreground text-2xl font-semibold tracking-tight">
-        Settings
-      </h1>
-      <p className="text-muted text-sm">
-        Workspace settings will appear here.
-      </p>
-    </div>
+    <ComingSoon
+      title="Settings (Coming Soon)"
+      description="Customize alert preferences, risk thresholds, and intelligence feeds."
+    />
   );
 }
