@@ -15,7 +15,7 @@ import type { FC } from 'react';
 const nav = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/alerts', label: 'Alerts', icon: MonitorDot },
-  { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/settings', label: 'Settings (Coming Soon)', icon: Settings },
 ] as const;
 
 export type SidebarProps = {

@@ -1,5 +1,6 @@
 export { default as Avatar } from './ui/Avatar/Avatar';
 export { Button, buttonVariants, type ButtonProps } from './ui/button';
+export { ComingSoon, type ComingSoonProps } from './ui/ComingSoon';
 export { EmptyState, type EmptyStateProps } from './ui/EmptyState';
 export { ErrorState, type ErrorStateProps } from './ui/ErrorState';
 export { LoadingState, type LoadingStateProps } from './ui/LoadingState';

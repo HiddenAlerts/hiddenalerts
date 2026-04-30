@@ -60,7 +60,7 @@ export const DashboardScreen: FC = () => {
             leftIcon={<Zap className="size-4" aria-hidden />}
             onClick={() => router.push('/alerts')}
           >
-            Process now
+            View Alerts
           </Button>
           <Button
             type="button"
