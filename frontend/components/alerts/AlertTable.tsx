@@ -7,9 +7,14 @@ import { AlertRow } from './AlertRow';
 export type AlertTableProps = {
   alerts: AlertItem[];
   className?: string;
+  alertsListReturnQuery?: string;
 };
 
-export const AlertTable: FC<AlertTableProps> = ({ alerts, className }) => (
+export const AlertTable: FC<AlertTableProps> = ({
+  alerts,
+  className,
+  alertsListReturnQuery,
+}) => (
   <div
     className={cn(
       'bg-transparent p-0',
@@ -23,7 +28,11 @@ export const AlertTable: FC<AlertTableProps> = ({ alerts, className }) => (
     ) : (
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
         {alerts.map(alert => (
-          <AlertRow key={alert.id} alert={alert} />
+          <AlertRow
+            key={alert.id}
+            alert={alert}
+            alertsListReturnQuery={alertsListReturnQuery}
+          />
         ))}
       </div>
     )}
