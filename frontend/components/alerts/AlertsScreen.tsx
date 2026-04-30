@@ -1,18 +1,19 @@
 'use client';
 
+import { LandingLogo } from '@/components/landing/LandingLogo';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
-import { LandingLogo } from '@/components/landing/LandingLogo';
 import { ALERTS_RISK_FILTER_OPTIONS } from '@/data/alertRiskFilterOptions';
+import { API_ALERT_CATEGORY_OPTIONS } from '@/data/apiAlertCategories';
 import { useAlertsPageQuery } from '@/hooks/useAlertsPageQuery';
 import { scoreVisualTone } from '@/lib/alertDisplay';
-import { presentFeaturedSignalCopy } from '@/lib/featuredSignalPresentation';
+import { alertsListQueryParsers } from '@/lib/alertsNuqsParsers';
+import { buildAlertsListQueryString } from '@/lib/alertsUrlState';
 import { ALERTS_PAGE_SIZE } from '@/lib/api/alerts';
 import { mapApiAlertToAlertItem } from '@/lib/api/alerts';
 import type { HttpRequestError } from '@/lib/api/client';
-import { alertsListQueryParsers } from '@/lib/alertsNuqsParsers';
-import { buildAlertsListQueryString } from '@/lib/alertsUrlState';
+import { presentFeaturedSignalCopy } from '@/lib/featuredSignalPresentation';
 import { cn } from '@/lib/utils';
 import type { AlertItem } from '@/types/alert';
 import Link from 'next/link';
@@ -64,19 +65,31 @@ function formatRelativeLastUpdated(updatedAtMs: number, nowMs: number): string {
 }
 
 export const AlertsScreen: FC = () => {
-  const [{ risk: riskFilter, page }, setAlertsListQuery] = useQueryStates(
-    alertsListQueryParsers,
-    {
-      history: 'replace',
-      scroll: false,
-    },
-  );
+  const [
+    { risk: riskFilter, category: categoryFilter, page },
+    setAlertsListQuery,
+  ] = useQueryStates(alertsListQueryParsers, {
+    history: 'replace',
+    scroll: false,
+  });
   const [earlyAccessOpen, setEarlyAccessOpen] = useState(false);
 
-  const listReturnQuery = buildAlertsListQueryString(riskFilter, page);
+  const listReturnQuery = buildAlertsListQueryString(
+    riskFilter,
+    page,
+    categoryFilter,
+  );
 
-  const { data, isPending, isError, isFetching, error, refetch, dataUpdatedAt, isPlaceholderData } =
-    useAlertsPageQuery(page, riskFilter);
+  const {
+    data,
+    isPending,
+    isError,
+    isFetching,
+    error,
+    refetch,
+    dataUpdatedAt,
+    isPlaceholderData,
+  } = useAlertsPageQuery(page, riskFilter, categoryFilter);
 
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -92,13 +105,15 @@ export const AlertsScreen: FC = () => {
   );
 
   const hasNextPage =
-    !isPlaceholderData &&
-    (data?.alerts.length ?? 0) === ALERTS_PAGE_SIZE;
+    !isPlaceholderData && (data?.alerts.length ?? 0) === ALERTS_PAGE_SIZE;
 
   useEffect(() => {
     if (isError || isPending || isPlaceholderData) return;
     if ((data?.alerts.length ?? 0) === 0 && page > 1) {
-      void setAlertsListQuery({ page: 1 }, { history: 'replace', scroll: false });
+      void setAlertsListQuery(
+        { page: 1 },
+        { history: 'replace', scroll: false },
+      );
     }
   }, [
     data?.alerts.length,
@@ -112,8 +127,7 @@ export const AlertsScreen: FC = () => {
   const featuredSignal = useMemo(() => selectFeaturedSignal(alerts), [alerts]);
 
   const featuredDisplay = useMemo(
-    () =>
-      featuredSignal ? presentFeaturedSignalCopy(featuredSignal) : null,
+    () => (featuredSignal ? presentFeaturedSignalCopy(featuredSignal) : null),
     [featuredSignal],
   );
 
@@ -150,7 +164,7 @@ export const AlertsScreen: FC = () => {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Link
           href="/dashboard"
-          className="text-foreground focus-visible:ring-primary-500 inline-flex min-w-0 max-w-full shrink-0 items-center rounded-md focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+          className="text-foreground focus-visible:ring-primary-500 inline-flex max-w-full min-w-0 shrink-0 items-center rounded-md focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
         >
           <LandingLogo
             iconClassName="bg-primary-500/15 text-primary-500 inline-flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md p-0.5"
@@ -248,7 +262,7 @@ export const AlertsScreen: FC = () => {
       ) : (
         <>
           {featuredSignal ? (
-            <article className="border-danger/60 from-danger/14 via-primary-900/30 to-surface/70 relative rounded-xl border-2 bg-gradient-to-r px-5 py-5 shadow-lg shadow-danger/15 ring-1 ring-danger/25">
+            <article className="border-danger/60 from-danger/14 via-primary-900/30 to-surface/70 shadow-danger/15 ring-danger/25 relative rounded-xl border-2 bg-gradient-to-r px-5 py-5 shadow-lg ring-1">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1">
                   <div className="mb-2 flex items-center gap-2.5">
@@ -299,7 +313,7 @@ export const AlertsScreen: FC = () => {
           ) : null}
 
           <section className="space-y-3">
-            <div className="border-border bg-surface/30 flex flex-col gap-3 rounded-lg border p-3">
+            <div className="border-border bg-surface/30 flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-2">
                 {ALERTS_RISK_FILTER_OPTIONS.map(opt => {
                   const selected = riskFilter === opt.value;
@@ -325,6 +339,31 @@ export const AlertsScreen: FC = () => {
                   );
                 })}
               </div>
+              <div className="flex min-w-0 flex-col gap-1 sm:max-w-[min(100%,20rem)] sm:flex-none">
+                <select
+                  id="alerts-category-filter"
+                  value={categoryFilter}
+                  onChange={e =>
+                    void setAlertsListQuery(
+                      {
+                        category: e.target.value as typeof categoryFilter,
+                        page: 1,
+                      },
+                      { history: 'replace', scroll: false },
+                    )
+                  }
+                  className={cn(
+                    'border-border bg-surface text-foreground focus-visible:ring-primary-500 w-full cursor-pointer rounded-md border px-3 py-2 text-sm font-medium',
+                    'focus-visible:ring-offset-background shadow-inner outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
+                  )}
+                >
+                  {API_ALERT_CATEGORY_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div
@@ -336,7 +375,7 @@ export const AlertsScreen: FC = () => {
               {alerts.length === 0 ? (
                 <EmptyState
                   title="No alerts"
-                  description="There are no alerts for this filter on this page. Try another risk level or go to the previous page."
+                  description="There are no alerts for this risk level or category on this page. Try another filter or go to the previous page."
                 />
               ) : gridAlerts.length === 0 ? (
                 <EmptyState
