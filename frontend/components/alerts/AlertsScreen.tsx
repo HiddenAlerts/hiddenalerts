@@ -1,20 +1,24 @@
 'use client';
 
+import { LandingLogo } from '@/components/landing/LandingLogo';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
-import { LandingLogo } from '@/components/landing/LandingLogo';
+import { ALERTS_RISK_FILTER_OPTIONS } from '@/data/alertRiskFilterOptions';
 import { API_ALERT_CATEGORY_OPTIONS } from '@/data/apiAlertCategories';
 import { useAlertsPageQuery } from '@/hooks/useAlertsPageQuery';
 import { scoreVisualTone } from '@/lib/alertDisplay';
-import { presentFeaturedSignalCopy } from '@/lib/featuredSignalPresentation';
+import { alertsListQueryParsers } from '@/lib/alertsNuqsParsers';
+import { buildAlertsListQueryString } from '@/lib/alertsUrlState';
 import { ALERTS_PAGE_SIZE } from '@/lib/api/alerts';
 import { mapApiAlertToAlertItem } from '@/lib/api/alerts';
 import type { HttpRequestError } from '@/lib/api/client';
+import { presentFeaturedSignalCopy } from '@/lib/featuredSignalPresentation';
 import { cn } from '@/lib/utils';
 import type { AlertItem } from '@/types/alert';
 import Link from 'next/link';
-import { type FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { useQueryStates } from 'nuqs';
+import { type FC, useEffect, useMemo, useState } from 'react';
 
 import { AlertTable } from './AlertTable';
 import { EarlyAccessModal } from './EarlyAccessModal';
@@ -61,12 +65,31 @@ function formatRelativeLastUpdated(updatedAtMs: number, nowMs: number): string {
 }
 
 export const AlertsScreen: FC = () => {
-  const [category, setCategory] = useState('all');
-  const [page, setPage] = useState(1);
+  const [
+    { risk: riskFilter, category: categoryFilter, page },
+    setAlertsListQuery,
+  ] = useQueryStates(alertsListQueryParsers, {
+    history: 'replace',
+    scroll: false,
+  });
   const [earlyAccessOpen, setEarlyAccessOpen] = useState(false);
 
-  const { data, isPending, isError, isFetching, error, refetch, dataUpdatedAt } =
-    useAlertsPageQuery(page, category);
+  const listReturnQuery = buildAlertsListQueryString(
+    riskFilter,
+    page,
+    categoryFilter,
+  );
+
+  const {
+    data,
+    isPending,
+    isError,
+    isFetching,
+    error,
+    refetch,
+    dataUpdatedAt,
+    isPlaceholderData,
+  } = useAlertsPageQuery(page, riskFilter, categoryFilter);
 
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -81,13 +104,30 @@ export const AlertsScreen: FC = () => {
     [data?.alerts],
   );
 
-  const hasNextPage = (data?.alerts.length ?? 0) === ALERTS_PAGE_SIZE;
+  const hasNextPage =
+    !isPlaceholderData && (data?.alerts.length ?? 0) === ALERTS_PAGE_SIZE;
+
+  useEffect(() => {
+    if (isError || isPending || isPlaceholderData) return;
+    if ((data?.alerts.length ?? 0) === 0 && page > 1) {
+      void setAlertsListQuery(
+        { page: 1 },
+        { history: 'replace', scroll: false },
+      );
+    }
+  }, [
+    data?.alerts.length,
+    isError,
+    isPending,
+    isPlaceholderData,
+    page,
+    setAlertsListQuery,
+  ]);
 
   const featuredSignal = useMemo(() => selectFeaturedSignal(alerts), [alerts]);
 
   const featuredDisplay = useMemo(
-    () =>
-      featuredSignal ? presentFeaturedSignalCopy(featuredSignal) : null,
+    () => (featuredSignal ? presentFeaturedSignalCopy(featuredSignal) : null),
     [featuredSignal],
   );
 
@@ -119,17 +159,12 @@ export const AlertsScreen: FC = () => {
     return { highRiskCount, averageScore, activeSources };
   }, [alerts]);
 
-  const setCategoryAndResetPage = useCallback((value: string) => {
-    setCategory(value);
-    setPage(1);
-  }, []);
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Link
           href="/dashboard"
-          className="text-foreground focus-visible:ring-primary-500 inline-flex min-w-0 max-w-full shrink-0 items-center rounded-md focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+          className="text-foreground focus-visible:ring-primary-500 inline-flex max-w-full min-w-0 shrink-0 items-center rounded-md focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
         >
           <LandingLogo
             iconClassName="bg-primary-500/15 text-primary-500 inline-flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md p-0.5"
@@ -166,10 +201,15 @@ export const AlertsScreen: FC = () => {
         </div>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-muted text-xs font-semibold tracking-[0.14em] uppercase">
-          Command Bar
-        </p>
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <p className="font-heading text-foreground text-sm font-semibold tracking-tight">
+            Signal Overview
+          </p>
+          <p className="text-muted max-w-prose text-xs leading-relaxed">
+            Real-time summary of alert activity and system signals.
+          </p>
+        </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <article className="border-border bg-surface/45 rounded-lg border px-4 py-3.5">
             <p className="text-muted text-[0.67rem] font-semibold tracking-[0.15em] uppercase">
@@ -221,110 +261,145 @@ export const AlertsScreen: FC = () => {
         <LoadingState label="Loading alerts…" />
       ) : (
         <>
-          {alerts.length === 0 ? (
-            <EmptyState
-              title="No alerts"
-              description="There are no alerts for this filter on this page. Try another category or go to the previous page."
-            />
-          ) : (
-            <>
-              {featuredSignal ? (
-                <article className="border-danger/60 from-danger/14 via-primary-900/30 to-surface/70 relative rounded-xl border-2 bg-gradient-to-r px-5 py-5 shadow-lg shadow-danger/15 ring-1 ring-danger/25">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="mb-2 flex items-center gap-2.5">
-                        <span className="border-danger/80 bg-danger/30 text-danger inline-flex items-center rounded-md border px-3 py-1 text-xs font-extrabold tracking-[0.09em] uppercase">
-                          {featuredSignal.riskLevelLabel}
-                        </span>
-                        <span className="text-foreground/90 text-xs font-semibold tracking-wide uppercase">
-                          Featured Signal
-                        </span>
-                      </div>
-                      <h2 className="font-heading text-foreground line-clamp-2 text-2xl leading-tight font-bold tracking-tight sm:text-[1.65rem]">
-                        {featuredDisplay?.title ?? featuredSignal.title}
-                      </h2>
-                      <p className="text-body/95 mt-2 line-clamp-3 max-w-3xl text-sm leading-relaxed">
-                        {featuredDisplay?.description ?? featuredSignal.description}
-                      </p>
-                      {featuredSignal.sourceUrl ? (
-                        <a
-                          href={featuredSignal.sourceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-danger mt-3 inline-flex text-sm font-semibold"
-                        >
-                          View Full Signal →
-                        </a>
-                      ) : null}
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-muted/80 text-xs font-semibold tracking-[0.12em] uppercase">
-                        Score
-                      </p>
-                      <p
-                        className={cn(
-                          'mt-1 text-6xl leading-none font-bold tabular-nums',
-                          scoreTextColor[
-                            scoreVisualTone(
-                              featuredSignal.signalScore,
-                              featuredSignal.riskLevelLabel,
-                            )
-                          ],
-                        )}
-                      >
-                        {featuredSignal.signalScore ?? '—'}
-                      </p>
-                    </div>
+          {featuredSignal ? (
+            <article className="border-danger/60 from-danger/14 via-primary-900/30 to-surface/70 shadow-danger/15 ring-danger/25 relative rounded-xl border-2 bg-gradient-to-r px-5 py-5 shadow-lg ring-1">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="mb-2 flex items-center gap-2.5">
+                    <span className="border-danger/80 bg-danger/30 text-danger inline-flex items-center rounded-md border px-3 py-1 text-xs font-extrabold tracking-[0.09em] uppercase">
+                      {featuredSignal.riskLevelLabel}
+                    </span>
+                    <span className="text-foreground/90 text-xs font-semibold tracking-wide uppercase">
+                      Featured Signal
+                    </span>
                   </div>
-                </article>
-              ) : null}
-
-              <section className="space-y-3">
-                <div className="border-border bg-surface/30 flex flex-col gap-3 rounded-lg border p-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {API_ALERT_CATEGORY_OPTIONS.map(opt => {
-                      const selected = category === opt.value;
-                      return (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => setCategoryAndResetPage(opt.value)}
-                          className={cn(
-                            'cursor-pointer rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
-                            selected
-                              ? 'border-primary-500 bg-primary-500 text-white'
-                              : 'border-border bg-surface text-body hover:bg-surface-muted',
-                          )}
-                        >
-                          {opt.label}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <h2 className="font-heading text-foreground line-clamp-2 text-2xl leading-tight font-bold tracking-tight sm:text-[1.65rem]">
+                    {featuredDisplay?.title ?? featuredSignal.title}
+                  </h2>
+                  <p className="text-body/95 mt-2 line-clamp-3 max-w-3xl text-sm leading-relaxed">
+                    {featuredDisplay?.description ?? featuredSignal.description}
+                  </p>
+                  {featuredSignal.sourceUrl ? (
+                    <a
+                      href={featuredSignal.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-danger mt-3 inline-flex text-sm font-semibold"
+                    >
+                      View Full Signal →
+                    </a>
+                  ) : null}
                 </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-muted/80 text-xs font-semibold tracking-[0.12em] uppercase">
+                    Score
+                  </p>
+                  <p
+                    className={cn(
+                      'mt-1 text-6xl leading-none font-bold tabular-nums',
+                      scoreTextColor[
+                        scoreVisualTone(
+                          featuredSignal.signalScore,
+                          featuredSignal.riskLevelLabel,
+                        )
+                      ],
+                    )}
+                  >
+                    {featuredSignal.signalScore ?? '—'}
+                  </p>
+                </div>
+              </div>
+            </article>
+          ) : null}
 
-                <div
+          <section className="space-y-3">
+            <div className="border-border bg-surface/30 flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                {ALERTS_RISK_FILTER_OPTIONS.map(opt => {
+                  const selected = riskFilter === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() =>
+                        void setAlertsListQuery(
+                          { risk: opt.value, page: 1 },
+                          { history: 'replace', scroll: false },
+                        )
+                      }
+                      className={cn(
+                        'cursor-pointer rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+                        selected
+                          ? 'border-primary-500 bg-primary-500 text-white'
+                          : 'border-border bg-surface text-body hover:bg-surface-muted',
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex min-w-0 flex-col gap-1 sm:max-w-[min(100%,20rem)] sm:flex-none">
+                <select
+                  id="alerts-category-filter"
+                  value={categoryFilter}
+                  onChange={e =>
+                    void setAlertsListQuery(
+                      {
+                        category: e.target.value as typeof categoryFilter,
+                        page: 1,
+                      },
+                      { history: 'replace', scroll: false },
+                    )
+                  }
                   className={cn(
-                    'transition-opacity',
-                    isFetching ? 'opacity-70' : 'opacity-100',
+                    'border-border bg-surface text-foreground focus-visible:ring-primary-500 w-full cursor-pointer rounded-md border px-3 py-2 text-sm font-medium',
+                    'focus-visible:ring-offset-background shadow-inner outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
                   )}
                 >
-                  {gridAlerts.length === 0 ? (
-                    <EmptyState
-                      title="No additional signals"
-                      description="The featured signal is currently the only item on this page."
-                    />
-                  ) : (
-                    <AlertTable alerts={gridAlerts} />
-                  )}
-                </div>
-              </section>
-            </>
-          )}
+                  {API_ALERT_CATEGORY_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div
+              className={cn(
+                'transition-opacity',
+                isFetching ? 'opacity-70' : 'opacity-100',
+              )}
+            >
+              {alerts.length === 0 ? (
+                <EmptyState
+                  title="No alerts"
+                  description="There are no alerts for this risk level or category on this page. Try another filter or go to the previous page."
+                />
+              ) : gridAlerts.length === 0 ? (
+                <EmptyState
+                  title="No additional signals"
+                  description="The featured signal is currently the only item on this page."
+                />
+              ) : (
+                <AlertTable
+                  alerts={gridAlerts}
+                  alertsListReturnQuery={listReturnQuery}
+                />
+              )}
+            </div>
+          </section>
+
           {!isError && !isInitialLoading && (page > 1 || hasNextPage) ? (
             <Pagination
               page={page}
-              onPageChange={setPage}
+              onPageChange={nextPage =>
+                void setAlertsListQuery(
+                  { page: nextPage },
+                  { history: 'replace', scroll: false },
+                )
+              }
               hasNextPage={hasNextPage}
             />
           ) : null}
