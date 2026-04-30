@@ -16,6 +16,18 @@ export function formatAlertDate(iso: string) {
   return `${day} ${month} ${year} — ${time}`;
 }
 
+/** MVP-friendly published date string (local calendar), e.g. `Mar 22, 2026`. */
+export function formatAlertDatePublished(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
 export function formatRelativeTime(iso: string) {
   const date = new Date(iso);
   const ts = date.getTime();
