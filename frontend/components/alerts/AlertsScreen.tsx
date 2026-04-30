@@ -11,10 +11,13 @@ import { presentFeaturedSignalCopy } from '@/lib/featuredSignalPresentation';
 import { ALERTS_PAGE_SIZE } from '@/lib/api/alerts';
 import { mapApiAlertToAlertItem } from '@/lib/api/alerts';
 import type { HttpRequestError } from '@/lib/api/client';
+import { alertsListQueryParsers } from '@/lib/alertsNuqsParsers';
+import { buildAlertsListQueryString } from '@/lib/alertsUrlState';
 import { cn } from '@/lib/utils';
 import type { AlertItem } from '@/types/alert';
 import Link from 'next/link';
-import { type FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { useQueryStates } from 'nuqs';
+import { type FC, useEffect, useMemo, useState } from 'react';
 
 import { AlertTable } from './AlertTable';
 import { EarlyAccessModal } from './EarlyAccessModal';
@@ -61,11 +64,18 @@ function formatRelativeLastUpdated(updatedAtMs: number, nowMs: number): string {
 }
 
 export const AlertsScreen: FC = () => {
-  const [riskFilter, setRiskFilter] = useState('all');
-  const [page, setPage] = useState(1);
+  const [{ risk: riskFilter, page }, setAlertsListQuery] = useQueryStates(
+    alertsListQueryParsers,
+    {
+      history: 'replace',
+      scroll: false,
+    },
+  );
   const [earlyAccessOpen, setEarlyAccessOpen] = useState(false);
 
-  const { data, isPending, isError, isFetching, error, refetch, dataUpdatedAt } =
+  const listReturnQuery = buildAlertsListQueryString(riskFilter, page);
+
+  const { data, isPending, isError, isFetching, error, refetch, dataUpdatedAt, isPlaceholderData } =
     useAlertsPageQuery(page, riskFilter);
 
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -81,7 +91,23 @@ export const AlertsScreen: FC = () => {
     [data?.alerts],
   );
 
-  const hasNextPage = (data?.alerts.length ?? 0) === ALERTS_PAGE_SIZE;
+  const hasNextPage =
+    !isPlaceholderData &&
+    (data?.alerts.length ?? 0) === ALERTS_PAGE_SIZE;
+
+  useEffect(() => {
+    if (isError || isPending || isPlaceholderData) return;
+    if ((data?.alerts.length ?? 0) === 0 && page > 1) {
+      void setAlertsListQuery({ page: 1 }, { history: 'replace', scroll: false });
+    }
+  }, [
+    data?.alerts.length,
+    isError,
+    isPending,
+    isPlaceholderData,
+    page,
+    setAlertsListQuery,
+  ]);
 
   const featuredSignal = useMemo(() => selectFeaturedSignal(alerts), [alerts]);
 
@@ -118,11 +144,6 @@ export const AlertsScreen: FC = () => {
     );
     return { highRiskCount, averageScore, activeSources };
   }, [alerts]);
-
-  const setRiskFilterAndResetPage = useCallback((value: string) => {
-    setRiskFilter(value);
-    setPage(1);
-  }, []);
 
   return (
     <div className="space-y-6">
@@ -281,7 +302,12 @@ export const AlertsScreen: FC = () => {
                     <button
                       key={opt.value}
                       type="button"
-                      onClick={() => setRiskFilterAndResetPage(opt.value)}
+                      onClick={() =>
+                        void setAlertsListQuery(
+                          { risk: opt.value, page: 1 },
+                          { history: 'replace', scroll: false },
+                        )
+                      }
                       className={cn(
                         'cursor-pointer rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
                         selected
@@ -313,7 +339,10 @@ export const AlertsScreen: FC = () => {
                   description="The featured signal is currently the only item on this page."
                 />
               ) : (
-                <AlertTable alerts={gridAlerts} />
+                <AlertTable
+                  alerts={gridAlerts}
+                  alertsListReturnQuery={listReturnQuery}
+                />
               )}
             </div>
           </section>
@@ -321,7 +350,12 @@ export const AlertsScreen: FC = () => {
           {!isError && !isInitialLoading && (page > 1 || hasNextPage) ? (
             <Pagination
               page={page}
-              onPageChange={setPage}
+              onPageChange={nextPage =>
+                void setAlertsListQuery(
+                  { page: nextPage },
+                  { history: 'replace', scroll: false },
+                )
+              }
               hasNextPage={hasNextPage}
             />
           ) : null}

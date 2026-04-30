@@ -36,9 +36,15 @@ function formatCategoryLabel(category: string) {
 export type AlertRowProps = {
   alert: AlertItem;
   className?: string;
+  /** Pass-through of `/alerts` query (`risk`, `page`) so detail “back” restores list state */
+  alertsListReturnQuery?: string;
 };
 
-export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
+export const AlertRow: FC<AlertRowProps> = ({
+  alert,
+  className,
+  alertsListReturnQuery,
+}) => {
   const sourceShort = alert.sourceDisplayLabel ?? alert.sourceLabel;
   const summary = alert.description;
   const relativeTime = formatRelativeTime(alert.occurredAt);
@@ -64,6 +70,11 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
     'hover:-translate-y-1 hover:border-primary-500/45 hover:bg-surface/62 hover:shadow-lg hover:shadow-black/25',
     'cursor-pointer focus-visible:ring-primary-500/35 focus-visible:ring-2 focus-visible:outline-none',
   );
+
+  const detailHref =
+    alertsListReturnQuery != null && alertsListReturnQuery.length > 0
+      ? `/alerts/${alert.id}?from=${encodeURIComponent(alertsListReturnQuery)}`
+      : `/alerts/${alert.id}`;
 
   const inner = (
     <div>
@@ -125,7 +136,7 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
   );
 
   return (
-    <Link href={`/alerts/${alert.id}`} className={cn(cardSurface, className)}>
+    <Link href={detailHref} className={cn(cardSurface, className)}>
       {inner}
     </Link>
   );

@@ -5,6 +5,7 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { useAlertDetailQuery } from '@/hooks';
 import { confidenceLabelFromRisk, formatRiskLevelLabel } from '@/lib/alertDisplay';
+import { alertsListHrefFromReturnParam } from '@/lib/alertsUrlState';
 import { formatRelativeTime } from '@/lib/formatAlertDate';
 import type { HttpRequestError } from '@/lib/api/client';
 import type { AlertApiRecord } from '@/types/alertsApi';
@@ -20,6 +21,8 @@ import {
   Users,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useQueryState } from 'nuqs';
+import { useMemo } from 'react';
 
 type AlertDetailScreenProps = {
   alertId: string;
@@ -162,6 +165,12 @@ function buildWhyThisMattersLines(data: AlertApiRecord): string[] {
 // }
 
 export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
+  const [fromRaw] = useQueryState('from');
+  const alertsListHref = useMemo(
+    () => alertsListHrefFromReturnParam(fromRaw ?? null),
+    [fromRaw],
+  );
+
   if (!alertId) {
     return (
       <EmptyState
@@ -242,7 +251,7 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
     <div className="bg-background text-foreground min-h-screen px-6 py-8">
       <div className="mb-3">
         <Link
-          href="/alerts"
+          href={alertsListHref}
           className="text-muted hover:text-foreground text-sm transition-colors"
         >
           ← Back to alerts

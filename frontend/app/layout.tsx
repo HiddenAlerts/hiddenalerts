@@ -3,6 +3,7 @@ import { Figtree, Manrope } from 'next/font/google';
 
 import './globals.css';
 import { QueryProvider } from '@/lib/query';
+import { NuqsAdapter } from 'nuqs/adapters/next/app';
 import { Toaster } from 'sonner';
 
 const manrope = Manrope({
@@ -34,7 +35,9 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className={`${manrope.className} flex min-h-full flex-col`}>
-        <QueryProvider>{children}</QueryProvider>
+        <NuqsAdapter>
+          <QueryProvider>{children}</QueryProvider>
+        </NuqsAdapter>
         <Toaster />
       </body>
     </html>
