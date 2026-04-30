@@ -187,10 +187,15 @@ export const AlertsScreen: FC = () => {
         </div>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-muted text-xs font-semibold tracking-[0.14em] uppercase">
-          Command Bar
-        </p>
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <p className="font-heading text-foreground text-sm font-semibold tracking-tight">
+            Signal Overview
+          </p>
+          <p className="text-muted max-w-prose text-xs leading-relaxed">
+            Real-time summary of alert activity and system signals.
+          </p>
+        </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <article className="border-border bg-surface/45 rounded-lg border px-4 py-3.5">
             <p className="text-muted text-[0.67rem] font-semibold tracking-[0.15em] uppercase">
