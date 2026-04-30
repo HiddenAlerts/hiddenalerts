@@ -5,21 +5,21 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 export function alertsListQueryKey(args: {
   page: number;
-  category: string;
+  risk: string;
 }) {
   return ['alerts', 'list', args] as const;
 }
 
-export function useAlertsPageQuery(page: number, category: string) {
+export function useAlertsPageQuery(page: number, risk: string) {
   const offset = (page - 1) * ALERTS_PAGE_SIZE;
 
   return useQuery({
-    queryKey: alertsListQueryKey({ page, category }),
+    queryKey: alertsListQueryKey({ page, risk }),
     queryFn: () =>
       fetchAlertsPage({
         limit: ALERTS_PAGE_SIZE,
         offset,
-        ...(category !== 'all' ? { category } : {}),
+        ...(risk !== 'all' ? { risk_level: risk } : {}),
       }),
     placeholderData: keepPreviousData,
   });
