@@ -6,8 +6,9 @@ import {
   scoreVisualTone,
   truncateSignalHeadline,
 } from '@/lib/alertDisplay';
-import { formatAlertDate, formatRelativeTime } from '@/lib/formatAlertDate';
+import { formatAlertDate, formatAlertDatePublished } from '@/lib/formatAlertDate';
 import { cn } from '@/lib/utils';
+import { HoverTip } from '@/components/ui/HoverTip';
 import type { AlertItem } from '@/types/alert';
 import Link from 'next/link';
 import type { FC } from 'react';
@@ -36,13 +37,19 @@ function formatCategoryLabel(category: string) {
 export type AlertRowProps = {
   alert: AlertItem;
   className?: string;
+  /** Pass-through of `/alerts` query (`risk`, `page`) so detail “back” restores list state */
+  alertsListReturnQuery?: string;
 };
 
-export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
+export const AlertRow: FC<AlertRowProps> = ({
+  alert,
+  className,
+  alertsListReturnQuery,
+}) => {
   const sourceShort = alert.sourceDisplayLabel ?? alert.sourceLabel;
   const summary = alert.description;
-  const relativeTime = formatRelativeTime(alert.occurredAt);
-  const absoluteTime = formatAlertDate(alert.occurredAt);
+  const publishedLabel = formatAlertDatePublished(alert.occurredAt);
+  const publishedTooltip = formatAlertDate(alert.occurredAt);
   const headline = truncateSignalHeadline(alert.title, 10);
   const confidence = confidenceLabelFromRisk(alert.riskLevelLabel);
   const categoryLabel = formatCategoryLabel(alert.category);
@@ -51,7 +58,7 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
 
   const metadataLine = [
     sourceShort,
-    relativeTime,
+    publishedLabel,
     categoryLabel,
     `Confidence ${confidence}`,
   ].join(' • ');
@@ -65,18 +72,22 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
     'cursor-pointer focus-visible:ring-primary-500/35 focus-visible:ring-2 focus-visible:outline-none',
   );
 
+  const detailHref =
+    alertsListReturnQuery != null && alertsListReturnQuery.length > 0
+      ? `/alerts/${alert.id}?from=${encodeURIComponent(alertsListReturnQuery)}`
+      : `/alerts/${alert.id}`;
+
   const inner = (
     <div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_112px] sm:gap-6">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2.5">
             <RiskBadge label={alert.riskLevelLabel} />
-            <span
-              className="text-body text-sm font-medium"
-              title={absoluteTime}
-            >
-              {relativeTime}
-            </span>
+            <HoverTip label={publishedTooltip} className="shrink-0">
+              <span className="text-body text-sm font-medium">
+                {publishedLabel}
+              </span>
+            </HoverTip>
           </div>
 
           <h2 className="font-heading text-foreground mt-3 line-clamp-2 text-lg leading-snug font-semibold tracking-tight sm:text-[1.1rem]">
@@ -106,12 +117,13 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
       </div>
 
       <div className="border-border/70 mt-3 flex items-center justify-between gap-4 border-t pt-3">
-        <p
-          className="text-body min-w-0 flex-1 truncate text-sm leading-relaxed tracking-[0.01em]"
-          title={metadataLine}
+        <HoverTip
+          label={metadataLine}
+          className="text-body min-w-0 flex-1 text-sm leading-relaxed tracking-[0.01em]"
+          bubbleClassName="font-normal"
         >
-          {metadataLine}
-        </p>
+          <p className="truncate">{metadataLine}</p>
+        </HoverTip>
         <span
           className={cn(
             'shrink-0 text-[0.95rem] font-semibold whitespace-nowrap',
@@ -125,7 +137,7 @@ export const AlertRow: FC<AlertRowProps> = ({ alert, className }) => {
   );
 
   return (
-    <Link href={`/alerts/${alert.id}`} className={cn(cardSurface, className)}>
+    <Link href={detailHref} className={cn(cardSurface, className)}>
       {inner}
     </Link>
   );

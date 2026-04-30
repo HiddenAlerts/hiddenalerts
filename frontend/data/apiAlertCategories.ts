@@ -1,10 +1,12 @@
-/** Category filter values for `/api/alerts` (exact match). */
 export const API_ALERT_CATEGORY_OPTIONS = [
-  { value: 'all', label: 'All categories' },
-  { value: 'Consumer Scam', label: 'Consumer Scam' },
-  { value: 'Cryptocurrency Fraud', label: 'Cryptocurrency Fraud' },
+  { value: 'all', label: 'All Categories' },
   { value: 'Cybercrime', label: 'Cybercrime' },
-  { value: 'Investment Fraud', label: 'Investment Fraud' },
   { value: 'Money Laundering', label: 'Money Laundering' },
+  { value: 'Consumer Scam', label: 'Consumer Scam' },
+  { value: 'Investment Fraud', label: 'Investment Fraud' },
+  { value: 'Cryptocurrency Fraud', label: 'Cryptocurrency Fraud' },
   { value: 'Other', label: 'Other' },
 ] as const;
+
+export type AlertsCategoryFilterValue =
+  (typeof API_ALERT_CATEGORY_OPTIONS)[number]['value'];
