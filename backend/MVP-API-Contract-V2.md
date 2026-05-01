@@ -20,7 +20,10 @@ Both admin and subscriber surfaces authenticate through the same backend. Token 
 ---
 
 ## Table of Contents
-0. [**Public Feed — Current Frontend MVP Endpoint**](#0-public-feed--current-frontend-mvp-endpoint)
+0. [**Public Feed — Current Frontend MVP Endpoints**](#0-public-feed--current-frontend-mvp-endpoints)
+   - [GET /api/alerts](#01-get-apialerts--published-alert-list)
+   - [GET /api/alerts/{id}](#02-get-apialertsid--published-alert-detail-new)
+   - [GET /api/alerts/stats](#03-get-apialertsstats--published-alert-stats-new)
 1. [Authentication Overview](#1-authentication-overview)
 2. [Auth Endpoints](#2-auth-endpoints)
 3. [Alerts — Admin](#3-alerts--admin)
@@ -38,16 +41,14 @@ Both admin and subscriber surfaces authenticate through the same backend. Token 
 
 ## 0. Public Feed
 
-> **Hasnain: This is the only endpoint you need for the current phase as per Ken's MVP plan.**
+> **Hasnain: Use the three endpoints below for the current frontend MVP phase.**  
+> No authentication required on any of them. All return published (admin-approved) alerts only.
 
-```
-GET /api/alerts
-```
-
-**No authentication required.** Returns only published (admin-approved) alerts.  
 Base URL: `http://localhost:8000/api/alerts` (local) / `https://hiddenalerts.com/api/alerts` (prod)
 
-### Response Shape
+---
+
+### 0.1 GET /api/alerts — Published Alert List
 
 ```json
 {
@@ -110,6 +111,115 @@ curl "http://localhost:8000/api/alerts?limit=10&offset=0"
 - Do NOT use `/api/v1/alerts` or `/api/v1/client/alerts` for this phase — those require auth.
 - `risk_level` values are lowercase: `"low"`, `"medium"`, `"high"` — capitalise in the UI.
 - Category values: `Investment Fraud`, `Cybercrime`, `Consumer Scam`, `Money Laundering`, `Cryptocurrency Fraud`.
+
+---
+
+### 0.2 GET /api/alerts/{id} — Published Alert Detail
+
+```
+GET /api/alerts/{id}
+```
+
+**No authentication required.**  
+Returns the full public detail for a single published alert.  
+Returns `404` if the alert does not exist **or** is not yet published.
+
+**Response `200 OK`:**
+```json
+{
+  "id": 42,
+  "title": "SEC Charges Investment Firm with $4.2M Fraud",
+  "summary": "The SEC charged a New York-based firm with defrauding investors...",
+  "category": "Investment Fraud",
+  "secondary_category": "Wire Fraud",
+  "risk_level": "high",
+  "signal_score": 19,
+  "source_name": "SEC Press Releases",
+  "source_url": "https://sec.gov/news/press-release/...",
+  "published_at": "2026-04-22T10:30:01Z",
+  "processed_at": "2026-04-22T10:15:00Z",
+  "entities": ["SEC", "New York-based Firm"]
+}
+```
+
+**Field Reference:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `int` | Unique alert ID |
+| `title` | `string\|null` | Article/press release title |
+| `summary` | `string\|null` | AI-generated summary |
+| `category` | `string\|null` | Primary fraud category |
+| `secondary_category` | `string\|null` | Secondary classification (if any) |
+| `risk_level` | `string\|null` | `"low"`, `"medium"`, or `"high"` |
+| `signal_score` | `int\|null` | Composite risk score (1–25) |
+| `source_name` | `string\|null` | Name of the originating source |
+| `source_url` | `string\|null` | Direct link to the original article |
+| `published_at` | `datetime\|null` | ISO 8601 UTC — when admin published it |
+| `processed_at` | `datetime\|null` | ISO 8601 UTC — when AI processed it |
+| `entities` | `string[]` | Named entities extracted by AI (flat list) |
+
+**NOT returned** (intentionally excluded): score breakdowns, review history, moderation state, `is_published`, `is_relevant`, `entities_json`, `ai_model`, `matched_keywords`.
+
+**Errors:**
+| Code | Reason |
+|------|--------|
+| `404` | Alert not found or not published |
+
+**Quick Test:**
+```bash
+curl http://localhost:8000/api/alerts/42
+```
+
+---
+
+### 0.3 GET /api/alerts/stats — Published Alert Stats *(NEW)*
+
+```
+GET /api/alerts/stats
+```
+
+**No authentication required.**  
+Returns aggregate counts for published alerts only. Use this to drive a summary dashboard panel or stats section.
+
+**Response `200 OK`:**
+```json
+{
+  "total_alerts": 42,
+  "high_count": 8,
+  "medium_count": 25,
+  "low_count": 9,
+  "category_breakdown": [
+    { "category": "Investment Fraud", "count": 12 },
+    { "category": "Cybercrime", "count": 10 },
+    { "category": "Consumer Scam", "count": 8 },
+    { "category": "Money Laundering", "count": 7 },
+    { "category": "Cryptocurrency Fraud", "count": 5 }
+  ]
+}
+```
+
+**Field Reference:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total_alerts` | `int` | Total number of published alerts |
+| `high_count` | `int` | Published alerts with `risk_level = "high"` |
+| `medium_count` | `int` | Published alerts with `risk_level = "medium"` |
+| `low_count` | `int` | Published alerts with `risk_level = "low"` |
+| `category_breakdown` | `array` | Per-category counts, ordered by count descending |
+| `category_breakdown[].category` | `string` | Fraud category name |
+| `category_breakdown[].count` | `int` | Number of published alerts in that category |
+
+**Notes:**
+- All aggregates are derived exclusively from published alerts. Unpublished alerts are never counted.
+- Alerts with no `primary_category` are counted in `total_alerts` but excluded from `category_breakdown`.
+- When no alerts are published, all counts are `0` and `category_breakdown` is `[]`.
+
+**Quick Test:**
+```bash
+curl http://localhost:8000/api/alerts/stats
+```
 
 ---
 
@@ -797,6 +907,9 @@ These are **not JSON API routes** — they return HTML pages rendered with Jinja
 |----------|---------|-------------|---------|
 | `POST /api/v1/auth/login` | ✅ | ✅ | ✅ |
 | `GET /api/v1/auth/me` | ✅ | ✅ | ❌ 401 |
+| `GET /api/alerts` | ✅ | ✅ | ✅ |
+| `GET /api/alerts/{id}` | ✅ | ✅ | ✅ |
+| `GET /api/alerts/stats` | ✅ | ✅ | ✅ |
 | `POST /api/v1/auth/change-password` | ✅ | ✅ | ❌ 401 |
 | `GET /api/v1/alerts` | ✅ | ✅ | ❌ 401 |
 | `GET /api/v1/alerts/{id}` | ✅ | ✅ | ❌ 401 |
