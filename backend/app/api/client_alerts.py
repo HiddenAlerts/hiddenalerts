@@ -37,9 +37,11 @@ router = APIRouter(prefix="/client", tags=["client"])
 def _to_client_read(alert: ProcessedAlert) -> ClientAlertRead:
     """Map ORM ProcessedAlert to ClientAlertRead (same join pattern as _alert_to_read)."""
     title = source_name = item_url = None
+    source_published_at = None
     if alert.raw_item:
         title = alert.raw_item.title
         item_url = alert.raw_item.item_url
+        source_published_at = alert.raw_item.published_at
         if alert.raw_item.source:
             source_name = alert.raw_item.source.name
 
@@ -53,6 +55,7 @@ def _to_client_read(alert: ProcessedAlert) -> ClientAlertRead:
         signal_score_total=alert.signal_score_total,
         summary=alert.summary,
         processed_at=alert.processed_at,
+        source_published_at=source_published_at,
         published_at=alert.published_at,
         matched_keywords=alert.matched_keywords,
     )

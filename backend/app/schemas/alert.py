@@ -26,6 +26,10 @@ class ProcessedAlertRead(BaseModel):
     matched_keywords: list[str] | None
     is_relevant: bool
     processed_at: datetime
+    # Original source/press-release publication date (parsed from RSS pubDate or
+    # listing page). Distinct from `published_at` which is when an admin published
+    # the alert on this platform.
+    source_published_at: datetime | None = None
     # Publication state (M3)
     is_published: bool = False
     published_at: datetime | None = None
@@ -116,6 +120,8 @@ class ClientAlertRead(BaseModel):
     signal_score_total: int | None
     summary: str | None = None
     processed_at: datetime
+    # Original source/press-release publication date.
+    source_published_at: datetime | None = None
     published_at: datetime | None = None
     matched_keywords: list[str] | None = None
 
@@ -149,6 +155,9 @@ class PublicAlertRead(BaseModel):
     signal_score: int | None = None
     source_name: str | None = None
     source_url: str | None = None
+    # Original source/press-release publication date — what to display on the
+    # frontend feed. Falls back to null when the source did not provide a date.
+    source_published_at: datetime | None = None
     published_at: datetime | None = None
 
 
