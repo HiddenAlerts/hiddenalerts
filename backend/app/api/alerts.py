@@ -69,10 +69,12 @@ def _alert_to_read(alert: ProcessedAlert) -> ProcessedAlertRead:
     title = None
     source_name = None
     item_url = None
+    source_published_at = None
 
     if alert.raw_item:
         title = alert.raw_item.title
         item_url = alert.raw_item.item_url
+        source_published_at = alert.raw_item.published_at
         if alert.raw_item.source:
             source_name = alert.raw_item.source.name
 
@@ -95,6 +97,7 @@ def _alert_to_read(alert: ProcessedAlert) -> ProcessedAlertRead:
         matched_keywords=alert.matched_keywords,
         is_relevant=alert.is_relevant,
         processed_at=alert.processed_at,
+        source_published_at=source_published_at,
         is_published=alert.is_published,
         published_at=alert.published_at,
     )

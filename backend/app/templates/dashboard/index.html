@@ -198,7 +198,13 @@
             </div>
             {% endif %}
             <div class="mt-1">
-                <small class="text-muted">{{ alert.processed_at.strftime('%b %d, %H:%M') if alert.processed_at else '' }}</small>
+                <small class="text-muted">
+                    {% if alert.source_published_at %}
+                        Published: {{ alert.source_published_at.strftime('%b %d, %Y %H:%M UTC') }}
+                    {% elif alert.processed_at %}
+                        Processed: {{ alert.processed_at.strftime('%b %d, %Y %H:%M UTC') }}
+                    {% endif %}
+                </small>
             </div>
         </div>
     </div>

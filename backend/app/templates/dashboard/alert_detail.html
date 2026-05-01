@@ -53,6 +53,9 @@
                 {% endif %}
                 <div class="mt-2">
                     <small class="text-muted">
+                        {% if alert.source_published_at %}
+                            Source published: {{ alert.source_published_at.strftime('%B %d, %Y at %H:%M UTC') }} ·
+                        {% endif %}
                         Processed: {{ alert.processed_at.strftime('%B %d, %Y at %H:%M UTC') if alert.processed_at else 'Unknown' }}
                         {% if alert.ai_model %} · AI model: {{ alert.ai_model }}{% endif %}
                     </small>

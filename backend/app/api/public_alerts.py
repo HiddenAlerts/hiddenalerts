@@ -35,9 +35,11 @@ router = APIRouter(prefix="/api/alerts", tags=["public"])
 def _to_public(alert: ProcessedAlert) -> PublicAlertRead:
     """Map ORM alert to the flat public schema."""
     title = source_name = source_url = None
+    source_published_at = None
     if alert.raw_item:
         title = alert.raw_item.title
         source_url = alert.raw_item.item_url
+        source_published_at = alert.raw_item.published_at
         if alert.raw_item.source:
             source_name = alert.raw_item.source.name
 
@@ -50,6 +52,7 @@ def _to_public(alert: ProcessedAlert) -> PublicAlertRead:
         signal_score=alert.signal_score_total,
         source_name=source_name,
         source_url=source_url,
+        source_published_at=source_published_at,
         published_at=alert.published_at,
     )
 

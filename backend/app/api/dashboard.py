@@ -195,6 +195,7 @@ async def dashboard_index(
             "signal_score_total": alert.signal_score_total,
             "matched_keywords": alert.matched_keywords or [],
             "processed_at": alert.processed_at,
+            "source_published_at": alert.raw_item.published_at if alert.raw_item else None,
             "item_url": alert.raw_item.item_url if alert.raw_item else None,
         }
 
@@ -297,6 +298,7 @@ async def dashboard_alert_detail(
         "event_title": event_title,
         "review_status": review_status,
         "processed_at": alert.processed_at,
+        "source_published_at": alert.raw_item.published_at if alert.raw_item else None,
     }
 
     msg = request.query_params.get("msg")
