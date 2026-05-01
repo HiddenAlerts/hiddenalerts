@@ -161,6 +161,23 @@ class PublicAlertRead(BaseModel):
     published_at: datetime | None = None
 
 
+class PublicAlertDetail(PublicAlertRead):
+    """Extended public alert detail — adds a few safe extra fields for the detail page/modal.
+
+    Intentionally does NOT include: review history, score breakdowns, moderation state,
+    raw entities_json, ai_model, financial_impact_estimate, victim_scale_raw, or
+    is_published / is_relevant flags.
+
+    Only returned by GET /api/alerts/{id}.
+    """
+
+    processed_at: datetime | None = None
+    secondary_category: str | None = None
+    # Flat entity list normalised from internal {"names": [...]} structure.
+    # Empty list when entities are absent or in an unexpected format.
+    entities: list[str] = []
+
+
 class PublicAlertsResponse(BaseModel):
     """Wrapper response for the public alerts feed.
 
@@ -169,3 +186,24 @@ class PublicAlertsResponse(BaseModel):
     """
 
     alerts: list[PublicAlertRead]
+
+
+class PublicCategoryBreakdown(BaseModel):
+    """Per-category count entry for the public stats endpoint."""
+
+    category: str
+    count: int
+
+
+class PublicAlertStatsResponse(BaseModel):
+    """Published-alert aggregate stats for the public frontend.
+
+    All counts are derived exclusively from published alerts.
+    No internal operational metadata is included.
+    """
+
+    total_alerts: int
+    high_count: int
+    medium_count: int
+    low_count: int
+    category_breakdown: list[PublicCategoryBreakdown]

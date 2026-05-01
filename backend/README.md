@@ -133,6 +133,7 @@ hiddenalerts/
 │   │   ├── alerts.py                   # M2: alerts + events REST API
 │   │   ├── auth.py                     # M3: JSON auth endpoints (login, me, change-password)
 │   │   ├── client_alerts.py           # M3: subscriber-safe published alert feed
+│   │   ├── public_alerts.py           # M3 Slice 4: public feed (list, detail, stats) — no auth
 │   │   └── dashboard.py               # M2: Jinja2 HTML routes (admin-only)
 │   ├── templates/                      # Jinja2 HTML templates
 │   │   ├── base.html                   # Bootstrap 5 layout + navbar
@@ -154,7 +155,8 @@ hiddenalerts/
 │   └── test_api/
 │       ├── test_health.py              # API smoke tests
 │       ├── test_auth.py                # JWT, bcrypt, login endpoint
-│       └── test_alerts_api.py          # Alerts + events REST API
+│       ├── test_alerts_api.py          # Alerts + events REST API
+│       └── test_public_alerts.py      # M3 Slice 4: public list, detail, stats — no auth
 ├── .env.example                        # All config variables with defaults
 ├── .env.production.example             # Production config template
 ├── alembic.ini
@@ -459,6 +461,14 @@ Authenticated endpoints accept either a valid `access_token` cookie **or** an `A
 | `GET` | `/api/v1/raw-items` | No | Paginated items (filter: source_id, since, is_duplicate) |
 | `GET` | `/api/v1/raw-items/{id}` | No | Full detail incl. raw_text + raw_html |
 
+### Public Feed — No Auth Required (M3 Slice 4)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/alerts` | No | Paginated published alert feed |
+| `GET` | `/api/alerts/{id}` | No | Published alert detail; 404 if unpublished |
+| `GET` | `/api/alerts/stats` | No | Published alert aggregate counts + category breakdown |
+
 ### Alerts (M2)
 
 | Method | Path | Auth | Description |
@@ -531,8 +541,9 @@ pytest tests/ -v
 | `test_health.py` | 5 | API health, sources, raw-items, stats smoke tests |
 | `test_auth.py` | 24 | Password/JWT utilities; JSON login (admin + subscriber); Bearer + cookie auth; change-password; role enforcement; inactive user; backwards compat |
 | `test_alerts_api.py` | 21 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation; publication state; approval publish; client feed access control |
+| `test_public_alerts.py` | 25 | Public list (no auth, published-only, field mapping, ordering, filters); public detail (200/404, safe fields, entity unwrapping); public stats (counts, category breakdown, null handling, empty state) |
 | `test_signal_scorer.py` | 33 | All 5 scoring factors; new M3 thresholds; boundary tests; recalibrated victim/financial buckets; realistic alert scenarios |
-| **Total** | **128** | |
+| **Total** | **153** | |
 
 ---
 
@@ -636,7 +647,8 @@ curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit
 | **M3 — Slice 1** | Role-aware auth foundation (admin/subscriber roles, Bearer token support, JSON auth endpoints) | ✅ Complete |
 | **M3 — Slice 2** | Alert publication workflow — Tier 1 auto-publish, Tier 2 admin review, subscriber-safe client feed | ✅ Complete |
 | **M3 — Slice 3** | Signal score recalibration — stricter HIGH threshold, recalibrated victim/financial buckets, re-scoring script | ✅ Complete |
-| **M3 — Slice 4** | Email alerts — HIGH immediate + MEDIUM daily digest | 🔄 Next |
-| **M3 — Slice 5** | Weekly fraud intelligence report generation | Planned |
-| **M3 — Slice 6** | Full-text search across alerts | Planned |
-| **M3 — Slice 7** | QA + VPS deployment handoff | Planned |
+| **M3 — Slice 4** | Public read-only alert detail + stats — GET /api/alerts/{id}, GET /api/alerts/stats, category breakdown | ✅ Complete |
+| **M3 — Slice 5** | Email alerts — HIGH immediate + MEDIUM daily digest | 🔄 Next |
+| **M3 — Slice 6** | Weekly fraud intelligence report generation | Planned |
+| **M3 — Slice 7** | Full-text search across alerts | Planned |
+| **M3 — Slice 8** | QA + VPS deployment handoff | Planned |
