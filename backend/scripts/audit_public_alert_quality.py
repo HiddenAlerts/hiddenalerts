@@ -23,13 +23,7 @@ from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.source import Source
 
-ALLOWED_PUBLISH_CATEGORIES = {
-    "Investment Fraud",
-    "Cybercrime",
-    "Consumer Scam",
-    "Money Laundering",
-    "Cryptocurrency Fraud",
-}
+from app.pipeline.alert_pipeline import ALLOWED_PUBLISH_CATEGORIES
 
 async def run_audit(apply: bool, ids: list[int] | None) -> None:
     async with AsyncSessionLocal() as session:
@@ -61,7 +55,7 @@ async def run_audit(apply: bool, ids: list[int] | None) -> None:
         
         # List suspicious published alerts (categories not in ALLOWED_PUBLISH_CATEGORIES)
         stmt = (
-            select(ProcessedAlert, RawItem.title, Source.name, RawItem.item_url, RawItem.fetched_at)
+            select(ProcessedAlert, RawItem.title, Source.name, RawItem.item_url, RawItem.published_at, RawItem.fetched_at)
             .join(RawItem, ProcessedAlert.raw_item_id == RawItem.id)
             .join(Source, RawItem.source_id == Source.id)
             .where(
@@ -75,14 +69,14 @@ async def run_audit(apply: bool, ids: list[int] | None) -> None:
         
         print(f"Found {len(rows)} published alerts in suspicious categories (e.g., 'Other')\n")
         
-        for alert, title, source_name, source_url, source_published_at in rows:
+        for alert, title, source_name, source_url, source_published_at, fetched_at in rows:
             print(
                 f"ID: {alert.id} | "
                 f"Category: {alert.primary_category} | "
                 f"Risk: {alert.risk_level} | "
                 f"Score: {alert.signal_score_total}\n"
                 f"Title: {title}\n"
-                f"Source: {source_name} | Published at: {source_published_at}\n"
+                f"Source: {source_name} | Published at: {source_published_at} | Fetched at: {fetched_at}\n"
                 f"Source URL: {source_url}\n"
                 f"{'-'*80}"
             )

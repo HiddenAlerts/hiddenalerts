@@ -39,6 +39,15 @@ log = logging.getLogger(__name__)
 # Maximum items to process per pipeline run (prevents unbounded DB load)
 BATCH_SIZE = 50
 
+# Categories allowed to auto-publish if score requirements are met
+ALLOWED_PUBLISH_CATEGORIES = {
+    "Investment Fraud",
+    "Cybercrime",
+    "Consumer Scam",
+    "Money Laundering",
+    "Cryptocurrency Fraud",
+}
+
 # Module-level lock to prevent concurrent pipeline runs from manual triggers
 _processing_lock = asyncio.Lock()
 
@@ -214,14 +223,6 @@ async def _process_single_item(
     # Tier 1 auto-publish: relevant + score >= 16 + source credibility >= 4 + allowed category.
     # Uses source.credibility_score directly (authoritative) rather than the
     # derived score_source_credibility field which maps the same value 1-5.
-    
-    ALLOWED_PUBLISH_CATEGORIES = {
-        "Investment Fraud",
-        "Cybercrime",
-        "Consumer Scam",
-        "Money Laundering",
-        "Cryptocurrency Fraud",
-    }
     
     _now = datetime.now(timezone.utc)
     tier1 = (

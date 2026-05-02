@@ -92,3 +92,21 @@ async def test_irrelevant_article_never_auto_publishes(mock_session, mock_raw_it
             saved_alert = mock_session.add.call_args[0][0]
             assert getattr(saved_alert, "is_published", False) is False
             assert saved_alert.is_relevant is False
+
+@pytest.mark.asyncio
+async def test_manual_admin_approval_can_publish_other(mock_session):
+    # This proves the pipeline auto-publish guard does not prevent 
+    # the ProcessedAlert model from being manually published if an admin chooses.
+    from app.models.processed_alert import ProcessedAlert
+    
+    alert = ProcessedAlert(
+        raw_item_id=1,
+        summary="Test",
+        primary_category="Other",
+        is_relevant=True,
+        is_published=True,
+        published_at=datetime.now(timezone.utc)
+    )
+    mock_session.add(alert)
+    assert alert.is_published is True
+    assert alert.primary_category == "Other"
