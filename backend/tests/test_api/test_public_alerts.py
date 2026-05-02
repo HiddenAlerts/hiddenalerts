@@ -46,13 +46,18 @@ from app.models.source import Source
 # ---------------------------------------------------------------------------
 
 
-async def _seed_source(db_session, name: str = "Test Source") -> Source:
+async def _seed_source(
+    db_session,
+    name: str = "Test Source",
+    credibility_score: int = 3,
+) -> Source:
     source = Source(
         name=name,
         base_url="https://example.com",
         source_type="rss",
         is_active=True,
         polling_frequency_minutes=60,
+        credibility_score=credibility_score,
     )
     db_session.add(source)
     await db_session.commit()
@@ -65,12 +70,14 @@ async def _seed_raw_item(
     source: Source,
     title: str = "Test Alert Title",
     url: str = "https://example.com/article",
+    published_at: datetime | None = None,
 ) -> RawItem:
     item = RawItem(
         source_id=source.id,
         item_url=url,
         title=title,
         is_duplicate=False,
+        published_at=published_at,
     )
     db_session.add(item)
     await db_session.commit()
@@ -90,6 +97,16 @@ async def _seed_alert(
     secondary_category: str | None = None,
     entities_json: dict | None = None,
     published_at: datetime | None = None,
+    is_relevant: bool = True,
+    financial_impact_estimate: str | None = None,
+    victim_scale_raw: str | None = None,
+    matched_keywords: list | None = None,
+    score_source_credibility: int | None = None,
+    score_financial_impact: int | None = None,
+    score_victim_scale: int | None = None,
+    score_cross_source: int | None = None,
+    score_trend_acceleration: int | None = None,
+    ai_model: str | None = None,
 ) -> ProcessedAlert:
     alert = ProcessedAlert(
         raw_item_id=raw_item.id,
@@ -98,15 +115,46 @@ async def _seed_alert(
         secondary_category=secondary_category,
         signal_score_total=signal_score,
         summary=summary,
-        is_relevant=True,
+        is_relevant=is_relevant,
         is_published=is_published,
         entities_json=entities_json,
+        financial_impact_estimate=financial_impact_estimate,
+        victim_scale_raw=victim_scale_raw,
+        matched_keywords=matched_keywords,
+        score_source_credibility=score_source_credibility,
+        score_financial_impact=score_financial_impact,
+        score_victim_scale=score_victim_scale,
+        score_cross_source=score_cross_source,
+        score_trend_acceleration=score_trend_acceleration,
+        ai_model=ai_model,
         published_at=published_at or (datetime.now(timezone.utc) if is_published else None),
     )
     db_session.add(alert)
     await db_session.commit()
     await db_session.refresh(alert)
     return alert
+
+
+async def _seed_event_link(
+    db_session, event_id: int | None, alert: ProcessedAlert, source_name: str = "Test Source"
+):
+    """Create an event_sources bridge row linking an alert to an event.
+
+    If event_id is None, creates a new Event first and returns its id.
+    """
+    from app.models.event import Event, EventSource
+
+    if event_id is None:
+        ev = Event(title=f"Event for alert {alert.id}", category="Cybercrime")
+        db_session.add(ev)
+        await db_session.commit()
+        await db_session.refresh(ev)
+        event_id = ev.id
+
+    es = EventSource(event_id=event_id, alert_id=alert.id, source_name=source_name)
+    db_session.add(es)
+    await db_session.commit()
+    return event_id
 
 
 # ===========================================================================
@@ -296,7 +344,12 @@ async def test_public_detail_requires_no_auth(client, db_session):
 
 @pytest.mark.asyncio
 async def test_public_detail_published_returns_200(client, db_session):
-    """Published alert returns 200 with the expected response body."""
+    """Published alert returns 200 with the expected enriched response body.
+
+    risk_level is title case ("High") in the detail response per Ken's spec.
+    Backward-compat fields (signal_score, secondary_category, source_name,
+    source_url, published_at, processed_at, entities) are still present.
+    """
     source = await _seed_source(db_session)
     item = await _seed_raw_item(db_session, source, title="Detail OK")
     alert = await _seed_alert(
@@ -317,11 +370,17 @@ async def test_public_detail_published_returns_200(client, db_session):
     assert data["title"] == "Detail OK"
     assert data["summary"] == "Detail summary"
     assert data["category"] == "Investment Fraud"
-    assert data["risk_level"] == "high"
+    # Title case in the enriched detail (Ken's schema)
+    assert data["risk_level"] == "High"
+    # Ken's primary score key
+    assert data["score"] == 20
+    # Backward-compat alias
     assert data["signal_score"] == 20
     assert data["source_name"] == "Test Source"
     assert data["source_url"] == "https://example.com/article"
+    # Both new (subcategory) and old (secondary_category) names present
     assert data["secondary_category"] == "Wire Fraud"
+    assert data["subcategory"] == "Wire Fraud"
     assert data["published_at"] is not None
     assert data["processed_at"] is not None
     assert data["entities"] == ["FBI", "Western Union"]
@@ -350,7 +409,24 @@ async def test_public_detail_safe_fields_only(client, db_session):
     """Detail response must NOT contain internal moderation or scoring fields."""
     source = await _seed_source(db_session)
     item = await _seed_raw_item(db_session, source, title="Field Safety Test")
-    alert = await _seed_alert(db_session, item, is_published=True)
+    # Seed every internal column we want to confirm is NOT leaked, plus a
+    # secondary_category so the backward-compat field key is present in JSON.
+    alert = await _seed_alert(
+        db_session,
+        item,
+        is_published=True,
+        secondary_category="Wire Fraud",
+        entities_json={"names": ["Acme Corp"]},
+        financial_impact_estimate="$5M",
+        victim_scale_raw="multiple",
+        matched_keywords=["fraud", "scam"],
+        score_source_credibility=4,
+        score_financial_impact=3,
+        score_victim_scale=3,
+        score_cross_source=2,
+        score_trend_acceleration=2,
+        ai_model="gpt-5-mini",
+    )
 
     response = await client.get(f"/api/alerts/{alert.id}")
     assert response.status_code == 200
@@ -359,7 +435,9 @@ async def test_public_detail_safe_fields_only(client, db_session):
     # Expected public-safe fields ARE present
     for field in ("id", "title", "summary", "category", "risk_level",
                   "signal_score", "source_name", "source_url", "published_at",
-                  "processed_at", "secondary_category", "entities"):
+                  "processed_at", "secondary_category", "entities",
+                  # Ken's enriched fields (always derivable from the seeded data above)
+                  "score", "confidence", "risk_assessment", "subcategory"):
         assert field in data, f"Missing expected field: {field}"
 
     # Internal / moderation fields must NOT be present
@@ -408,6 +486,329 @@ async def test_public_detail_entities_empty_dict(client, db_session):
     response = await client.get(f"/api/alerts/{alert.id}")
     assert response.status_code == 200
     assert response.json()["entities"] == []
+
+
+# ===========================================================================
+# Public detail — enriched (Ken-approved frontend-facing schema)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_public_detail_enriched_includes_kens_fields(client, db_session):
+    """A fully-seeded published alert exposes all of Ken's enriched fields."""
+    source = await _seed_source(db_session, name="SEC Press Releases", credibility_score=5)
+    item = await _seed_raw_item(
+        db_session, source,
+        title="SEC Charges Investment Firm with $4.2M Fraud",
+        published_at=datetime(2026, 4, 22, 8, 0, tzinfo=timezone.utc),
+    )
+    alert = await _seed_alert(
+        db_session, item,
+        is_published=True,
+        risk_level="high",
+        category="Investment Fraud",
+        secondary_category="Wire Fraud",
+        signal_score=20,
+        summary="The SEC charged a NY firm with defrauding investors of $4.2M.",
+        financial_impact_estimate="$4.2M",
+        victim_scale_raw="multiple",
+        entities_json={"names": ["SEC", "NY Firm"]},
+        matched_keywords=["fraud", "investor"],
+        published_at=datetime(2026, 4, 22, 10, 30, tzinfo=timezone.utc),
+    )
+
+    response = await client.get(f"/api/alerts/{alert.id}")
+    assert response.status_code == 200
+    data = response.json()
+
+    # Ken's primary fields
+    assert data["id"] == alert.id
+    assert data["title"] == "SEC Charges Investment Firm with $4.2M Fraud"
+    assert data["score"] == 20
+    assert data["risk_level"] == "High"
+    assert data["confidence"] == "High"  # cred=5, score=20, is_relevant=True
+    assert data["summary"].startswith("The SEC charged")
+    assert isinstance(data["why_it_matters"], list) and len(data["why_it_matters"]) >= 1
+    assert isinstance(data["key_intelligence"], list) and len(data["key_intelligence"]) >= 1
+    for kv in data["key_intelligence"]:
+        assert set(kv.keys()) == {"label", "value"}
+        assert isinstance(kv["label"], str) and isinstance(kv["value"], str)
+    assert isinstance(data["risk_assessment"], str) and data["risk_assessment"]
+    assert isinstance(data["sources"], list) and data["sources"][0]["name"] == "SEC Press Releases"
+    assert data["category"] == "Investment Fraud"
+    assert data["subcategory"] == "Wire Fraud"
+    assert data["affected_group"] == "Multiple victims or organizations"
+    assert isinstance(data["timeline"], list) and len(data["timeline"]) == 2
+    assert data["published_date"] is not None
+
+
+@pytest.mark.asyncio
+async def test_public_detail_confidence_high(client, db_session):
+    """Credibility 5 + relevant + score >= 16 → confidence 'High'."""
+    source = await _seed_source(db_session, credibility_score=5)
+    item = await _seed_raw_item(db_session, source)
+    alert = await _seed_alert(
+        db_session, item, is_published=True, signal_score=18, is_relevant=True,
+    )
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    assert data["confidence"] == "High"
+
+
+@pytest.mark.asyncio
+async def test_public_detail_confidence_medium_via_credibility(client, db_session):
+    """Credibility 4 → confidence 'Medium' (regardless of score)."""
+    source = await _seed_source(db_session, credibility_score=4)
+    item = await _seed_raw_item(db_session, source)
+    alert = await _seed_alert(db_session, item, is_published=True, signal_score=5)
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    assert data["confidence"] == "Medium"
+
+
+@pytest.mark.asyncio
+async def test_public_detail_confidence_low(client, db_session):
+    """Credibility 3 + low score → confidence 'Low'."""
+    source = await _seed_source(db_session, credibility_score=3)
+    item = await _seed_raw_item(db_session, source)
+    alert = await _seed_alert(db_session, item, is_published=True, signal_score=4)
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    assert data["confidence"] == "Low"
+
+
+@pytest.mark.asyncio
+async def test_public_detail_confidence_medium_via_score(client, db_session):
+    """Credibility 3 + score >= 9 → confidence 'Medium' (score-tier path)."""
+    source = await _seed_source(db_session, credibility_score=3)
+    item = await _seed_raw_item(db_session, source)
+    alert = await _seed_alert(db_session, item, is_published=True, signal_score=10)
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    assert data["confidence"] == "Medium"
+
+
+@pytest.mark.asyncio
+async def test_public_detail_key_intelligence_structured(client, db_session):
+    """Every key_intelligence item has exactly {label, value} and short string values."""
+    source = await _seed_source(db_session, credibility_score=5)
+    item = await _seed_raw_item(db_session, source)
+    alert = await _seed_alert(
+        db_session, item, is_published=True,
+        category="Cybercrime", secondary_category="Phishing",
+        financial_impact_estimate="$2M", victim_scale_raw="nationwide",
+        entities_json={"names": ["FBI"]},
+        matched_keywords=["phishing"],
+    )
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    items = data["key_intelligence"]
+    assert isinstance(items, list) and items
+    for it in items:
+        assert set(it.keys()) == {"label", "value"}
+        assert isinstance(it["value"], str)
+        # value must be a short scalar string (no narrative — test against newlines/length)
+        assert "\n" not in it["value"]
+    labels = {it["label"] for it in items}
+    # Expected labels for this seed
+    assert {"Fraud Type", "Financial Impact", "Affected Group",
+            "Source Credibility"}.issubset(labels)
+
+
+@pytest.mark.asyncio
+async def test_public_detail_affected_group_omitted_when_no_victim(client, db_session):
+    """victim_scale_raw=None → affected_group key is absent in response."""
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="No Victim Scale")
+    alert = await _seed_alert(db_session, item, is_published=True, victim_scale_raw=None)
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    assert "affected_group" not in data
+
+
+@pytest.mark.asyncio
+async def test_public_detail_affected_group_present_for_multiple(client, db_session):
+    """victim_scale_raw='multiple' → affected_group is the human-readable string."""
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Multiple Victims")
+    alert = await _seed_alert(
+        db_session, item, is_published=True, victim_scale_raw="multiple",
+    )
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    assert data["affected_group"] == "Multiple victims or organizations"
+
+
+@pytest.mark.asyncio
+async def test_public_detail_published_date_uses_source_first(client, db_session):
+    """published_date prefers raw_item.published_at when available."""
+    src_pub = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
+    plat_pub = datetime(2026, 4, 22, 10, 30, tzinfo=timezone.utc)
+
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Source First", published_at=src_pub)
+    alert = await _seed_alert(db_session, item, is_published=True, published_at=plat_pub)
+
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    # SQLite drops tzinfo on round-trip; compare on naive UTC.
+    parsed = datetime.fromisoformat(data["published_date"].replace("Z", "+00:00"))
+    parsed_naive = parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+    assert parsed_naive == src_pub.replace(tzinfo=None)
+
+
+@pytest.mark.asyncio
+async def test_public_detail_published_date_falls_back_to_published_at(client, db_session):
+    """published_date falls back to alert.published_at when source has no date."""
+    plat_pub = datetime(2026, 4, 22, 10, 30, tzinfo=timezone.utc)
+
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Fallback", published_at=None)
+    alert = await _seed_alert(db_session, item, is_published=True, published_at=plat_pub)
+
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    parsed = datetime.fromisoformat(data["published_date"].replace("Z", "+00:00"))
+    parsed_naive = parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+    assert parsed_naive == plat_pub.replace(tzinfo=None)
+
+
+@pytest.mark.asyncio
+async def test_public_detail_risk_level_is_title_case(client, db_session):
+    """risk_level stored lowercase but returned title case in detail."""
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Title Case")
+    alert = await _seed_alert(db_session, item, is_published=True, risk_level="medium")
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    assert data["risk_level"] == "Medium"
+
+
+@pytest.mark.asyncio
+async def test_public_detail_sources_array_has_current_source(client, db_session):
+    """sources array contains at least the current source with name + url."""
+    source = await _seed_source(db_session, name="DOJ Press Releases")
+    item = await _seed_raw_item(db_session, source,
+                                title="Sources Test",
+                                url="https://justice.gov/article/x")
+    alert = await _seed_alert(db_session, item, is_published=True)
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    assert isinstance(data["sources"], list) and data["sources"]
+    assert data["sources"][0]["name"] == "DOJ Press Releases"
+    assert data["sources"][0]["url"] == "https://justice.gov/article/x"
+
+
+@pytest.mark.asyncio
+async def test_public_detail_timeline_when_data_exists(client, db_session):
+    """timeline contains source-pub and platform-pub entries with correct order."""
+    src_pub = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
+    plat_pub = datetime(2026, 4, 22, 10, 30, tzinfo=timezone.utc)
+
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Timeline", published_at=src_pub)
+    alert = await _seed_alert(db_session, item, is_published=True, published_at=plat_pub)
+
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    timeline = data["timeline"]
+    assert isinstance(timeline, list) and len(timeline) == 2
+    assert timeline[0]["event"] == "Source published the alert"
+    assert timeline[1]["event"] == "Alert published to dashboard"
+
+
+@pytest.mark.asyncio
+async def test_public_detail_related_signals_via_event(client, db_session):
+    """Two alerts linked to the same Event surface as related_signals for each other."""
+    source = await _seed_source(db_session)
+    item_a = await _seed_raw_item(db_session, source, title="Alert A", url="https://x.com/a")
+    item_b = await _seed_raw_item(db_session, source, title="Alert B", url="https://x.com/b")
+    alert_a = await _seed_alert(db_session, item_a, is_published=True, risk_level="high")
+    alert_b = await _seed_alert(db_session, item_b, is_published=True, risk_level="medium")
+
+    event_id = await _seed_event_link(db_session, None, alert_a)
+    await _seed_event_link(db_session, event_id, alert_b)
+
+    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    assert isinstance(data["related_signals"], list)
+    ids = [r["id"] for r in data["related_signals"]]
+    assert alert_b.id in ids
+    # Title case in related_signals risk_level
+    rb = next(r for r in data["related_signals"] if r["id"] == alert_b.id)
+    assert rb["risk_level"] == "Medium"
+    assert rb["title"] == "Alert B"
+
+
+@pytest.mark.asyncio
+async def test_public_detail_related_signals_omitted_when_no_event(client, db_session):
+    """An alert with no event linkage has no related_signals key in response."""
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Standalone")
+    alert = await _seed_alert(db_session, item, is_published=True)
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    assert "related_signals" not in data
+
+
+@pytest.mark.asyncio
+async def test_public_detail_related_signals_excludes_unpublished(client, db_session):
+    """Unpublished related alerts must NOT appear in related_signals."""
+    source = await _seed_source(db_session)
+    item_a = await _seed_raw_item(db_session, source, title="Pub A", url="https://x.com/pa")
+    item_pub = await _seed_raw_item(db_session, source, title="Pub Other", url="https://x.com/po")
+    item_unpub = await _seed_raw_item(db_session, source, title="Unpub Other",
+                                      url="https://x.com/uo")
+
+    alert_a = await _seed_alert(db_session, item_a, is_published=True)
+    alert_pub = await _seed_alert(db_session, item_pub, is_published=True)
+    alert_unpub = await _seed_alert(db_session, item_unpub, is_published=False)
+
+    event_id = await _seed_event_link(db_session, None, alert_a)
+    await _seed_event_link(db_session, event_id, alert_pub)
+    await _seed_event_link(db_session, event_id, alert_unpub)
+
+    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    ids = {r["id"] for r in data.get("related_signals", [])}
+    assert alert_pub.id in ids
+    assert alert_unpub.id not in ids
+
+
+@pytest.mark.asyncio
+async def test_public_detail_related_signals_max_four(client, db_session):
+    """When more than four published peers share an event, only four are returned."""
+    source = await _seed_source(db_session)
+    item_a = await _seed_raw_item(db_session, source, title="Center", url="https://x.com/c")
+    alert_a = await _seed_alert(db_session, item_a, is_published=True)
+    event_id = await _seed_event_link(db_session, None, alert_a)
+
+    for i in range(6):
+        it = await _seed_raw_item(
+            db_session, source, title=f"Peer {i}", url=f"https://x.com/p{i}",
+        )
+        peer = await _seed_alert(db_session, it, is_published=True)
+        await _seed_event_link(db_session, event_id, peer)
+
+    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    assert isinstance(data["related_signals"], list)
+    assert len(data["related_signals"]) <= 4
+
+
+@pytest.mark.asyncio
+async def test_public_detail_no_score_breakdown_leak(client, db_session):
+    """Even with full internal score data seeded, none of it appears in the response."""
+    source = await _seed_source(db_session, credibility_score=5)
+    item = await _seed_raw_item(db_session, source, title="No Leak")
+    alert = await _seed_alert(
+        db_session, item, is_published=True,
+        score_source_credibility=5,
+        score_financial_impact=5,
+        score_victim_scale=5,
+        score_cross_source=3,
+        score_trend_acceleration=3,
+        financial_impact_estimate="$10M+",
+        victim_scale_raw="nationwide",
+        ai_model="gpt-5-mini",
+        matched_keywords=["money laundering"],
+        entities_json={"names": ["FBI"]},
+    )
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    forbidden = (
+        "score_source_credibility", "score_financial_impact", "score_victim_scale",
+        "score_cross_source", "score_trend_acceleration",
+        "victim_scale_raw", "financial_impact_estimate",
+        "ai_model", "matched_keywords", "entities_json",
+        "is_published", "is_relevant", "raw_item_id",
+        "published_by_user_id", "review_status", "signal_score_total",
+    )
+    for f in forbidden:
+        assert f not in data, f"Forbidden field leaked: {f}"
 
 
 # ===========================================================================

@@ -114,7 +114,7 @@ curl "http://localhost:8000/api/alerts?limit=10&offset=0"
 
 ---
 
-### 0.2 GET /api/alerts/{id} — Published Alert Detail
+### 0.2 GET /api/alerts/{id} — Enriched Public Alert Detail
 
 ```
 GET /api/alerts/{id}
@@ -124,18 +124,66 @@ GET /api/alerts/{id}
 Returns the full public detail for a single published alert.  
 Returns `404` if the alert does not exist **or** is not yet published.
 
-**Response `200 OK`:**
+Optional sections (`why_it_matters`, `key_intelligence`, `risk_assessment`,
+`sources`, `affected_group`, `subcategory`, `timeline`, `related_signals`) are
+**omitted from the JSON when their underlying data is empty** — Hasnain does not
+have to filter blanks on the frontend.
+
+> Note: `risk_level` and `confidence` are returned in **Title Case** (`"High"`,
+> `"Medium"`, `"Low"`) on the detail endpoint to match Ken's design spec. The
+> list endpoint (`GET /api/alerts`) keeps the lowercase form for backward
+> compatibility — convert as needed when navigating list → detail.
+
+**Response `200 OK` (rich example with all optional sections populated):**
 ```json
 {
   "id": 42,
   "title": "SEC Charges Investment Firm with $4.2M Fraud",
+  "score": 20,
+  "risk_level": "High",
+  "confidence": "High",
   "summary": "The SEC charged a New York-based firm with defrauding investors...",
+
+  "why_it_matters": [
+    "Reported by a trusted source.",
+    "Financial impact reported as $4.2M.",
+    "Victim scope indicated as multiple."
+  ],
+
+  "key_intelligence": [
+    { "label": "Fraud Type", "value": "Wire Fraud" },
+    { "label": "Financial Impact", "value": "$4.2M" },
+    { "label": "Affected Group", "value": "Multiple victims or organizations" },
+    { "label": "Source Credibility", "value": "High" },
+    { "label": "Named Entities", "value": "SEC, New York-based Firm" }
+  ],
+
+  "risk_assessment": "High risk based on credible source reporting and strong supporting fraud signals indicating broad or significant impact.",
+
+  "sources": [
+    { "name": "SEC Press Releases", "url": "https://sec.gov/news/press-release/..." }
+  ],
+
+  "published_date": "2026-04-22T08:00:00Z",
+
   "category": "Investment Fraud",
+  "subcategory": "Wire Fraud",
+  "affected_group": "Multiple victims or organizations",
+
+  "timeline": [
+    { "date": "2026-04-22T08:00:00Z", "event": "Source published the alert" },
+    { "date": "2026-04-22T10:30:01Z", "event": "Alert published to dashboard" }
+  ],
+
+  "related_signals": [
+    { "id": 38, "title": "DOJ indicts related actor", "score": 17, "risk_level": "High" }
+  ],
+
+  "signal_score": 20,
   "secondary_category": "Wire Fraud",
-  "risk_level": "high",
-  "signal_score": 19,
   "source_name": "SEC Press Releases",
   "source_url": "https://sec.gov/news/press-release/...",
+  "source_published_at": "2026-04-22T08:00:00Z",
   "published_at": "2026-04-22T10:30:01Z",
   "processed_at": "2026-04-22T10:15:00Z",
   "entities": ["SEC", "New York-based Firm"]
@@ -148,18 +196,40 @@ Returns `404` if the alert does not exist **or** is not yet published.
 |-------|------|-------------|
 | `id` | `int` | Unique alert ID |
 | `title` | `string\|null` | Article/press release title |
+| `score` | `int\|null` | Composite signal score (0–25) |
+| `risk_level` | `string\|null` | **Title case**: `"High"`, `"Medium"`, or `"Low"` |
+| `confidence` | `string\|null` | **Title case** — derived from source credibility + score + relevance |
 | `summary` | `string\|null` | AI-generated summary |
+| `why_it_matters` | `string[]?` | 1–3 short bullets — omitted if no qualifying signals |
+| `key_intelligence` | `{label,value}[]?` | Structured data points — omitted if empty |
+| `risk_assessment` | `string` | Short 1–2 sentence justification tied to `risk_level` |
+| `sources` | `{name,url}[]?` | Source references (current source — array form for future multi-source) |
+| `published_date` | `datetime\|null` | Best display date — `source_published_at` first, then `published_at`, then `processed_at` |
 | `category` | `string\|null` | Primary fraud category |
-| `secondary_category` | `string\|null` | Secondary classification (if any) |
-| `risk_level` | `string\|null` | `"low"`, `"medium"`, or `"high"` |
-| `signal_score` | `int\|null` | Composite risk score (1–25) |
-| `source_name` | `string\|null` | Name of the originating source |
-| `source_url` | `string\|null` | Direct link to the original article |
-| `published_at` | `datetime\|null` | ISO 8601 UTC — when admin published it |
-| `processed_at` | `datetime\|null` | ISO 8601 UTC — when AI processed it |
-| `entities` | `string[]` | Named entities extracted by AI (flat list) |
+| `subcategory` | `string?` | Secondary classification — omitted if absent |
+| `affected_group` | `string?` | Human-readable victim scope — omitted if absent |
+| `timeline` | `{date,event}[]?` | Source-pub + platform-pub timestamps — omitted if no timestamps |
+| `related_signals` | `{id,title,score,risk_level}[]?` | Up to 4 published peers via shared event — omitted if no event linkage |
 
-**NOT returned** (intentionally excluded): score breakdowns, review history, moderation state, `is_published`, `is_relevant`, `entities_json`, `ai_model`, `matched_keywords`.
+**Backward-compatibility additive fields** (kept from the prior contract; safe to keep using if your frontend already references them):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `signal_score` | `int\|null` | Alias for `score` |
+| `secondary_category` | `string\|null` | Alias for `subcategory` |
+| `source_name` | `string\|null` | First source's name (mirrors `sources[0].name`) |
+| `source_url` | `string\|null` | First source's url (mirrors `sources[0].url`) |
+| `source_published_at` | `datetime\|null` | Original source publication date |
+| `published_at` | `datetime\|null` | When admin published on platform |
+| `processed_at` | `datetime\|null` | When AI processed |
+| `entities` | `string[]` | Flat entity list (always present, may be empty) |
+
+**NOT returned** (intentionally excluded): score breakdown fields
+(`score_source_credibility`, `score_financial_impact`, `score_victim_scale`,
+`score_cross_source`, `score_trend_acceleration`), review history,
+moderation state (`is_published`, `is_relevant`), raw `entities_json`,
+`ai_model`, `matched_keywords`, `financial_impact_estimate`,
+`victim_scale_raw`, `published_by_user_id`.
 
 **Errors:**
 | Code | Reason |

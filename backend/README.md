@@ -461,13 +461,18 @@ Authenticated endpoints accept either a valid `access_token` cookie **or** an `A
 | `GET` | `/api/v1/raw-items` | No | Paginated items (filter: source_id, since, is_duplicate) |
 | `GET` | `/api/v1/raw-items/{id}` | No | Full detail incl. raw_text + raw_html |
 
-### Public Feed — No Auth Required (M3 Slice 4)
+### Public Feed — No Auth Required (M3 Slice 4 + Frontend Completion)
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/api/alerts` | No | Paginated published alert feed |
-| `GET` | `/api/alerts/{id}` | No | Published alert detail; 404 if unpublished |
+| `GET` | `/api/alerts/{id}` | No | Enriched published alert detail (`confidence`, `why_it_matters`, `key_intelligence`, `risk_assessment`, `sources`, `published_date`, `subcategory`, `affected_group`, `timeline`, `related_signals` + backward-compat aliases). Optional sections omitted when empty. 404 if unpublished. |
 | `GET` | `/api/alerts/stats` | No | Published alert aggregate counts + category breakdown |
+
+> Detail-endpoint conventions: `risk_level` and `confidence` are returned in
+> Title Case (`"High"|"Medium"|"Low"`); `published_date` resolves in priority
+> order `source_published_at` → `published_at` → `processed_at`. See
+> `MVP-API-Contract-V2.md` §0.2 for the full schema.
 
 ### Alerts (M2)
 
