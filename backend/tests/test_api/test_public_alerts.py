@@ -145,7 +145,13 @@ async def _seed_event_link(
     from app.models.event import Event, EventSource
 
     if event_id is None:
-        ev = Event(title=f"Event for alert {alert.id}", category="Cybercrime")
+        # Use a sentinel category so this polluted event doesn't collide with
+        # event_grouper unit tests that match on real fraud categories like
+        # "Cybercrime"/"Investment Fraud" within the same session-scoped DB.
+        ev = Event(
+            title=f"PublicTestEvent for alert {alert.id}",
+            category="__public_test_only__",
+        )
         db_session.add(ev)
         await db_session.commit()
         await db_session.refresh(ev)
@@ -272,15 +278,16 @@ async def test_public_feed_ordering_newest_first(client, db_session):
 
 @pytest.mark.asyncio
 async def test_public_feed_filter_risk_level(client, db_session):
-    """risk_level filter narrows results but never exposes unpublished alerts."""
+    """risk_level filter narrows by derived score bucket; never exposes unpublished alerts."""
     source = await _seed_source(db_session)
     item_high = await _seed_raw_item(db_session, source, title="High Risk")
     item_medium = await _seed_raw_item(db_session, source, title="Medium Risk")
     item_unpub = await _seed_raw_item(db_session, source, title="Unpublished High")
 
-    await _seed_alert(db_session, item_high, is_published=True, risk_level="high")
-    await _seed_alert(db_session, item_medium, is_published=True, risk_level="medium")
-    await _seed_alert(db_session, item_unpub, is_published=False, risk_level="high")
+    # Filter is derived from signal_score_total (M3 thresholds): >=16 high.
+    await _seed_alert(db_session, item_high, is_published=True, signal_score=20)
+    await _seed_alert(db_session, item_medium, is_published=True, signal_score=10)
+    await _seed_alert(db_session, item_unpub, is_published=False, signal_score=20)
 
     response = await client.get("/api/alerts?risk_level=high")
     assert response.status_code == 200
@@ -707,23 +714,39 @@ async def test_public_detail_timeline_when_data_exists(client, db_session):
 
 @pytest.mark.asyncio
 async def test_public_detail_related_signals_via_event(client, db_session):
-    """Two alerts linked to the same Event surface as related_signals for each other."""
+    """Same-event alerts that share at least one named entity surface as related_signals.
+
+    Ken's quantity rule: at least 2 qualifying peers required, so this seeds two.
+    """
     source = await _seed_source(db_session)
     item_a = await _seed_raw_item(db_session, source, title="Alert A", url="https://x.com/a")
     item_b = await _seed_raw_item(db_session, source, title="Alert B", url="https://x.com/b")
-    alert_a = await _seed_alert(db_session, item_a, is_published=True, risk_level="high")
-    alert_b = await _seed_alert(db_session, item_b, is_published=True, risk_level="medium")
+    item_c = await _seed_raw_item(db_session, source, title="Alert C", url="https://x.com/c")
+    # Shared entity "Acme Corp" — passes the entity-overlap clean-related rule.
+    alert_a = await _seed_alert(
+        db_session, item_a, is_published=True, signal_score=20,
+        entities_json={"names": ["Acme Corp", "FBI"]},
+    )
+    alert_b = await _seed_alert(
+        db_session, item_b, is_published=True, signal_score=10,
+        entities_json={"names": ["Acme Corp"]},
+    )
+    alert_c = await _seed_alert(
+        db_session, item_c, is_published=True, signal_score=18,
+        entities_json={"names": ["Acme Corp"]},
+    )
 
     event_id = await _seed_event_link(db_session, None, alert_a)
     await _seed_event_link(db_session, event_id, alert_b)
+    await _seed_event_link(db_session, event_id, alert_c)
 
     data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
     assert isinstance(data["related_signals"], list)
     ids = [r["id"] for r in data["related_signals"]]
     assert alert_b.id in ids
-    # Title case in related_signals risk_level
     rb = next(r for r in data["related_signals"] if r["id"] == alert_b.id)
-    assert rb["risk_level"] == "Medium"
+    # risk_level on related items is derived from score (M3 thresholds), Title Case
+    assert rb["risk_level"] == "Medium"  # score=10 → medium
     assert rb["title"] == "Alert B"
 
 
@@ -739,24 +762,39 @@ async def test_public_detail_related_signals_omitted_when_no_event(client, db_se
 
 @pytest.mark.asyncio
 async def test_public_detail_related_signals_excludes_unpublished(client, db_session):
-    """Unpublished related alerts must NOT appear in related_signals."""
+    """Unpublished related alerts must NOT appear in related_signals.
+
+    Need >=2 published peers to satisfy Ken's min count, so seed 2 published
+    alongside the unpublished one we expect to be excluded.
+    """
     source = await _seed_source(db_session)
     item_a = await _seed_raw_item(db_session, source, title="Pub A", url="https://x.com/pa")
-    item_pub = await _seed_raw_item(db_session, source, title="Pub Other", url="https://x.com/po")
+    item_pub1 = await _seed_raw_item(db_session, source, title="Pub Other 1",
+                                     url="https://x.com/po1")
+    item_pub2 = await _seed_raw_item(db_session, source, title="Pub Other 2",
+                                     url="https://x.com/po2")
     item_unpub = await _seed_raw_item(db_session, source, title="Unpub Other",
                                       url="https://x.com/uo")
 
-    alert_a = await _seed_alert(db_session, item_a, is_published=True)
-    alert_pub = await _seed_alert(db_session, item_pub, is_published=True)
-    alert_unpub = await _seed_alert(db_session, item_unpub, is_published=False)
+    shared_entities = {"names": ["Western Union"]}
+    alert_a = await _seed_alert(db_session, item_a, is_published=True,
+                                entities_json=shared_entities)
+    alert_pub1 = await _seed_alert(db_session, item_pub1, is_published=True,
+                                   entities_json=shared_entities)
+    alert_pub2 = await _seed_alert(db_session, item_pub2, is_published=True,
+                                   entities_json=shared_entities)
+    alert_unpub = await _seed_alert(db_session, item_unpub, is_published=False,
+                                    entities_json=shared_entities)
 
     event_id = await _seed_event_link(db_session, None, alert_a)
-    await _seed_event_link(db_session, event_id, alert_pub)
+    await _seed_event_link(db_session, event_id, alert_pub1)
+    await _seed_event_link(db_session, event_id, alert_pub2)
     await _seed_event_link(db_session, event_id, alert_unpub)
 
     data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
     ids = {r["id"] for r in data.get("related_signals", [])}
-    assert alert_pub.id in ids
+    assert alert_pub1.id in ids
+    assert alert_pub2.id in ids
     assert alert_unpub.id not in ids
 
 
@@ -764,20 +802,354 @@ async def test_public_detail_related_signals_excludes_unpublished(client, db_ses
 async def test_public_detail_related_signals_max_four(client, db_session):
     """When more than four published peers share an event, only four are returned."""
     source = await _seed_source(db_session)
+    shared = {"names": ["SharedSubject"]}
     item_a = await _seed_raw_item(db_session, source, title="Center", url="https://x.com/c")
-    alert_a = await _seed_alert(db_session, item_a, is_published=True)
+    alert_a = await _seed_alert(db_session, item_a, is_published=True,
+                                entities_json=shared)
     event_id = await _seed_event_link(db_session, None, alert_a)
 
     for i in range(6):
         it = await _seed_raw_item(
             db_session, source, title=f"Peer {i}", url=f"https://x.com/p{i}",
         )
-        peer = await _seed_alert(db_session, it, is_published=True)
+        peer = await _seed_alert(db_session, it, is_published=True,
+                                 entities_json=shared)
         await _seed_event_link(db_session, event_id, peer)
 
     data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
     assert isinstance(data["related_signals"], list)
     assert len(data["related_signals"]) <= 4
+
+
+@pytest.mark.asyncio
+async def test_public_list_risk_level_derived_from_score(client, db_session):
+    """List endpoint risk_level is derived from signal_score_total, not stored column.
+
+    Stale stored value 'high' on a score-12 alert must show as 'medium' in the
+    public response.
+    """
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Stale High List")
+    # Mismatch on purpose: score 12 is medium per M3, but stored risk_level says high.
+    await _seed_alert(
+        db_session, item, is_published=True,
+        risk_level="high", signal_score=12,
+    )
+    body = (await client.get("/api/alerts")).json()
+    match = next((a for a in body["alerts"] if a["title"] == "Stale High List"), None)
+    assert match is not None
+    assert match["risk_level"] == "medium"  # lowercase on list, derived
+
+
+@pytest.mark.asyncio
+async def test_public_detail_risk_level_derived_from_score(client, db_session):
+    """Detail endpoint risk_level is derived from signal_score_total (Title Case)."""
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Stale High Detail")
+    alert = await _seed_alert(
+        db_session, item, is_published=True,
+        risk_level="high", signal_score=15,  # 15 < 16 → medium per M3
+    )
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    assert data["risk_level"] == "Medium"
+    assert data["score"] == 15
+
+
+@pytest.mark.asyncio
+async def test_public_stats_counts_use_derived_risk(client, db_session):
+    """Stats counts must bucket alerts by score (M3 thresholds), not stored risk_level."""
+    baseline = (await client.get("/api/alerts/stats")).json()
+    source = await _seed_source(db_session)
+
+    # Stored 'high' but score 12 → must count as medium, not high.
+    item = await _seed_raw_item(db_session, source, title="Stale High Stats")
+    await _seed_alert(
+        db_session, item, is_published=True,
+        risk_level="high", signal_score=12,
+    )
+    after = (await client.get("/api/alerts/stats")).json()
+
+    assert after["high_count"] == baseline["high_count"]
+    assert after["medium_count"] == baseline["medium_count"] + 1
+    assert after["low_count"] == baseline["low_count"]
+    assert after["total_alerts"] == baseline["total_alerts"] + 1
+
+
+@pytest.mark.asyncio
+async def test_related_signals_excludes_same_event_no_entity_overlap(client, db_session):
+    """Same-event alerts with NO shared named entity must NOT surface as related_signals.
+
+    Event grouping alone is too broad — the cleanup rule requires entity overlap.
+    """
+    source = await _seed_source(db_session)
+    item_a = await _seed_raw_item(db_session, source, title="Center A",
+                                  url="https://x.com/center")
+    item_b = await _seed_raw_item(db_session, source, title="Drifted Peer",
+                                  url="https://x.com/drifted")
+    alert_a = await _seed_alert(
+        db_session, item_a, is_published=True,
+        entities_json={"names": ["Acme Corp", "FBI"]},
+    )
+    alert_b = await _seed_alert(
+        db_session, item_b, is_published=True,
+        # Disjoint entity set — same event, but semantically unrelated.
+        entities_json={"names": ["Globex Inc", "DOJ"]},
+    )
+    event_id = await _seed_event_link(db_session, None, alert_a)
+    await _seed_event_link(db_session, event_id, alert_b)
+
+    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    # No qualifying peer → related_signals must be omitted entirely.
+    assert "related_signals" not in data
+
+
+@pytest.mark.asyncio
+async def test_related_signals_includes_same_event_with_entity_overlap(client, db_session):
+    """Same-event alerts WITH shared entity surface as related_signals (>=2 required)."""
+    source = await _seed_source(db_session)
+    item_a = await _seed_raw_item(db_session, source, title="Anchor",
+                                  url="https://x.com/anchor")
+    item_b = await _seed_raw_item(db_session, source, title="Sibling 1",
+                                  url="https://x.com/sibling1")
+    item_c = await _seed_raw_item(db_session, source, title="Sibling 2",
+                                  url="https://x.com/sibling2")
+    alert_a = await _seed_alert(
+        db_session, item_a, is_published=True,
+        entities_json={"names": ["Acme Corp", "FBI"]},
+    )
+    alert_b = await _seed_alert(
+        db_session, item_b, is_published=True,
+        entities_json={"names": ["FBI", "Treasury"]},  # FBI overlaps
+    )
+    alert_c = await _seed_alert(
+        db_session, item_c, is_published=True,
+        entities_json={"names": ["Acme Corp"]},  # Acme Corp overlaps
+    )
+    event_id = await _seed_event_link(db_session, None, alert_a)
+    await _seed_event_link(db_session, event_id, alert_b)
+    await _seed_event_link(db_session, event_id, alert_c)
+
+    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    ids = [r["id"] for r in data.get("related_signals", [])]
+    assert alert_b.id in ids
+    assert alert_c.id in ids
+
+
+@pytest.mark.asyncio
+async def test_related_signals_overlap_is_case_insensitive(client, db_session):
+    """Entity overlap is case-insensitive — 'fbi' matches 'FBI' (need >=2 peers)."""
+    source = await _seed_source(db_session)
+    item_a = await _seed_raw_item(db_session, source, title="A1", url="https://x.com/a1")
+    item_b = await _seed_raw_item(db_session, source, title="B1", url="https://x.com/b1")
+    item_c = await _seed_raw_item(db_session, source, title="C1", url="https://x.com/c1")
+    alert_a = await _seed_alert(
+        db_session, item_a, is_published=True,
+        entities_json={"names": ["FBI"]},
+    )
+    alert_b = await _seed_alert(
+        db_session, item_b, is_published=True,
+        entities_json={"names": ["fbi"]},  # case-different match
+    )
+    alert_c = await _seed_alert(
+        db_session, item_c, is_published=True,
+        entities_json={"names": ["FbI"]},  # mixed case match
+    )
+    event_id = await _seed_event_link(db_session, None, alert_a)
+    await _seed_event_link(db_session, event_id, alert_b)
+    await _seed_event_link(db_session, event_id, alert_c)
+
+    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    ids = [r["id"] for r in data.get("related_signals", [])]
+    assert alert_b.id in ids
+    assert alert_c.id in ids
+
+
+@pytest.mark.asyncio
+async def test_related_signals_omitted_when_current_has_no_entities(client, db_session):
+    """If the current alert has no entities, overlap can't be evaluated → omit entirely."""
+    source = await _seed_source(db_session)
+    item_a = await _seed_raw_item(db_session, source, title="No Ents", url="https://x.com/ne")
+    item_b = await _seed_raw_item(db_session, source, title="Has Ents", url="https://x.com/he")
+    alert_a = await _seed_alert(
+        db_session, item_a, is_published=True, entities_json=None,
+    )
+    alert_b = await _seed_alert(
+        db_session, item_b, is_published=True,
+        entities_json={"names": ["FBI"]},
+    )
+    event_id = await _seed_event_link(db_session, None, alert_a)
+    await _seed_event_link(db_session, event_id, alert_b)
+
+    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    assert "related_signals" not in data
+
+
+@pytest.mark.asyncio
+async def test_related_signals_omitted_when_only_one_clean_peer(client, db_session):
+    """Ken's quantity rule: a single qualifying peer means the section is omitted."""
+    source = await _seed_source(db_session)
+    item_a = await _seed_raw_item(db_session, source, title="Solo Anchor",
+                                  url="https://x.com/solo-a")
+    item_b = await _seed_raw_item(db_session, source, title="Solo Peer",
+                                  url="https://x.com/solo-b")
+    shared = {"names": ["FBI"]}
+    alert_a = await _seed_alert(db_session, item_a, is_published=True,
+                                entities_json=shared)
+    alert_b = await _seed_alert(db_session, item_b, is_published=True,
+                                entities_json=shared)
+    event_id = await _seed_event_link(db_session, None, alert_a)
+    await _seed_event_link(db_session, event_id, alert_b)
+
+    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    # Only 1 qualifying peer (alert_b) — must be omitted entirely.
+    assert "related_signals" not in data
+
+
+@pytest.mark.asyncio
+async def test_related_signals_included_when_two_clean_peers(client, db_session):
+    """Exactly two qualifying peers → section included with both."""
+    source = await _seed_source(db_session)
+    item_a = await _seed_raw_item(db_session, source, title="Pair Anchor",
+                                  url="https://x.com/pair-a")
+    item_b = await _seed_raw_item(db_session, source, title="Pair Peer 1",
+                                  url="https://x.com/pair-b")
+    item_c = await _seed_raw_item(db_session, source, title="Pair Peer 2",
+                                  url="https://x.com/pair-c")
+    shared = {"names": ["FBI"]}
+    alert_a = await _seed_alert(db_session, item_a, is_published=True,
+                                entities_json=shared)
+    alert_b = await _seed_alert(db_session, item_b, is_published=True,
+                                entities_json=shared)
+    alert_c = await _seed_alert(db_session, item_c, is_published=True,
+                                entities_json=shared)
+    event_id = await _seed_event_link(db_session, None, alert_a)
+    await _seed_event_link(db_session, event_id, alert_b)
+    await _seed_event_link(db_session, event_id, alert_c)
+
+    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    assert isinstance(data["related_signals"], list)
+    assert len(data["related_signals"]) == 2
+    ids = {r["id"] for r in data["related_signals"]}
+    assert ids == {alert_b.id, alert_c.id}
+
+
+# ===========================================================================
+# Risk assessment — strong-factor enrichment
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_risk_assessment_high_mentions_strong_factors(client, db_session):
+    """High-risk assessment must mention specific strong factors, not generic copy."""
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Strong Factors")
+    alert = await _seed_alert(
+        db_session, item, is_published=True,
+        signal_score=22,
+        score_source_credibility=5,         # → "trusted source reporting"
+        score_victim_scale=5,               # → "broad victim scope"
+        score_cross_source=3,               # → "cross-source support"
+        score_financial_impact=2,
+        score_trend_acceleration=1,
+    )
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    text = data["risk_assessment"]
+    assert text.startswith("High risk due to")
+    # At least one of our derived factor phrases must appear.
+    assert any(p in text for p in (
+        "trusted source reporting",
+        "broad victim scope",
+        "cross-source support",
+    ))
+
+
+@pytest.mark.asyncio
+async def test_risk_assessment_uses_financial_estimate_when_meaningful(client, db_session):
+    """A non-empty, non-'unknown' financial_impact_estimate triggers the financial phrase."""
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source)
+    alert = await _seed_alert(
+        db_session, item, is_published=True,
+        signal_score=20,
+        financial_impact_estimate="$4.2M",
+    )
+    text = (await client.get(f"/api/alerts/{alert.id}")).json()["risk_assessment"]
+    assert "notable financial impact" in text
+
+
+@pytest.mark.asyncio
+async def test_risk_assessment_medium_concise(client, db_session):
+    """Medium risk_assessment is a single concise sentence (no factor data here)."""
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Medium Concise")
+    alert = await _seed_alert(db_session, item, is_published=True, signal_score=10)
+    text = (await client.get(f"/api/alerts/{alert.id}")).json()["risk_assessment"]
+    assert text.startswith("Medium risk")
+    # One sentence. ≤ 250 chars is plenty for "scannable".
+    assert text.count(". ") == 0
+    assert text.endswith(".")
+    assert len(text) <= 250
+
+
+@pytest.mark.asyncio
+async def test_risk_assessment_low_concise(client, db_session):
+    """Low risk_assessment is a single concise sentence."""
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Low Concise")
+    alert = await _seed_alert(db_session, item, is_published=True, signal_score=4)
+    text = (await client.get(f"/api/alerts/{alert.id}")).json()["risk_assessment"]
+    assert text.startswith("Low risk")
+    assert text.count(". ") == 0
+    assert text.endswith(".")
+    assert len(text) <= 250
+
+
+@pytest.mark.asyncio
+async def test_risk_assessment_falls_back_when_no_strong_factors(client, db_session):
+    """When no factor reaches the strong threshold, fall back to the generic copy."""
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="No Strong Factors")
+    alert = await _seed_alert(
+        db_session, item, is_published=True,
+        signal_score=20,                 # high bucket via score
+        score_source_credibility=2,      # below 4
+        score_financial_impact=2,
+        score_victim_scale=2,
+        score_cross_source=1,
+        score_trend_acceleration=1,
+        financial_impact_estimate=None,
+        victim_scale_raw=None,
+    )
+    text = (await client.get(f"/api/alerts/{alert.id}")).json()["risk_assessment"]
+    # Generic high-risk fallback contains "based on credible source reporting"
+    assert "based on credible source reporting" in text
+    assert text.startswith("High risk")
+
+
+@pytest.mark.asyncio
+async def test_risk_assessment_does_not_leak_raw_score_fields(client, db_session):
+    """Raw per-factor scores must never appear in the public detail body."""
+    source = await _seed_source(db_session, credibility_score=5)
+    item = await _seed_raw_item(db_session, source, title="No Leak Risk")
+    alert = await _seed_alert(
+        db_session, item, is_published=True,
+        signal_score=22,
+        score_source_credibility=5,
+        score_financial_impact=5,
+        score_victim_scale=5,
+        score_cross_source=3,
+        score_trend_acceleration=3,
+        financial_impact_estimate="$10M",
+        victim_scale_raw="nationwide",
+    )
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    forbidden = (
+        "score_source_credibility", "score_financial_impact",
+        "score_victim_scale", "score_cross_source", "score_trend_acceleration",
+        "financial_impact_estimate", "victim_scale_raw",
+    )
+    for f in forbidden:
+        assert f not in data, f"Forbidden field leaked: {f}"
 
 
 @pytest.mark.asyncio
@@ -860,8 +1232,9 @@ async def test_public_stats_counts_published_only(client, db_session):
     item_pub = await _seed_raw_item(db_session, source, title="Pub High stats_only")
     item_unpub = await _seed_raw_item(db_session, source, title="Unpub High stats_only")
 
-    await _seed_alert(db_session, item_pub, is_published=True, risk_level="high")
-    await _seed_alert(db_session, item_unpub, is_published=False, risk_level="high")
+    # Counts are derived from signal_score_total — score=20 is the High bucket.
+    await _seed_alert(db_session, item_pub, is_published=True, signal_score=20)
+    await _seed_alert(db_session, item_unpub, is_published=False, signal_score=20)
 
     after = (await client.get("/api/alerts/stats")).json()
 
@@ -883,17 +1256,18 @@ async def test_public_stats_risk_level_counts(client, db_session):
 
     source = await _seed_source(db_session)
 
+    # Buckets derived from signal_score_total (M3): >=16 high, 9..15 medium, <9 low.
     for _ in range(2):
         item = await _seed_raw_item(db_session, source, title="High rl")
-        await _seed_alert(db_session, item, is_published=True, risk_level="high")
+        await _seed_alert(db_session, item, is_published=True, signal_score=20)
 
     for _ in range(3):
         item = await _seed_raw_item(db_session, source, title="Medium rl")
-        await _seed_alert(db_session, item, is_published=True, risk_level="medium")
+        await _seed_alert(db_session, item, is_published=True, signal_score=10)
 
     for _ in range(1):
         item = await _seed_raw_item(db_session, source, title="Low rl")
-        await _seed_alert(db_session, item, is_published=True, risk_level="low")
+        await _seed_alert(db_session, item, is_published=True, signal_score=4)
 
     after = (await client.get("/api/alerts/stats")).json()
 
@@ -916,9 +1290,11 @@ async def test_public_stats_total_is_sum_of_risk_levels(client, db_session):
     baseline = (await client.get("/api/alerts/stats")).json()
 
     source = await _seed_source(db_session)
+    # Counts are derived from signal_score_total — pick scores per bucket.
+    score_for = {"high": 20, "medium": 10, "low": 4}
     for risk in ("high", "medium", "low", "high"):
         item = await _seed_raw_item(db_session, source, title=f"Sum test {risk}")
-        await _seed_alert(db_session, item, is_published=True, risk_level=risk)
+        await _seed_alert(db_session, item, is_published=True, signal_score=score_for[risk])
 
     after = (await client.get("/api/alerts/stats")).json()
 

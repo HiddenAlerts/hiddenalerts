@@ -109,8 +109,12 @@ curl "http://localhost:8000/api/alerts?limit=10&offset=0"
 - Results are sorted newest-published first.
 - If `"alerts": []`, no alerts have been published yet — the admin reviews and publishes them.
 - Do NOT use `/api/v1/alerts` or `/api/v1/client/alerts` for this phase — those require auth.
-- `risk_level` values are lowercase: `"low"`, `"medium"`, `"high"` — capitalise in the UI.
-- Category values: `Investment Fraud`, `Cybercrime`, `Consumer Scam`, `Money Laundering`, `Cryptocurrency Fraud`.
+- `risk_level` values are lowercase here: `"low"`, `"medium"`, `"high"` — capitalise in the UI.
+  **Derived from `signal_score` on the server** (M3 thresholds: `≥16` high, `9..15` medium, `<9` low).
+  Older alerts whose stored value is stale will still display correctly. Filtering on `risk_level=high` also uses the derived bucket.
+- Category values: `Investment Fraud`, `Cybercrime`, `Consumer Scam`, `Money Laundering`, `Cryptocurrency Fraud`, `Other`.
+  `Other` is a real value — when shown, render it as a low-emphasis label (don't promote it to a primary fraud-type badge).
+- **Use `source_published_at` for the date shown on list cards** (it's the article/press-release date — what readers expect). `published_at` is the platform publish time and is mainly an internal/sort key.
 
 ---
 
@@ -133,6 +137,24 @@ have to filter blanks on the frontend.
 > `"Medium"`, `"Low"`) on the detail endpoint to match Ken's design spec. The
 > list endpoint (`GET /api/alerts`) keeps the lowercase form for backward
 > compatibility — convert as needed when navigating list → detail.
+> `risk_level` is **derived from `score` on the server** (M3 thresholds: `≥16`
+> High, `9..15` Medium, `<9` Low) — do not compute it on the client and do not
+> trust the legacy stored value.
+
+> **Timestamp reference (read this — frequently confused):**
+> | Field | Meaning | Use it for |
+> |---|---|---|
+> | `source_published_at` | Original article / press-release publication date | List cards (what readers expect). Backward-compat alias on detail. |
+> | `published_at` | When HiddenAlerts (admin) published the alert on the platform | Internal sort key; appears in `timeline`. |
+> | `processed_at` | When the AI pipeline processed the alert | Audit only — not for display. |
+> | `published_date` | Canonical display date for the **detail page** | Render this on the detail page header. Resolves in priority order: `source_published_at` → `published_at` → `processed_at`. |
+
+> **`related_signals` cleanness + quantity rule:** an alert appears here only
+> if it (a) is published, (b) shares an event with the current alert, AND
+> (c) shares at least one named entity. Event grouping alone is too broad; the
+> entity-overlap requirement keeps drift out. **At least 2 qualifying peers are
+> required** (Ken's "two to four items max"); fewer means the section is
+> **omitted entirely**. Capped at 4.
 
 **Response `200 OK` (rich example with all optional sections populated):**
 ```json
@@ -209,7 +231,7 @@ have to filter blanks on the frontend.
 | `subcategory` | `string?` | Secondary classification — omitted if absent |
 | `affected_group` | `string?` | Human-readable victim scope — omitted if absent |
 | `timeline` | `{date,event}[]?` | Source-pub + platform-pub timestamps — omitted if no timestamps |
-| `related_signals` | `{id,title,score,risk_level}[]?` | Up to 4 published peers via shared event — omitted if no event linkage |
+| `related_signals` | `{id,title,score,risk_level}[]?` | 2–4 published peers via shared event **and** entity overlap — omitted when fewer than 2 qualifying peers exist |
 
 **Backward-compatibility additive fields** (kept from the prior contract; safe to keep using if your frontend already references them):
 
