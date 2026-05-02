@@ -94,6 +94,39 @@ async def test_analyze_article_success():
 
 
 @pytest.mark.asyncio
+async def test_analyze_article_violent_crime_irrelevant():
+    """Violent crime, coup, or murder articles should be parsed as is_relevant=False."""
+    parsed = _make_parsed_analysis(
+        summary="Defendants charged following an armed coup attack.",
+        primary_category="Other",
+        entities=["John Doe"],
+        financial_impact_estimate="none",
+        victim_scale="multiple",
+        is_relevant=False,
+    )
+    mock_completion = _make_mock_completion(parsed)
+
+    with patch("app.pipeline.ai_processor.openai.AsyncOpenAI") as MockClient:
+        mock_instance = MockClient.return_value
+        mock_instance.beta.chat.completions.parse = AsyncMock(return_value=mock_completion)
+
+        with patch("app.pipeline.ai_processor.settings") as mock_settings:
+            mock_settings.openai_api_key = "sk-test"
+            mock_settings.openai_model = "gpt-4o-mini"
+            mock_settings.ai_max_retries = 1
+            mock_settings.ai_retry_delay_seconds = 0.0
+
+            result = await analyze_article(
+                title="Armed Coup Attack",
+                text="An armed coup attack resulted in multiple charges. " * 10,
+                matched_keywords=["conspiracy", "charged"],
+            )
+
+    assert result.is_relevant is False
+    assert result.primary_category == "Other"
+
+
+@pytest.mark.asyncio
 async def test_analyze_article_rate_limit_then_success():
     """First attempt raises RateLimitError, second succeeds."""
     parsed = _make_parsed_analysis(is_relevant=True)

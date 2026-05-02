@@ -146,6 +146,7 @@ async def _process_single_item(
             raw_item_id=raw_item.id,
             is_relevant=False,
             matched_keywords=[],
+            is_published=False,
             processed_at=datetime.now(timezone.utc),
         )
         session.add(alert)
@@ -168,6 +169,7 @@ async def _process_single_item(
             raw_item_id=raw_item.id,
             is_relevant=False,
             matched_keywords=matched_keywords,
+            is_published=False,
             processed_at=datetime.now(timezone.utc),
         )
         session.add(alert)
@@ -189,6 +191,7 @@ async def _process_single_item(
             victim_scale_raw=ai_result.victim_scale,
             ai_model=ai_result.ai_model,
             is_relevant=False,
+            is_published=False,
             processed_at=datetime.now(timezone.utc),
         )
         session.add(alert)
@@ -208,13 +211,23 @@ async def _process_single_item(
     )
 
     # --- Step 4: Create ProcessedAlert ---
-    # Tier 1 auto-publish: relevant + score >= 16 + source credibility >= 4.
+    # Tier 1 auto-publish: relevant + score >= 16 + source credibility >= 4 + allowed category.
     # Uses source.credibility_score directly (authoritative) rather than the
     # derived score_source_credibility field which maps the same value 1-5.
+    
+    ALLOWED_PUBLISH_CATEGORIES = {
+        "Investment Fraud",
+        "Cybercrime",
+        "Consumer Scam",
+        "Money Laundering",
+        "Cryptocurrency Fraud",
+    }
+    
     _now = datetime.now(timezone.utc)
     tier1 = (
         score_result.signal_score_total >= 16
         and (source.credibility_score or 0) >= 4
+        and ai_result.primary_category in ALLOWED_PUBLISH_CATEGORIES
     )
 
     alert = ProcessedAlert(
