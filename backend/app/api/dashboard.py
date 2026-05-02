@@ -136,14 +136,14 @@ async def dashboard_index(
     if category:
         base_stmt = base_stmt.where(ProcessedAlert.primary_category == category)
 
-    base_stmt = base_stmt.offset(offset).limit(limit)
-    result = await db.execute(base_stmt)
-    all_alerts = result.scalars().all()
+    async def _get_alerts_by_risk(risk_level: str):
+        stmt = base_stmt.where(ProcessedAlert.risk_level == risk_level).offset(offset).limit(limit)
+        result = await db.execute(stmt)
+        return result.scalars().all()
 
-    # Separate by risk level
-    high_alerts = [a for a in all_alerts if a.risk_level == "high"]
-    medium_alerts = [a for a in all_alerts if a.risk_level == "medium"]
-    low_alerts = [a for a in all_alerts if a.risk_level == "low"]
+    high_alerts = await _get_alerts_by_risk("high")
+    medium_alerts = await _get_alerts_by_risk("medium")
+    low_alerts = await _get_alerts_by_risk("low")
 
     # Stats
     count_result = await db.execute(
@@ -214,6 +214,7 @@ async def dashboard_index(
                 "high_count": high_count,
                 "medium_count": medium_count,
                 "low_count": low_count,
+                "max_count": max(high_count, medium_count, low_count),
                 "total_events": total_events,
                 "processed_today": processed_today,
             },
