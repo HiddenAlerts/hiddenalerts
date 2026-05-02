@@ -161,20 +161,91 @@ class PublicAlertRead(BaseModel):
     published_at: datetime | None = None
 
 
-class PublicAlertDetail(PublicAlertRead):
-    """Extended public alert detail — adds a few safe extra fields for the detail page/modal.
+class PublicKeyIntelItem(BaseModel):
+    """Structured key-intelligence data point for the public detail view.
 
-    Intentionally does NOT include: review history, score breakdowns, moderation state,
-    raw entities_json, ai_model, financial_impact_estimate, victim_scale_raw, or
-    is_published / is_relevant flags.
-
-    Only returned by GET /api/alerts/{id}.
+    Values are short single-line strings (no narrative paragraphs).
     """
 
-    processed_at: datetime | None = None
+    label: str
+    value: str
+
+
+class PublicTimelineItem(BaseModel):
+    """Single timeline entry on the public detail view."""
+
+    date: str  # ISO 8601 string
+    event: str
+
+
+class PublicRelatedSignal(BaseModel):
+    """Reference to another published alert linked via shared event."""
+
+    id: int
+    title: str | None = None
+    score: int | None = None
+    risk_level: str | None = None  # Title case: "High" | "Medium" | "Low"
+
+
+class PublicSourceRef(BaseModel):
+    """Source reference shown on the public detail view."""
+
+    name: str
+    url: str | None = None
+
+
+class PublicAlertDetail(BaseModel):
+    """Enriched public alert detail — Ken-approved frontend-facing schema (M3 frontend completion).
+
+    Returned by GET /api/alerts/{id} for published alerts only.
+
+    Fields are split into:
+      1. Ken's primary frontend-facing fields (with derived enrichments).
+      2. Backward-compatibility additive fields preserved from the prior contract.
+
+    Optional sections (why_it_matters, key_intelligence, risk_assessment, sources,
+    affected_group, timeline, related_signals, subcategory) are omitted from the
+    JSON response when their underlying data is empty — the route uses
+    response_model_exclude_none=True.
+
+    Intentionally does NOT include: review history, score breakdowns,
+    moderation state, raw entities_json, ai_model, raw financial_impact_estimate,
+    raw victim_scale_raw, is_published, is_relevant, published_by_user_id,
+    matched_keywords.
+    """
+
+    # ----- Ken's primary fields -----
+    id: int
+    title: str | None = None
+    score: int | None = None
+    risk_level: str | None = None  # Title case: "High" | "Medium" | "Low"
+    confidence: str | None = None  # Title case: "High" | "Medium" | "Low" — derived
+    summary: str | None = None
+
+    why_it_matters: list[str] | None = None
+    key_intelligence: list[PublicKeyIntelItem] | None = None
+    risk_assessment: str | None = None
+
+    sources: list[PublicSourceRef] | None = None
+    published_date: datetime | None = None
+
+    category: str | None = None
+    subcategory: str | None = None  # mirrors secondary_category
+    affected_group: str | None = None
+
+    timeline: list[PublicTimelineItem] | None = None
+    related_signals: list[PublicRelatedSignal] | None = None
+
+    # ----- Backward-compatibility additive fields (kept; do not remove) -----
+    signal_score: int | None = None
     secondary_category: str | None = None
-    # Flat entity list normalised from internal {"names": [...]} structure.
-    # Empty list when entities are absent or in an unexpected format.
+    source_name: str | None = None
+    source_url: str | None = None
+    source_published_at: datetime | None = None
+    published_at: datetime | None = None
+    processed_at: datetime | None = None
+    # Default [] preserves the prior contract — entities is always present even
+    # when there are no extracted names.
     entities: list[str] = []
 
 
