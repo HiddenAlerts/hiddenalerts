@@ -367,6 +367,148 @@ async def dashboard_submit_review(
 
 
 # ---------------------------------------------------------------------------
+# Events Hub view
+# ---------------------------------------------------------------------------
+
+
+@router.get("/dashboard/events", response_class=HTMLResponse)
+async def dashboard_events(
+    request: Request,
+    offset: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    try:
+        current_user = await get_current_user(request, db)
+    except HTTPException:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    if current_user.role != "admin":
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    # Base query for active events
+    base_stmt = select(Event).order_by(Event.last_updated_at.desc())
+
+    # Fetch paginated events
+    events_result = await db.execute(base_stmt.offset(offset).limit(limit))
+    events = events_result.scalars().all()
+
+    # Get total count
+    count_result = await db.execute(select(func.count()).select_from(Event))
+    total_events = count_result.scalar() or 0
+
+    # Get source counts for each event
+    # We can do this efficiently with a group by query
+    source_counts = {}
+    if events:
+        event_ids = [e.id for e in events]
+        count_stmt = (
+            select(
+                EventSource.event_id,
+                func.count(func.distinct(EventSource.source_name)).label("source_count")
+            )
+            .where(EventSource.event_id.in_(event_ids))
+            .group_by(EventSource.event_id)
+        )
+        counts_res = await db.execute(count_stmt)
+        for row in counts_res.all():
+            source_counts[row.event_id] = row.source_count
+
+    event_contexts = []
+    for event in events:
+        event_contexts.append({
+            "id": event.id,
+            "title": event.title,
+            "risk_level": event.risk_level,
+            "category": event.category,
+            "primary_entity": event.primary_entity,
+            "last_updated_at": event.last_updated_at,
+            "source_count": source_counts.get(event.id, 0)
+        })
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/events.html",
+        context={
+            "current_user": current_user,
+            "events": event_contexts,
+            "offset": offset,
+            "limit": limit,
+            "total_events": total_events,
+        },
+    )
+
+
+@router.get("/dashboard/events/{event_id}", response_class=HTMLResponse)
+async def dashboard_event_detail(
+    request: Request,
+    event_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    try:
+        current_user = await get_current_user(request, db)
+    except HTTPException:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    if current_user.role != "admin":
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    result = await db.execute(
+        select(Event)
+        .where(Event.id == event_id)
+        .options(
+            selectinload(Event.event_sources)
+            .selectinload(EventSource.alert)
+            .selectinload(ProcessedAlert.raw_item)
+            .selectinload(RawItem.source)
+        )
+    )
+    event = result.scalar_one_or_none()
+    if event is None:
+        return RedirectResponse(url="/dashboard/events", status_code=status.HTTP_302_FOUND)
+
+    # Extract all related alerts
+    alerts = []
+    for es in event.event_sources:
+        if es.alert:
+            alerts.append(es.alert)
+
+    # Sort alerts chronologically (oldest to newest for timeline view)
+    alerts.sort(key=lambda a: a.processed_at)
+
+    alert_contexts = []
+    for alert in alerts:
+        alert_contexts.append({
+            "id": alert.id,
+            "title": alert.raw_item.title if alert.raw_item else "Untitled",
+            "source_name": alert.raw_item.source.name if alert.raw_item and alert.raw_item.source else None,
+            "item_url": alert.raw_item.item_url if alert.raw_item else None,
+            "risk_level": alert.risk_level,
+            "processed_at": alert.processed_at,
+            "source_published_at": alert.raw_item.published_at if alert.raw_item else None,
+            "matched_keywords": alert.matched_keywords or [],
+        })
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/event_detail.html",
+        context={
+            "current_user": current_user,
+            "event": {
+                "id": event.id,
+                "title": event.title,
+                "risk_level": event.risk_level,
+                "category": event.category,
+                "primary_entity": event.primary_entity,
+                "first_detected_at": event.first_detected_at,
+                "last_updated_at": event.last_updated_at,
+            },
+            "alerts": alert_contexts,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Monitoring view
 # ---------------------------------------------------------------------------
 

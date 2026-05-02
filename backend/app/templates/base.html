@@ -37,6 +37,12 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link {% if active_page == 'events' %}active{% endif %}"
+                       href="/dashboard/events">
+                        <i class="bi bi-calendar3-event me-1"></i>Events
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a class="nav-link {% if active_page == 'monitoring' %}active{% endif %}"
                        href="/dashboard/monitoring">
                         <i class="bi bi-activity me-1"></i>Monitoring
