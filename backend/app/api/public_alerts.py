@@ -85,10 +85,42 @@ def _detail_stmt():
 # Pure derivation helpers (frontend-facing detail enrichment)
 # ---------------------------------------------------------------------------
 
+# M3 thresholds — public endpoints derive risk_level from signal_score_total
+# rather than reading the stored risk_level column. This guards against stale
+# values on alerts that were processed before threshold recalibration.
+_RISK_HIGH_THRESHOLD = 16
+_RISK_MEDIUM_THRESHOLD = 9
+
+
+def _risk_from_score(score: int | None, *, title_case: bool = False) -> str | None:
+    """Derive displayed risk level from signal_score_total per current M3 thresholds.
+
+    Thresholds:
+      score >= 16 -> high
+      9 <= score <= 15 -> medium
+      score < 9 -> low
+
+    Returns None when score is None — frontend treats absence as unknown.
+    Used by all public endpoints; do NOT use the stored risk_level column for
+    public display.
+    """
+    if score is None:
+        return None
+    if score >= _RISK_HIGH_THRESHOLD:
+        return "High" if title_case else "high"
+    if score >= _RISK_MEDIUM_THRESHOLD:
+        return "Medium" if title_case else "medium"
+    return "Low" if title_case else "low"
+
 
 def _title_case_level(level: str | None) -> str | None:
     """Convert lowercase risk-level value ('high'/'medium'/'low') to title case."""
     return level.capitalize() if level else None
+
+
+def _entity_set(entities_json: Any) -> set[str]:
+    """Extract a normalized (lowercase, stripped) entity-name set from entities_json."""
+    return {e.strip().lower() for e in _flat_entities(entities_json) if e and e.strip()}
 
 
 def _credibility_label(score: int | None) -> str | None:
@@ -239,9 +271,69 @@ def _why_it_matters(alert: ProcessedAlert) -> list[str] | None:
     return bullets[:3] or None
 
 
+def _comma_and_join(items: list[str]) -> str:
+    """Join phrases as 'A', 'A and B', or 'A, B, and C' (Oxford-comma style)."""
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def _risk_factor_phrases(alert: ProcessedAlert) -> list[str]:
+    """Pick out which strong factors are driving this alert's risk level.
+
+    Returns 0..N short reason phrases derived from the per-factor scores and
+    raw AI fields. Pure function — no DB, no AI. Order is meaningful: the
+    most decision-relevant factors come first so we can take the top few when
+    composing a one-line risk_assessment.
+    """
+    phrases: list[str] = []
+
+    if (alert.score_source_credibility or 0) >= 4:
+        phrases.append("trusted source reporting")
+
+    fi_raw = (alert.financial_impact_estimate or "").strip().lower()
+    fi_meaningful = bool(fi_raw) and fi_raw not in ("unknown", "none", "n/a")
+    if (alert.score_financial_impact or 0) >= 4 or fi_meaningful:
+        phrases.append("notable financial impact")
+
+    vs_raw = (alert.victim_scale_raw or "").strip().lower()
+    if (alert.score_victim_scale or 0) >= 4 or vs_raw == "nationwide":
+        phrases.append("broad victim scope")
+
+    if (alert.score_cross_source or 0) >= 3:
+        phrases.append("cross-source support")
+
+    if (alert.score_trend_acceleration or 0) >= 3:
+        phrases.append("rising trend signal")
+
+    return phrases
+
+
 def _risk_assessment(alert: ProcessedAlert) -> str:
-    """Short one-to-two-line explanation tied to risk_level. Deterministic — no AI."""
-    risk = (alert.risk_level or "low").lower()
+    """Short, deterministic one-line explanation of risk tied to actual factors.
+
+    Pulls strong factors via `_risk_factor_phrases` and composes a single
+    sentence using the *derived* public risk level (M3 thresholds applied to
+    `signal_score_total`). Falls back to the prior generic copy when no strong
+    factors qualify, so a concise sentence is always returned.
+
+    Per-factor raw values (`score_*`, `financial_impact_estimate`,
+    `victim_scale_raw`) are NEVER returned to the public — only the derived
+    natural-language phrases are.
+    """
+    risk = _risk_from_score(alert.signal_score_total) or "low"
+    label = {"high": "High risk", "medium": "Medium risk", "low": "Low risk"}[risk]
+
+    phrases = _risk_factor_phrases(alert)
+    if phrases:
+        # Cap at 3 to keep the sentence scannable even for fully-loaded alerts.
+        return f"{label} due to {_comma_and_join(phrases[:3])}."
+
+    # Generic fallbacks — concise, single sentence each.
     if risk == "high":
         return (
             "High risk based on credible source reporting and strong supporting "
@@ -297,20 +389,47 @@ def _sources_list(alert: ProcessedAlert) -> list[dict] | None:
     ]
 
 
+_RELATED_SIGNALS_MIN = 2
+_RELATED_SIGNALS_MAX = 4
+
+
 async def _related_signals(
     db: AsyncSession,
     alert: ProcessedAlert,
-    max_items: int = 4,
+    max_items: int = _RELATED_SIGNALS_MAX,
 ) -> list[dict] | None:
-    """Find up to `max_items` other published alerts linked to the same event(s).
+    """Find 2-4 other published alerts that are *cleanly* related to the current one.
 
-    Linkage is via the event_sources bridge table (events ↔ processed_alerts).
-    Returns None when the alert has no event linkage or no published peers.
+    Cleanness rule (Ken's spec, M3 cleanup): a candidate must
+      - share at least one event_id with the current alert (via event_sources), AND
+      - share at least one named entity with the current alert
+        (case-insensitive overlap on entities_json["names"]).
+
+    Event-grouping alone proved too broad in live QA — co-grouped alerts could
+    drift semantically. The entity-overlap requirement keeps the section to
+    alerts that genuinely share a named subject (company, individual, domain).
+
+    Quantity rule: returns None unless **at least 2** qualifying peers exist
+    (Ken: "two to four items max"). A single peer is rendered as the "Related"
+    section by the frontend even though it offers little value, so we omit
+    the section entirely below the min.
+
+    Returns None when the alert has no event linkage, no entities of its own to
+    overlap on, or fewer than 2 qualifying published peers. Risk level on each
+    related item is derived from signal_score_total (M3 thresholds), not the
+    stored column.
     """
     event_ids = [
         es.event_id for es in (alert.event_sources or []) if es.event_id is not None
     ]
     if not event_ids:
+        return None
+
+    current_entities = _entity_set(alert.entities_json)
+    if not current_entities:
+        # No entity set on the current alert — overlap cannot be evaluated, so
+        # we omit the section rather than risk surfacing semantically unrelated
+        # peers that only share an event grouping.
         return None
 
     stmt = (
@@ -323,20 +442,22 @@ async def _related_signals(
         )
         .options(selectinload(ProcessedAlert.raw_item))
         .order_by(ProcessedAlert.published_at.desc().nullslast())
-        .limit(max_items)
     )
     result = await db.execute(stmt)
-    related = []
+
+    related: list[ProcessedAlert] = []
     seen_ids: set[int] = set()
     for a in result.scalars().all():
         if a.id in seen_ids:
             continue
         seen_ids.add(a.id)
+        if not (current_entities & _entity_set(a.entities_json)):
+            continue  # event-grouped but semantically unrelated — skip
         related.append(a)
         if len(related) >= max_items:
             break
 
-    if not related:
+    if len(related) < _RELATED_SIGNALS_MIN:
         return None
 
     return [
@@ -344,7 +465,7 @@ async def _related_signals(
             "id": a.id,
             "title": a.raw_item.title if a.raw_item else None,
             "score": a.signal_score_total,
-            "risk_level": _title_case_level(a.risk_level),
+            "risk_level": _risk_from_score(a.signal_score_total, title_case=True),
         }
         for a in related
     ]
@@ -371,7 +492,9 @@ def _to_public_read(alert: ProcessedAlert) -> PublicAlertRead:
         title=title,
         summary=alert.summary,
         category=alert.primary_category,
-        risk_level=alert.risk_level,
+        # Derived from signal_score_total (M3 thresholds) — not the stored
+        # risk_level column. Older alerts may have stale stored values.
+        risk_level=_risk_from_score(alert.signal_score_total),
         signal_score=alert.signal_score_total,
         source_name=source_name,
         source_url=source_url,
@@ -402,7 +525,8 @@ async def _to_public_detail(
         id=alert.id,
         title=title,
         score=alert.signal_score_total,
-        risk_level=_title_case_level(alert.risk_level),
+        # Title case + derived from signal_score_total (M3 thresholds).
+        risk_level=_risk_from_score(alert.signal_score_total, title_case=True),
         confidence=_confidence(alert),
         summary=alert.summary,
         why_it_matters=_why_it_matters(alert),
@@ -453,7 +577,25 @@ async def list_public_alerts(
     )
 
     if risk_level is not None:
-        stmt = stmt.where(ProcessedAlert.risk_level == risk_level.lower())
+        # Filter on derived score buckets, matching how risk_level is displayed.
+        # Unknown values match nothing (consistent with prior behaviour where an
+        # invalid value matched no rows in the stored column).
+        rl = risk_level.lower()
+        if rl == "high":
+            stmt = stmt.where(
+                ProcessedAlert.signal_score_total >= _RISK_HIGH_THRESHOLD
+            )
+        elif rl == "medium":
+            stmt = stmt.where(
+                ProcessedAlert.signal_score_total >= _RISK_MEDIUM_THRESHOLD,
+                ProcessedAlert.signal_score_total < _RISK_HIGH_THRESHOLD,
+            )
+        elif rl == "low":
+            stmt = stmt.where(
+                ProcessedAlert.signal_score_total < _RISK_MEDIUM_THRESHOLD
+            )
+        else:
+            stmt = stmt.where(ProcessedAlert.id == -1)  # no rows
 
     if category is not None:
         stmt = stmt.where(ProcessedAlert.primary_category == category)
@@ -486,16 +628,33 @@ async def get_public_stats(
     - category_breakdown: per-primary_category counts, ordered by count DESC
       then category ASC. Rows with null primary_category are excluded.
     """
+    # Counts are derived from signal_score_total (M3 thresholds), matching how
+    # risk_level is displayed on list/detail. Alerts with null scores are
+    # counted in `total` but fall outside every bucket — same behaviour as
+    # null-risk_level rows had previously.
     count_stmt = select(
         func.count().label("total"),
         func.count(
-            case((ProcessedAlert.risk_level == "high", 1), else_=None)
+            case(
+                (ProcessedAlert.signal_score_total >= _RISK_HIGH_THRESHOLD, 1),
+                else_=None,
+            )
         ).label("high"),
         func.count(
-            case((ProcessedAlert.risk_level == "medium", 1), else_=None)
+            case(
+                (
+                    (ProcessedAlert.signal_score_total >= _RISK_MEDIUM_THRESHOLD)
+                    & (ProcessedAlert.signal_score_total < _RISK_HIGH_THRESHOLD),
+                    1,
+                ),
+                else_=None,
+            )
         ).label("medium"),
         func.count(
-            case((ProcessedAlert.risk_level == "low", 1), else_=None)
+            case(
+                (ProcessedAlert.signal_score_total < _RISK_MEDIUM_THRESHOLD, 1),
+                else_=None,
+            )
         ).label("low"),
     ).where(ProcessedAlert.is_published.is_(True))
 

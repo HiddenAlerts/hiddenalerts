@@ -535,7 +535,7 @@ Tests use an in-memory SQLite database — no PostgreSQL or OpenAI key required.
 pytest tests/ -v
 ```
 
-**104 tests, 0 failures.** Test breakdown:
+**189 tests, 0 failures.** Test breakdown:
 
 | File | Tests | What it covers |
 |------|-------|---------------|
@@ -546,9 +546,9 @@ pytest tests/ -v
 | `test_health.py` | 5 | API health, sources, raw-items, stats smoke tests |
 | `test_auth.py` | 24 | Password/JWT utilities; JSON login (admin + subscriber); Bearer + cookie auth; change-password; role enforcement; inactive user; backwards compat |
 | `test_alerts_api.py` | 21 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation; publication state; approval publish; client feed access control |
-| `test_public_alerts.py` | 25 | Public list (no auth, published-only, field mapping, ordering, filters); public detail (200/404, safe fields, entity unwrapping); public stats (counts, category breakdown, null handling, empty state) |
-| `test_signal_scorer.py` | 33 | All 5 scoring factors; new M3 thresholds; boundary tests; recalibrated victim/financial buckets; realistic alert scenarios |
-| **Total** | **153** | |
+| `test_public_alerts.py` | 61 | Public list (no auth, published-only, field mapping, ordering, filters); enriched detail (Ken's frontend schema — confidence, why_it_matters, key_intelligence, risk_assessment with strong-factor enrichment, sources, timeline, related_signals; safe-fields-only); public stats (counts, breakdown, empty state); derived risk_level from score on every public endpoint; related_signals entity-overlap + 2–4 quantity rule |
+| `test_signal_scorer.py` | 41 | All 5 scoring factors; M3 thresholds; boundary tests; recalibrated victim/financial buckets; realistic alert scenarios |
+| **Total** | **189** | |
 
 ---
 
