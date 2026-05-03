@@ -1,7 +1,13 @@
+export { DashboardAlertGroup } from './DashboardAlertGroup';
+export { DashboardAlertListItem } from './DashboardAlertListItem';
 export { DashboardAlertMiniRow } from './DashboardAlertMiniRow';
+export { DashboardPageHeader } from './DashboardPageHeader';
+export { DashboardRiskScoreLegend } from './DashboardRiskScoreLegend';
+export { DashboardRiskSummaryCard } from './DashboardRiskSummaryCard';
 export { DashboardRiskTable } from './DashboardRiskTable';
 export { DashboardScreen } from './DashboardScreen';
 export { DashboardShell } from './DashboardShell';
 export { DashboardStatCard } from './DashboardStatCard';
+export { DashboardUnlockCta } from './DashboardUnlockCta';
 export { Sidebar } from './Sidebar';
 export { TopBar } from './TopBar';
