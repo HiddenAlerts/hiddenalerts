@@ -8,6 +8,8 @@ export type AlertApiRecord = {
   source_name: string;
   source_url: string;
   published_at: string;
+  /** When the original source published the material (UTC). */
+  source_published_at?: string | null;
   processed_at?: string;
   secondary_category?: string | null;
   entities?: string[];

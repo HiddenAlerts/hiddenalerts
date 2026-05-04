@@ -1,6 +1,10 @@
 'use client';
 
-import { confidenceLabelFromRisk, scoreVisualTone } from '@/lib/alertDisplay';
+import {
+  alertDisplayedAtIso,
+  confidenceLabelFromRisk,
+  scoreVisualTone,
+} from '@/lib/alertDisplay';
 import {
   DashboardCategoryIcon,
   formatDashboardAlertTypeLabel,
@@ -72,8 +76,9 @@ export const DashboardAlertListItem: FC<DashboardAlertListItemProps> = ({
   const scoreDisplay =
     typeof alert.signalScore === 'number' ? String(alert.signalScore) : '—';
   const riskWord = confidenceLabelFromRisk(alert.riskLevelLabel);
-  const dateLine = formatDashboardAlertDateOnlyUtc(alert.occurredAt);
-  const timeLine = formatDashboardAlertTimeUtcLine(alert.occurredAt);
+  const displayedAtIso = alertDisplayedAtIso(alert);
+  const dateLine = formatDashboardAlertDateOnlyUtc(displayedAtIso);
+  const timeLine = formatDashboardAlertTimeUtcLine(displayedAtIso);
 
   const scorePhrase =
     scoreDisplay === '—'

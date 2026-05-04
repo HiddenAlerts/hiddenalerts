@@ -18,4 +18,6 @@ export type AlertItem = {
   /** Used for the category filter */
   category: string;
   occurredAt: string;
+  /** From API `source_published_at` when set; drives source-facing date/time in lists. */
+  sourcePublishedAt?: string;
 };
