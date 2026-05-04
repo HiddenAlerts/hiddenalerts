@@ -23,7 +23,8 @@ Both admin and subscriber surfaces authenticate through the same backend. Token 
 0. [**Public Feed — Current Frontend MVP Endpoints**](#0-public-feed--current-frontend-mvp-endpoints)
    - [GET /api/alerts](#01-get-apialerts--published-alert-list)
    - [GET /api/alerts/{id}](#02-get-apialertsid--published-alert-detail-new)
-   - [GET /api/alerts/stats](#03-get-apialertsstats--published-alert-stats-new)
+   - [GET /api/alerts/top](#03-get-apialertstop--curated-top-alerts-new)
+   - [GET /api/alerts/stats](#04-get-apialertsstats--published-alert-stats-new)
 1. [Authentication Overview](#1-authentication-overview)
 2. [Auth Endpoints](#2-auth-endpoints)
 3. [Alerts — Admin](#3-alerts--admin)
@@ -265,7 +266,77 @@ curl http://localhost:8000/api/alerts/42
 
 ---
 
-### 0.3 GET /api/alerts/stats — Published Alert Stats *(NEW)*
+### 0.3 GET /api/alerts/top — Curated Top Alerts *(NEW)*
+
+```
+GET /api/alerts/top
+```
+
+**No authentication required.** Returns the strongest 3 published alerts for a
+dashboard hero panel. Same response shape as `GET /api/alerts` so the same
+list-card UI can consume it.
+
+**Response `200 OK`:**
+```json
+{
+  "alerts": [
+    {
+      "id": 87,
+      "title": "DOJ Indicts Crypto Network in $50M Money Laundering Case",
+      "summary": "...",
+      "category": "Money Laundering",
+      "risk_level": "high",
+      "signal_score": 22,
+      "source_name": "DOJ Press Releases",
+      "source_url": "https://justice.gov/...",
+      "source_published_at": "2026-04-21T13:00:00Z",
+      "published_at": "2026-04-21T15:11:08Z"
+    }
+  ]
+}
+```
+
+Field reference is identical to `0.1 GET /api/alerts` — see that table.
+
+**What `top` selects (deterministic, server-side):**
+
+1. **Threshold:** only published alerts with `signal_score_total >= 15`. This
+   maps Ken's "risk ≥ 60" target to the 0–25 backend scale (60% of 25). The
+   threshold sits intentionally below the high cutoff (16) so genuinely strong
+   medium-high alerts qualify.
+2. **Ranking** (descending priority):
+   1. `signal_score_total` — score wins.
+   2. **Signal strength** — number of `event_sources` bridges attached to the
+      alert (more sources confirming the event ranks higher).
+   3. **Source credibility** (1–5 from `sources.credibility_score`).
+   4. **Recency** — `source_published_at` → platform `published_at` →
+      `processed_at`, whichever is available first.
+3. **Duplicate-entity suppression** — if the alert's primary entity (first
+   non-empty name from `entities_json["names"]`, lowercase + stripped) has
+   already been claimed by a higher-ranked alert, the alert is skipped. This
+   prevents the panel from showing two cards about the same company /
+   individual / domain.
+4. **Cap:** at most 3 alerts. May return fewer (or `{"alerts": []}`) if not
+   enough alerts qualify — frontend should handle the empty case gracefully.
+
+**No internal fields are exposed.** Score components, AI metadata, raw
+victim/financial fields, moderation status, and `entities_json` are never in
+the response — same field-leakage protection as `GET /api/alerts`.
+
+**Errors:**
+
+| Status | Reason |
+|--------|--------|
+| `200` | Always (returns `{"alerts": []}` when nothing qualifies) |
+
+**Quick Test:**
+```bash
+curl http://localhost:8000/api/alerts/top
+```
+
+---
+
+### 0.4 GET /api/alerts/stats — Published Alert Stats *(NEW)*
 
 ```
 GET /api/alerts/stats
@@ -1001,6 +1072,7 @@ These are **not JSON API routes** — they return HTML pages rendered with Jinja
 | `GET /api/v1/auth/me` | ✅ | ✅ | ❌ 401 |
 | `GET /api/alerts` | ✅ | ✅ | ✅ |
 | `GET /api/alerts/{id}` | ✅ | ✅ | ✅ |
+| `GET /api/alerts/top` | ✅ | ✅ | ✅ |
 | `GET /api/alerts/stats` | ✅ | ✅ | ✅ |
 | `POST /api/v1/auth/change-password` | ✅ | ✅ | ❌ 401 |
 | `GET /api/v1/alerts` | ✅ | ✅ | ❌ 401 |

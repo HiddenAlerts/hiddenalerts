@@ -226,7 +226,8 @@ async def _process_single_item(
     
     _now = datetime.now(timezone.utc)
     tier1 = (
-        score_result.signal_score_total >= 16
+        ai_result.is_relevant
+        and score_result.signal_score_total >= 16
         and (source.credibility_score or 0) >= 4
         and ai_result.primary_category in ALLOWED_PUBLISH_CATEGORIES
     )

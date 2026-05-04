@@ -9,6 +9,7 @@ import pytest
 from app.pipeline.ai_processor import (
     AIAnalysisResult,
     AIProcessingError,
+    SYSTEM_PROMPT,
     analyze_article,
 )
 
@@ -229,3 +230,34 @@ async def test_analyze_article_no_api_key():
                 text="test content " * 20,
                 matched_keywords=["fraud"],
             )
+
+
+# ---------------------------------------------------------------------------
+# SYSTEM_PROMPT content tests — verify Ken's financial-risk intelligence scope
+# ---------------------------------------------------------------------------
+
+
+def test_system_prompt_includes_financial_risk_intelligence_scope():
+    """Prompt must call out OFAC/sanctions, governance, liquidity, transparency,
+    and network exposure as relevant financial-risk signals."""
+    assert "FINANCIAL RISK INTELLIGENCE SCOPE" in SYSTEM_PROMPT
+    for phrase in (
+        "OFAC",
+        "sanctions",
+        "governance failure",
+        "transparency failure",
+        "liquidity risk",
+        "network exposure",
+        "blocked entities",
+    ):
+        assert phrase in SYSTEM_PROMPT, f"Missing financial-risk phrase: {phrase!r}"
+
+
+def test_system_prompt_conditions_cybercrime_and_organized_crime_on_financial_relevance():
+    """Cybercrime and organized crime must be conditional on financial relevance,
+    not blanket-relevant categories."""
+    assert "Cybercrime IS relevant only when tied to" in SYSTEM_PROMPT
+    assert "Organized crime IS relevant only when" in SYSTEM_PROMPT
+    # General arrests / fugitives must be explicitly excluded from default relevance
+    assert "General arrests" in SYSTEM_PROMPT
+    assert "fugitives" in SYSTEM_PROMPT

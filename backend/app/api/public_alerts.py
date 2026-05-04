@@ -392,6 +392,16 @@ def _sources_list(alert: ProcessedAlert) -> list[dict] | None:
 _RELATED_SIGNALS_MIN = 2
 _RELATED_SIGNALS_MAX = 4
 
+# Top Alerts — Ken's "risk >= 60" maps to signal_score_total >= 15 on the 0-25
+# scale (60% of 25). Sits intentionally below the high threshold (16) so genuinely
+# strong medium-high alerts qualify.
+_TOP_ALERTS_MIN_SCORE = 15
+_TOP_ALERTS_LIMIT = 3
+# SQL fetches this many candidates; Python applies the full multi-key sort and
+# duplicate-entity suppression. Larger pool gives the dedup more room without
+# adding a noticeable query cost.
+_TOP_ALERTS_CANDIDATE_POOL = 30
+
 
 async def _related_signals(
     db: AsyncSession,
@@ -469,6 +479,76 @@ async def _related_signals(
         }
         for a in related
     ]
+
+
+# ---------------------------------------------------------------------------
+# Top Alerts ranking helpers
+# ---------------------------------------------------------------------------
+
+
+def _primary_entity_key(alert: ProcessedAlert) -> str:
+    """Pick a stable dedup key for top-alerts.
+
+    First non-empty entity name from entities_json, normalized lowercase +
+    stripped. Falls back to "alert:{id}" so an alert with no entities is
+    unique rather than silently dropped.
+    """
+    for name in _flat_entities(alert.entities_json):
+        norm = name.strip().lower()
+        if norm:
+            return norm
+    return f"alert:{alert.id}"
+
+
+def _signal_strength(alert: ProcessedAlert) -> int:
+    """Number of event_sources bridges attached to this alert.
+
+    Higher means the alert participates in a multi-source event cluster, which
+    Ken counts as stronger corroboration. Requires event_sources eager-loaded.
+    """
+    return len(alert.event_sources or [])
+
+
+def _credibility_for_ranking(alert: ProcessedAlert) -> int:
+    """Source credibility (1-5) or 0 when unknown."""
+    if alert.raw_item and alert.raw_item.source:
+        return alert.raw_item.source.credibility_score or 0
+    return 0
+
+
+def _recency_for_ranking(alert: ProcessedAlert) -> float:
+    """Sortable timestamp; -inf when no date is available."""
+    dt = _published_date(alert)
+    return dt.timestamp() if dt else float("-inf")
+
+
+def _select_top_alerts(
+    candidates: list[ProcessedAlert],
+    *,
+    limit: int = _TOP_ALERTS_LIMIT,
+) -> list[ProcessedAlert]:
+    """Apply the full multi-key sort + duplicate-entity suppression."""
+    ranked = sorted(
+        candidates,
+        key=lambda a: (
+            -(a.signal_score_total or 0),
+            -_signal_strength(a),
+            -_credibility_for_ranking(a),
+            -_recency_for_ranking(a),
+            a.id,
+        ),
+    )
+    selected: list[ProcessedAlert] = []
+    seen_keys: set[str] = set()
+    for a in ranked:
+        key = _primary_entity_key(a)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        selected.append(a)
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 # ---------------------------------------------------------------------------
@@ -687,6 +767,51 @@ async def get_public_stats(
         low_count=low,
         category_breakdown=breakdown,
     )
+
+
+@router.get("/top", response_model=PublicAlertsResponse)
+async def list_top_alerts(
+    db: AsyncSession = Depends(get_db),
+) -> PublicAlertsResponse:
+    """Curated top alerts for the dashboard hero panel.
+
+    Public, no auth. At most 3 published alerts with signal_score_total >= 15
+    (Ken's "risk >= 60" mapped to the 0-25 scale), ranked by:
+
+      1. signal_score_total (desc)
+      2. signal strength = len(event_sources) (desc)
+      3. source credibility (desc)
+      4. recency = source-pub > platform-pub > processed (desc)
+      5. id asc — final deterministic tiebreaker
+
+    Duplicate primary entities are suppressed: if alert A's primary entity is
+    already in the selected set, alert B claiming the same entity is skipped.
+    Alerts with no entities use a per-alert fallback key so they are never
+    silently dropped — they're just unique against each other.
+
+    Returns {"alerts": []} when no alerts qualify (200 OK, empty list).
+    """
+    stmt = (
+        select(ProcessedAlert)
+        .where(
+            ProcessedAlert.is_published.is_(True),
+            ProcessedAlert.signal_score_total >= _TOP_ALERTS_MIN_SCORE,
+        )
+        .options(
+            selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source),
+            selectinload(ProcessedAlert.event_sources),
+        )
+        .order_by(
+            ProcessedAlert.signal_score_total.desc().nullslast(),
+            ProcessedAlert.published_at.desc().nullslast(),
+            ProcessedAlert.processed_at.desc(),
+        )
+        .limit(_TOP_ALERTS_CANDIDATE_POOL)
+    )
+    result = await db.execute(stmt)
+    candidates = list(result.scalars().unique().all())
+    selected = _select_top_alerts(candidates)
+    return PublicAlertsResponse(alerts=[_to_public_read(a) for a in selected])
 
 
 @router.get(
