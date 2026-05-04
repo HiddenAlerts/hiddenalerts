@@ -158,7 +158,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
               tabIndex={-1}
               disabled={disabled}
               onClick={handleTogglePassword}
-              className="text-muted hover:text-foreground ml-2 shrink-0 disabled:opacity-40"
+              className="text-muted hover:text-foreground ml-2 shrink-0 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
               aria-label={passwordVisible ? 'Hide password' : 'Show password'}
             >
               {passwordVisible ? (

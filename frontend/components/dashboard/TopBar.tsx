@@ -20,7 +20,7 @@ export const TopBar: FC<TopBarProps> = ({ onOpenSidebar, className }) => (
     <button
       type="button"
       onClick={onOpenSidebar}
-      className="text-muted hover:text-foreground hover:bg-surface inline-flex size-10 items-center justify-center rounded-md lg:hidden"
+      className="text-muted hover:text-foreground hover:bg-surface inline-flex size-10 cursor-pointer items-center justify-center rounded-md lg:hidden"
       aria-label="Open menu"
     >
       <Menu className="size-5" />
@@ -43,7 +43,7 @@ export const TopBar: FC<TopBarProps> = ({ onOpenSidebar, className }) => (
     <div className="ml-auto flex items-center gap-1 sm:gap-2">
       <button
         type="button"
-        className="text-muted hover:text-foreground hover:bg-surface inline-flex size-10 items-center justify-center rounded-md"
+        className="text-muted hover:text-foreground hover:bg-surface inline-flex size-10 cursor-pointer items-center justify-center rounded-md"
         aria-label="Notifications"
       >
         <Bell className="size-5" />
@@ -51,7 +51,7 @@ export const TopBar: FC<TopBarProps> = ({ onOpenSidebar, className }) => (
 
       <button
         type="button"
-        className="hover:bg-surface inline-flex items-center gap-1 rounded-md py-1 pr-1 pl-1 sm:pr-2"
+        className="hover:bg-surface inline-flex cursor-pointer items-center gap-1 rounded-md py-1 pr-1 pl-1 sm:pr-2"
         aria-label="Account menu"
       >
         <Avatar size="sm" alt="Account" />

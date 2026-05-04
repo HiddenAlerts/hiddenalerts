@@ -164,6 +164,9 @@ export const DashboardScreen: FC = () => {
           viewAllHref="/alerts?risk=low"
           riskTone="low"
           emptyMessage="No low-risk alerts."
+          collapsible
+          defaultCollapsed
+          collapsedSummary="Low risk alerts are collapsed by default"
         >
           {lowSorted.slice(0, DASHBOARD_ALERTS_PER_RISK).map(alert => (
             <DashboardAlertListItem key={alert.id} alert={alert} />

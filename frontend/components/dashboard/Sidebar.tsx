@@ -56,7 +56,7 @@ export const Sidebar: FC<SidebarProps> = ({
           href="/dashboard"
           onClick={onCloseMobile}
           className={cn(
-            'text-foreground inline-flex min-w-0 items-center gap-2 font-semibold',
+            'text-foreground inline-flex min-w-0 cursor-pointer items-center gap-2 font-semibold',
             collapsed && 'lg:w-full lg:min-w-0 lg:justify-center',
           )}
         >
@@ -85,7 +85,7 @@ export const Sidebar: FC<SidebarProps> = ({
           type="button"
           onClick={onToggleCollapse}
           className={cn(
-            'text-muted hover:text-foreground hover:bg-surface hidden size-9 shrink-0 items-center justify-center rounded-md transition-colors lg:inline-flex',
+            'text-muted hover:text-foreground hover:bg-surface hidden size-9 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors lg:inline-flex',
           )}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
@@ -107,7 +107,7 @@ export const Sidebar: FC<SidebarProps> = ({
               title={collapsed ? label : undefined}
               onClick={onCloseMobile}
               className={cn(
-                'flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
+                'flex cursor-pointer items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
                 'lg:justify-start',
                 collapsed && 'lg:justify-center lg:px-0',
                 active

@@ -53,7 +53,7 @@ export const DashboardRiskSummaryCard: FC<DashboardRiskSummaryCardProps> = ({
   <Link
     href={href}
     className={cn(
-      'border-border bg-background-alt group hover:border-primary-500/25 relative flex min-h-[5.5rem] items-center gap-3 rounded-lg border border-t-[3px] py-3 pr-3 pl-3 shadow-xs transition-colors sm:gap-4 sm:py-3.5 sm:pr-4 sm:pl-4',
+      'border-border bg-background-alt group hover:border-primary-500/25 relative flex min-h-[5.5rem] cursor-pointer items-center gap-3 rounded-lg border border-t-[3px] py-3 pr-3 pl-3 shadow-xs transition-colors sm:gap-4 sm:py-3.5 sm:pr-4 sm:pl-4',
       'hover:bg-surface/35 focus-visible:ring-primary-500/40 focus-visible:ring-2 focus-visible:outline-none',
       toneAccent[tone],
       className,
