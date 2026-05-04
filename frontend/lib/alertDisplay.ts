@@ -59,3 +59,16 @@ export function scoreVisualTone(
   if (typeof signalScore === 'number' && signalScore >= 50) return 'success';
   return 'muted';
 }
+
+/**
+ * ISO-ish instant for displaying source-facing dates in the UI:
+ * prefers API `source_published_at`, otherwise ingest time (`published_at` / `occurredAt`).
+ */
+export function alertDisplayedAtIso(alert: {
+  sourcePublishedAt?: string;
+  occurredAt: string;
+}): string {
+  const s = alert.sourcePublishedAt?.trim();
+  if (s) return s;
+  return alert.occurredAt;
+}

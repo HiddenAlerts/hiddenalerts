@@ -15,26 +15,19 @@ export const AlertTable: FC<AlertTableProps> = ({
   className,
   alertsListReturnQuery,
 }) => (
-  <div
-    className={cn(
-      'bg-transparent p-0',
-      className,
-    )}
-  >
+  <div className={cn('flex flex-col gap-3 sm:gap-4', className)}>
     {alerts.length === 0 ? (
       <div className="text-muted py-10 text-center text-sm">
         No alerts match your filters.
       </div>
     ) : (
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-        {alerts.map(alert => (
-          <AlertRow
-            key={alert.id}
-            alert={alert}
-            alertsListReturnQuery={alertsListReturnQuery}
-          />
-        ))}
-      </div>
+      alerts.map(alert => (
+        <AlertRow
+          key={alert.id}
+          alert={alert}
+          alertsListReturnQuery={alertsListReturnQuery}
+        />
+      ))
     )}
   </div>
 );

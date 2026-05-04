@@ -1,3 +1,4 @@
+import { alertDisplayedAtIso } from '@/lib/alertDisplay';
 import { formatAlertDate } from '@/lib/formatAlertDate';
 import { cn } from '@/lib/utils';
 import type { AlertItem } from '@/types/alert';
@@ -28,7 +29,7 @@ export const DashboardAlertMiniRow: FC<DashboardAlertMiniRowProps> = ({
       </p>
     </td>
     <td className="text-muted w-[1%] whitespace-nowrap px-3 py-2.5 text-right text-xs sm:px-4">
-      {formatAlertDate(alert.occurredAt)}
+      {formatAlertDate(alertDisplayedAtIso(alert))}
     </td>
   </tr>
 );
