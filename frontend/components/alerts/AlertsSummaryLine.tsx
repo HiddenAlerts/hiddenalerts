@@ -23,6 +23,8 @@ export type AlertsSummaryLineProps = {
   page: number;
   /** Total for this risk (and current category scope) from `/alerts/stats`. */
   filterTotal?: number;
+  /** When known (from list `total` or stats-derived page count), show “Page X of Y”. */
+  totalPages?: number;
   className?: string;
 };
 
@@ -30,6 +32,7 @@ export const AlertsSummaryLine: FC<AlertsSummaryLineProps> = ({
   risk,
   page,
   filterTotal,
+  totalPages,
   className,
 }) => {
   const phrase = riskPhraseLabel(risk);
@@ -51,7 +54,12 @@ export const AlertsSummaryLine: FC<AlertsSummaryLineProps> = ({
         <span className={cn('font-semibold', phraseClass)}>{phrase}</span>
         <span className="text-muted"> alerts</span>
         <span className="text-muted-foreground mx-1.5">•</span>
-        <span className="text-muted tabular-nums">Page {page}</span>
+        <span className="text-muted tabular-nums">
+          Page {page}
+          {typeof totalPages === 'number' && totalPages > 0 ? (
+            <> of {totalPages}</>
+          ) : null}
+        </span>
       </p>
       <p className="text-muted shrink-0 text-right tabular-nums">
         <span className="text-muted">Total: </span>

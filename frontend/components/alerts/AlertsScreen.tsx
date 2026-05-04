@@ -83,6 +83,42 @@ export const AlertsScreen: FC = () => {
   const hasNextPage =
     !isPlaceholderData && (data?.alerts.length ?? 0) === ALERTS_PAGE_SIZE;
 
+  /** Prefer list `total`; else approximate from `/alerts/stats` for current risk + category. */
+  const listTotalForPagination = useMemo(() => {
+    const raw =
+      !isPlaceholderData ? (data?.total ?? data?.total_count) : undefined;
+    const fromList =
+      typeof raw === 'number' && Number.isFinite(raw) && raw >= 0
+        ? raw
+        : undefined;
+    if (fromList !== undefined) return fromList;
+    const fromStats = riskCounts?.[riskFilter];
+    if (
+      typeof fromStats === 'number' &&
+      Number.isFinite(fromStats) &&
+      fromStats >= 0
+    ) {
+      return fromStats;
+    }
+    return undefined;
+  }, [
+    data?.total,
+    data?.total_count,
+    isPlaceholderData,
+    riskCounts,
+    riskFilter,
+  ]);
+
+  const totalPages = useMemo(() => {
+    if (
+      typeof listTotalForPagination !== 'number' ||
+      listTotalForPagination <= 0
+    ) {
+      return undefined;
+    }
+    return Math.max(1, Math.ceil(listTotalForPagination / ALERTS_PAGE_SIZE));
+  }, [listTotalForPagination]);
+
   useEffect(() => {
     if (isError || isPending || isPlaceholderData) return;
     if ((data?.alerts.length ?? 0) === 0 && page > 1) {
@@ -160,6 +196,7 @@ export const AlertsScreen: FC = () => {
             risk={riskFilter}
             page={page}
             filterTotal={riskCounts?.[riskFilter]}
+            totalPages={totalPages}
           />
 
           <AlertsRiskLegendStrip items={DASHBOARD_RISK_LEGEND_ITEMS} />
@@ -182,7 +219,10 @@ export const AlertsScreen: FC = () => {
             )}
           </div>
 
-          {!isError && !isInitialLoading && (page > 1 || hasNextPage) ? (
+          {!isError &&
+          !isInitialLoading &&
+          ((typeof totalPages === 'number' && totalPages > 1) ||
+            (typeof totalPages !== 'number' && (page > 1 || hasNextPage))) ? (
             <Pagination
               page={page}
               onPageChange={nextPage =>
@@ -191,6 +231,7 @@ export const AlertsScreen: FC = () => {
                   { history: 'replace', scroll: false },
                 )
               }
+              totalPages={totalPages}
               hasNextPage={hasNextPage}
               activePageClassName="bg-danger text-white"
             />

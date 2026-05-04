@@ -33,4 +33,11 @@ export type AlertsStatsResponse = {
 
 export type AlertsListResponse = {
   alerts: AlertApiRecord[];
+  /**
+   * Total rows matching this list request (same filters as `limit`/`offset`).
+   * Enables “Page X of Y” and numbered pagination. Prefer this over inferring from stats.
+   */
+  total?: number;
+  /** Alternative field name some APIs use for the same value as `total`. */
+  total_count?: number;
 };
