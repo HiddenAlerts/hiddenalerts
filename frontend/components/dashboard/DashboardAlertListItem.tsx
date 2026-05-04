@@ -109,7 +109,7 @@ export const DashboardAlertListItem: FC<DashboardAlertListItemProps> = ({
     >
       <Link
         href={`/alerts/${alert.id}`}
-        className="flex min-w-0 flex-1 items-center gap-3 py-3 pr-2 pl-3 sm:gap-4 sm:py-3.5 sm:pr-3 sm:pl-4"
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-3 pr-2 pl-3 sm:gap-4 sm:py-3.5 sm:pr-3 sm:pl-4"
       >
         <div
           className={cn(
@@ -161,7 +161,7 @@ export const DashboardAlertListItem: FC<DashboardAlertListItemProps> = ({
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
-            className="text-muted hover:text-foreground rounded-md p-1 transition-colors"
+            className="cursor-pointer text-muted hover:text-foreground rounded-md p-1 transition-colors"
             aria-label="Bookmark alert"
             onClick={stopNavigation}
           >
@@ -169,7 +169,7 @@ export const DashboardAlertListItem: FC<DashboardAlertListItemProps> = ({
           </button>
           <button
             type="button"
-            className="text-muted hover:text-foreground rounded-md p-1 transition-colors"
+            className="cursor-pointer text-muted hover:text-foreground rounded-md p-1 transition-colors"
             aria-label="More actions"
             onClick={stopNavigation}
           >

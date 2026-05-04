@@ -59,7 +59,7 @@ export const DashboardUnlockCta: FC<DashboardUnlockCtaProps> = ({
         </Button>
         <Link
           href={secondaryHref}
-          className="text-foreground hover:text-body inline-flex items-center gap-0.5 text-sm font-semibold transition-colors"
+          className="text-foreground hover:text-body inline-flex cursor-pointer items-center gap-0.5 text-sm font-semibold transition-colors"
         >
           {secondaryLabel}
           <ChevronRight className="size-4 shrink-0" aria-hidden />

@@ -73,7 +73,7 @@ export const EarlyAccessModal: FC<EarlyAccessModalProps> = ({
     >
       <button
         type="button"
-        className="absolute inset-0 bg-black/50"
+        className="absolute inset-0 cursor-pointer bg-black/50"
         aria-label="Dismiss dialog"
         onClick={handleClose}
       />
@@ -86,7 +86,7 @@ export const EarlyAccessModal: FC<EarlyAccessModalProps> = ({
         <button
           type="button"
           onClick={handleClose}
-          className="text-muted hover:text-foreground hover:bg-surface-muted absolute top-3 right-3 inline-flex size-9 items-center justify-center rounded-md transition-colors"
+          className="text-muted hover:text-foreground hover:bg-surface-muted absolute top-3 right-3 inline-flex size-9 cursor-pointer items-center justify-center rounded-md transition-colors"
           aria-label="Close"
         >
           <X className="size-5" aria-hidden />

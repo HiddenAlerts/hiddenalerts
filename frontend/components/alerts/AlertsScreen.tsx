@@ -164,7 +164,7 @@ export const AlertsScreen: FC = () => {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Link
           href="/dashboard"
-          className="text-foreground focus-visible:ring-primary-500 inline-flex max-w-full min-w-0 shrink-0 items-center rounded-md focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+          className="text-foreground focus-visible:ring-primary-500 inline-flex max-w-full min-w-0 shrink-0 cursor-pointer items-center rounded-md focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
         >
           <LandingLogo
             iconClassName="bg-primary-500/15 text-primary-500 inline-flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md p-0.5"
@@ -174,7 +174,7 @@ export const AlertsScreen: FC = () => {
         <button
           type="button"
           onClick={() => setEarlyAccessOpen(true)}
-          className="bg-danger hover:bg-danger/90 active:bg-danger/80 self-end rounded-md px-4 py-2.5 text-sm font-semibold text-white transition-colors sm:self-auto"
+          className="bg-danger hover:bg-danger/90 active:bg-danger/80 cursor-pointer self-end rounded-md px-4 py-2.5 text-sm font-semibold text-white transition-colors sm:self-auto"
         >
           Get Early Access
         </button>
