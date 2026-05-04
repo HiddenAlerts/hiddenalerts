@@ -66,7 +66,7 @@ export const Pagination: FC<PaginationProps> = ({
                 onClick={() => onPageChange(n)}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'h-9 min-w-9 cursor-pointer rounded-md px-2 text-sm font-medium transition-colors',
+                  'h-9 min-w-9 cursor-pointer rounded-sm px-2 text-sm font-medium transition-colors',
                   active
                     ? activePageClassName
                     : 'text-muted hover:bg-surface hover:text-foreground',
