@@ -156,6 +156,12 @@ have to filter blanks on the frontend.
 > entity-overlap requirement keeps drift out. **At least 2 qualifying peers are
 > required** (Ken's "two to four items max"); fewer means the section is
 > **omitted entirely**. Capped at 4.
+>
+> Agency / regulator names (FBI, DOJ, U.S. Attorney's Office, SEC, OFAC, IC3,
+> IRS, HHS, etc.) are excluded from the entity-overlap check — they appear
+> in nearly every fraud alert and would otherwise surface thematically
+> unrelated peers. Overlap matches on real subjects (companies, individuals,
+> domains) only.
 
 **Response `200 OK` (rich example with all optional sections populated):**
 ```json
@@ -312,10 +318,15 @@ Field reference is identical to `0.1 GET /api/alerts` — see that table.
    4. **Recency** — `source_published_at` → platform `published_at` →
       `processed_at`, whichever is available first.
 3. **Duplicate-entity suppression** — if the alert's primary entity (first
-   non-empty name from `entities_json["names"]`, lowercase + stripped) has
-   already been claimed by a higher-ranked alert, the alert is skipped. This
-   prevents the panel from showing two cards about the same company /
-   individual / domain.
+   non-empty *non-agency* name from `entities_json["names"]`, lowercase +
+   stripped) has already been claimed by a higher-ranked alert, the alert is
+   skipped. This prevents the panel from showing two cards about the same
+   company / individual / domain. Prosecutor / regulator / law-enforcement
+   names (FBI, DOJ, U.S. Attorney's Office, SEC, OFAC, IC3, IRS, HHS, etc.)
+   are excluded from this match — they appear in nearly every fraud alert
+   and would otherwise collapse unrelated alerts together. When all of an
+   alert's entities are agencies, a per-alert fallback key is used so the
+   alert is never silently dropped.
 4. **Cap:** at most 3 alerts. May return fewer (or `{"alerts": []}`) if not
    enough alerts qualify — frontend should handle the empty case gracefully.
 
