@@ -295,7 +295,7 @@ http://localhost:8000/docs           → Swagger UI (all endpoints)
 | `score_cross_source` | INTEGER | 1–5 |
 | `score_trend_acceleration` | INTEGER | 1–5 |
 | `signal_score_total` | INTEGER | Sum of 5 factors (5–25) |
-| `risk_level` | VARCHAR | `low` (≤6) / `medium` (7–12) / `high` (≥13) |
+| `risk_level` | VARCHAR | M3 thresholds: `low` (≤8) / `medium` (9–15) / `high` (≥16). Public endpoints derive risk from `signal_score_total` rather than this stored value, so legacy rows with stale levels still display correctly. |
 
 ### Migrations
 
@@ -378,7 +378,7 @@ Step 3 — Signal Scoring (signal_scorer.py)
     score_cross_source        = f(event_source_count)
     score_trend_acceleration  = compare keyword freq last 7d vs prior 7d
     signal_score_total        = sum(5 factors)
-    risk_level                = low(≤6) / medium(7–12) / high(≥13)
+    risk_level                = low(≤8) / medium(9–15) / high(≥16)   # M3 thresholds
 
 Step 4 — Event Grouping (event_grouper.py)
     Match: same primary_category + entity name overlap + within 7 days
@@ -402,7 +402,15 @@ Each processed alert receives five independent scores (1–5 each):
 
 **Risk level (M3 Slice 3):** total ≤ 8 → `low` — total 9–15 → `medium` — total ≥ 16 → `high`
 
-**Tier 1 auto-publish threshold:** `signal_score_total ≥ 16` AND `source.credibility_score ≥ 4`
+**Tier 1 auto-publish rule:** an alert is auto-published only when **all four** conditions hold:
+
+1. `ai_result.is_relevant == True` — AI confirmed the article describes a real fraud / financial-crime mechanism (defensive guard against any code path that lets an irrelevant alert reach scoring).
+2. `signal_score_total ≥ 16` — high-risk signal under M3 thresholds.
+3. `source.credibility_score ≥ 4` — government / regulator / law-enforcement source.
+4. `primary_category` is in the auto-publish allowlist:
+   `Investment Fraud`, `Cybercrime`, `Consumer Scam`, `Money Laundering`, `Cryptocurrency Fraud`.
+
+`Other` and any unknown / borderline category **never auto-publish** — they go to manual admin review. Manual admin approval remains available for any alert (including `Other` and below-threshold scores) via the dashboard's review workflow.
 
 ---
 
@@ -656,10 +664,10 @@ curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit
 | **M3 — Slice 3** | Signal score recalibration — stricter HIGH threshold, recalibrated victim/financial buckets, re-scoring script | ✅ Complete |
 | **M3 — Slice 4** | Public read-only alert detail + stats — GET /api/alerts/{id}, GET /api/alerts/stats, category breakdown | ✅ Complete |
 | **M3 — Top Alerts + Inclusion Criteria** | GET /api/alerts/top with score≥15 / strength / credibility / recency ranking + duplicate-entity suppression; AI prompt extended with financial-risk-intelligence scope (OFAC, sanctions, governance, liquidity, network exposure); cybercrime/organized-crime conditional relevance; defensive `is_relevant` guard on auto-publish; agency stoplist excludes FBI/DOJ/SEC/etc. from entity dedup so unrelated alerts no longer collapse together | ✅ Complete |
+| **M3 — Public-feed cleanup** | Off-topic legacy alerts (CSAM / terrorism / weapons / drug-trafficking) reviewed and unpublished manually; `audit_offtopic_alerts.py` reports the live feed as clean; new pipeline guards prevent these from re-publishing | ✅ Complete |
+| **M3 — QA + VPS deployment handoff** | Backend deployed on VPS, smoke tests green, public endpoints verified live, frontend handoff docs updated | ✅ Complete |
 | **M3 — Slice 5** | Full-text search across alerts | 🔄 Next |
-| **M3 — Slice 6** | Email alerts — HIGH immediate + MEDIUM daily digest | Planned |
-| **M3 — Slice 7** | Weekly fraud intelligence report generation | Planned |
-| **M3 — Slice 8** | QA + VPS deployment handoff | Planned |
+| **Future / Paused** | Email alerts (HIGH immediate + MEDIUM daily digest), weekly fraud intelligence report generation, subscriber login + gating for the public frontend | Paused — out of scope for current MVP; revisit after search ships |
 
 ---
 
