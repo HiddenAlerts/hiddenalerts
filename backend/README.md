@@ -536,7 +536,7 @@ Tests use an in-memory SQLite database — no PostgreSQL or OpenAI key required.
 pytest tests/ -v
 ```
 
-**208 tests, 0 failures.** Test breakdown:
+**216 tests, 0 failures.** Test breakdown:
 
 | File | Tests | What it covers |
 |------|-------|---------------|
@@ -548,9 +548,9 @@ pytest tests/ -v
 | `test_health.py` | 5 | API health, sources, raw-items, stats smoke tests |
 | `test_auth.py` | 24 | Password/JWT utilities; JSON login (admin + subscriber); Bearer + cookie auth; change-password; role enforcement; inactive user; backwards compat |
 | `test_alerts_api.py` | 21 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation; publication state; approval publish; client feed access control |
-| `test_public_alerts.py` | 73 | Public list (no auth, published-only, field mapping, ordering, filters); enriched detail (Ken's frontend schema — confidence, why_it_matters, key_intelligence, risk_assessment with strong-factor enrichment, sources, timeline, related_signals; safe-fields-only); public stats (counts, breakdown, empty state); top alerts (no auth, published-only, max 3, score ≥15 threshold, score-then-strength-then-credibility-then-recency ranking, duplicate-entity suppression, fallback key for entity-less alerts, empty when none qualify, no internal-field leakage); derived risk_level from score on every public endpoint; related_signals entity-overlap + 2–4 quantity rule |
+| `test_public_alerts.py` | 81 | Public list (no auth, published-only, field mapping, ordering, filters); enriched detail (Ken's frontend schema — confidence, why_it_matters, key_intelligence, risk_assessment with strong-factor enrichment, sources, timeline, related_signals; safe-fields-only); public stats (counts, breakdown, empty state); top alerts (no auth, published-only, max 3, score ≥15 threshold, score-then-strength-then-credibility-then-recency ranking, duplicate-entity suppression, fallback key for entity-less alerts, empty when none qualify, no internal-field leakage); agency stoplist (FBI/DOJ/SEC/etc. excluded from primary-entity dedup and entity-overlap matching); derived risk_level from score on every public endpoint; related_signals entity-overlap + 2–4 quantity rule |
 | `test_signal_scorer.py` | 41 | All 5 scoring factors; M3 thresholds; boundary tests; recalibrated victim/financial buckets; realistic alert scenarios |
-| **Total** | **208** | |
+| **Total** | **216** | |
 
 ---
 
@@ -655,7 +655,19 @@ curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit
 | **M3 — Slice 2** | Alert publication workflow — Tier 1 auto-publish, Tier 2 admin review, subscriber-safe client feed | ✅ Complete |
 | **M3 — Slice 3** | Signal score recalibration — stricter HIGH threshold, recalibrated victim/financial buckets, re-scoring script | ✅ Complete |
 | **M3 — Slice 4** | Public read-only alert detail + stats — GET /api/alerts/{id}, GET /api/alerts/stats, category breakdown | ✅ Complete |
-| **M3 — Slice 5** | Email alerts — HIGH immediate + MEDIUM daily digest | 🔄 Next |
-| **M3 — Slice 6** | Weekly fraud intelligence report generation | Planned |
-| **M3 — Slice 7** | Full-text search across alerts | Planned |
+| **M3 — Top Alerts + Inclusion Criteria** | GET /api/alerts/top with score≥15 / strength / credibility / recency ranking + duplicate-entity suppression; AI prompt extended with financial-risk-intelligence scope (OFAC, sanctions, governance, liquidity, network exposure); cybercrime/organized-crime conditional relevance; defensive `is_relevant` guard on auto-publish; agency stoplist excludes FBI/DOJ/SEC/etc. from entity dedup so unrelated alerts no longer collapse together | ✅ Complete |
+| **M3 — Slice 5** | Full-text search across alerts | 🔄 Next |
+| **M3 — Slice 6** | Email alerts — HIGH immediate + MEDIUM daily digest | Planned |
+| **M3 — Slice 7** | Weekly fraud intelligence report generation | Planned |
 | **M3 — Slice 8** | QA + VPS deployment handoff | Planned |
+
+---
+
+## Maintenance Scripts
+
+| Script | Purpose | Default mode |
+|--------|---------|--------------|
+| `scripts/audit_public_alert_quality.py` | List published alerts in non-allowed categories (e.g. `Other`); unpublish by ID with `--apply --ids …` | dry-run |
+| `scripts/audit_offtopic_alerts.py` | Flag published alerts whose title/summary contains off-topic terms (CSAM, terrorism, weapons, etc.) without any positive fraud term; unpublish by ID with `--apply --ids …`. Use `--json` for machine-readable output | report |
+| `scripts/rescore_alerts.py` | Recompute signal scores under current thresholds | dry-run |
+| `scripts/approve_alerts.py` | Bulk-publish reviewed alerts | requires explicit IDs |

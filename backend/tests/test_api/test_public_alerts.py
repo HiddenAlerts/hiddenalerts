@@ -919,7 +919,7 @@ async def test_related_signals_includes_same_event_with_entity_overlap(client, d
     )
     alert_b = await _seed_alert(
         db_session, item_b, is_published=True,
-        entities_json={"names": ["FBI", "Treasury"]},  # FBI overlaps
+        entities_json={"names": ["Acme Corp", "Treasury"]},  # Acme Corp overlaps
     )
     alert_c = await _seed_alert(
         db_session, item_c, is_published=True,
@@ -937,22 +937,22 @@ async def test_related_signals_includes_same_event_with_entity_overlap(client, d
 
 @pytest.mark.asyncio
 async def test_related_signals_overlap_is_case_insensitive(client, db_session):
-    """Entity overlap is case-insensitive — 'fbi' matches 'FBI' (need >=2 peers)."""
+    """Entity overlap is case-insensitive — 'acme corp' matches 'Acme Corp' (need >=2 peers)."""
     source = await _seed_source(db_session)
     item_a = await _seed_raw_item(db_session, source, title="A1", url="https://x.com/a1")
     item_b = await _seed_raw_item(db_session, source, title="B1", url="https://x.com/b1")
     item_c = await _seed_raw_item(db_session, source, title="C1", url="https://x.com/c1")
     alert_a = await _seed_alert(
         db_session, item_a, is_published=True,
-        entities_json={"names": ["FBI"]},
+        entities_json={"names": ["Acme Corp"]},
     )
     alert_b = await _seed_alert(
         db_session, item_b, is_published=True,
-        entities_json={"names": ["fbi"]},  # case-different match
+        entities_json={"names": ["acme corp"]},  # case-different match
     )
     alert_c = await _seed_alert(
         db_session, item_c, is_published=True,
-        entities_json={"names": ["FbI"]},  # mixed case match
+        entities_json={"names": ["AcMe CoRp"]},  # mixed case match
     )
     event_id = await _seed_event_link(db_session, None, alert_a)
     await _seed_event_link(db_session, event_id, alert_b)
@@ -992,7 +992,7 @@ async def test_related_signals_omitted_when_only_one_clean_peer(client, db_sessi
                                   url="https://x.com/solo-a")
     item_b = await _seed_raw_item(db_session, source, title="Solo Peer",
                                   url="https://x.com/solo-b")
-    shared = {"names": ["FBI"]}
+    shared = {"names": ["Acme Corp"]}
     alert_a = await _seed_alert(db_session, item_a, is_published=True,
                                 entities_json=shared)
     alert_b = await _seed_alert(db_session, item_b, is_published=True,
@@ -1015,7 +1015,7 @@ async def test_related_signals_included_when_two_clean_peers(client, db_session)
                                   url="https://x.com/pair-b")
     item_c = await _seed_raw_item(db_session, source, title="Pair Peer 2",
                                   url="https://x.com/pair-c")
-    shared = {"names": ["FBI"]}
+    shared = {"names": ["Acme Corp"]}
     alert_a = await _seed_alert(db_session, item_a, is_published=True,
                                 entities_json=shared)
     alert_b = await _seed_alert(db_session, item_b, is_published=True,
@@ -1753,3 +1753,163 @@ async def test_top_alerts_no_internal_field_leakage(client, clean_db):
     )
     for key in forbidden:
         assert key not in item_resp, f"Forbidden internal field leaked: {key!r}"
+
+
+# ===========================================================================
+# Agency stoplist — _is_agency_name + _primary_entity_key + _entity_set
+# ===========================================================================
+
+
+def test_is_agency_name_recognizes_common_agencies():
+    """Common prosecutor/regulator names must be identified as agencies."""
+    from app.api.public_alerts import _is_agency_name
+
+    agencies = (
+        "FBI",
+        "Federal Bureau of Investigation",
+        "DOJ",
+        "Department of Justice",
+        "U.S. Attorney's Office for the Middle District of Florida",
+        "Securities and Exchange Commission",
+        "SEC",
+        "FinCEN",
+        "OFAC",
+        "Office of Foreign Assets Control",
+        "IC3",
+        "HHS-OIG",
+        "Internal Revenue Service",
+        "Project Safe Childhood",
+        "Operation Winter SHIELD",
+        "Texas Medicaid Fraud Control Unit",
+    )
+    for name in agencies:
+        assert _is_agency_name(name), f"Should be agency: {name!r}"
+
+
+def test_is_agency_name_does_not_false_positive_on_companies():
+    """Real subject names containing agency-sounding substrings must NOT match."""
+    from app.api.public_alerts import _is_agency_name
+
+    real_subjects = (
+        "Acme Corp",
+        "Acme Securities Holdings",  # contains "securities" but not standalone agency
+        "John Doe",
+        "Patrick Cassells",
+        "Corsa Coal Corporation",
+        "Rah Roshd",
+        "Phobos Ransomware",
+        "Bitfinex",
+        "Binance",
+    )
+    for name in real_subjects:
+        assert not _is_agency_name(name), f"Should NOT be agency: {name!r}"
+
+
+def test_is_agency_name_handles_blank_and_none():
+    from app.api.public_alerts import _is_agency_name
+
+    assert _is_agency_name("") is False
+    assert _is_agency_name("   ") is False
+
+
+def test_primary_entity_key_skips_agencies():
+    """When an alert lists FBI first and Acme second, dedup must pick Acme."""
+    from app.api.public_alerts import _primary_entity_key
+    from app.models.processed_alert import ProcessedAlert
+
+    alert = ProcessedAlert(
+        id=1,
+        raw_item_id=1,
+        entities_json={"names": ["FBI", "Department of Justice", "Acme Corp", "John Doe"]},
+    )
+    assert _primary_entity_key(alert) == "acme corp"
+
+
+def test_primary_entity_key_falls_back_when_only_agencies():
+    """If every listed entity is an agency, fall back to the alert:{id} key."""
+    from app.api.public_alerts import _primary_entity_key
+    from app.models.processed_alert import ProcessedAlert
+
+    alert = ProcessedAlert(
+        id=42,
+        raw_item_id=1,
+        entities_json={"names": ["FBI", "DOJ", "U.S. Attorney's Office"]},
+    )
+    assert _primary_entity_key(alert) == "alert:42"
+
+
+def test_entity_set_excludes_agencies():
+    """Overlap must be computed on subjects, not on shared prosecutors."""
+    from app.api.public_alerts import _entity_set
+
+    s = _entity_set({"names": ["FBI", "Department of Justice", "Acme Corp"]})
+    assert s == {"acme corp"}
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_dedup_uses_subject_not_agency(client, clean_db):
+    """Two alerts both leading with FBI but distinct subjects must BOTH appear."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    item_a = await _seed_raw_item(clean_db, source, title="A", url="https://x.com/a")
+    item_b = await _seed_raw_item(clean_db, source, title="B", url="https://x.com/b")
+
+    a_a = await _seed_alert(
+        clean_db, item_a, is_published=True, signal_score=20,
+        entities_json={"names": ["FBI", "Acme Corp"]},
+    )
+    a_b = await _seed_alert(
+        clean_db, item_b, is_published=True, signal_score=20,
+        entities_json={"names": ["FBI", "Beta Inc"]},
+    )
+
+    response = await client.get("/api/alerts/top")
+    ids = [a["id"] for a in response.json()["alerts"]]
+    assert a_a.id in ids
+    assert a_b.id in ids
+
+
+@pytest.mark.asyncio
+async def test_related_signals_requires_non_agency_overlap(client, clean_db):
+    """Two same-event alerts that share only an agency must NOT be related."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    item_a = await _seed_raw_item(clean_db, source, title="CSAM Case", url="https://x.com/a")
+    item_b = await _seed_raw_item(
+        clean_db, source, title="Securities Fraud", url="https://x.com/b"
+    )
+    item_c = await _seed_raw_item(
+        clean_db, source, title="Other Fraud", url="https://x.com/c"
+    )
+
+    # Alert A: only agency entity ("FBI") — share-only-agency overlap must
+    # NOT surface peers as related_signals (overlap set is empty after the
+    # agency stoplist strips FBI from both sides).
+    alert_a = await _seed_alert(
+        clean_db, item_a, is_published=True, signal_score=20,
+        entities_json={"names": ["FBI", "Department of Justice"]},
+    )
+    await _seed_alert(
+        clean_db, item_b, is_published=True, signal_score=20,
+        entities_json={"names": ["FBI", "Acme Corp"]},
+    )
+    await _seed_alert(
+        clean_db, item_c, is_published=True, signal_score=20,
+        entities_json={"names": ["FBI", "Beta Inc"]},
+    )
+
+    # Link all three to the same event so event_id overlap exists.
+    event_id = await _seed_event_link(clean_db, None, alert_a)
+    # We need to refresh-and-link the others too. Re-fetch them by id via the
+    # session for the link helper to work cleanly.
+    from sqlalchemy import select as _select
+    from app.models.processed_alert import ProcessedAlert as _PA
+    others = (
+        await clean_db.execute(_select(_PA).where(_PA.id != alert_a.id))
+    ).scalars().all()
+    for other in others:
+        await _seed_event_link(clean_db, event_id, other)
+
+    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    # related_signals must be omitted entirely — alert_a's only entities are
+    # agencies, so its non-agency entity_set is empty and the section is
+    # skipped per the existing "no current_entities → no peers" guard.
+    assert "related_signals" not in data

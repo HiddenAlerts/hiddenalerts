@@ -24,6 +24,7 @@ Route ordering note:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import Any
 
@@ -118,9 +119,90 @@ def _title_case_level(level: str | None) -> str | None:
     return level.capitalize() if level else None
 
 
+# Lowercase phrases that identify a prosecutor / regulator / law-enforcement
+# agency or program rather than a *subject* of the alert. Agencies appear in
+# almost every fraud article (FBI, DOJ, etc.) so allowing them to drive
+# dedup or related-signals overlap collapses thematically distinct alerts
+# together — e.g. a CSAM case and a securities-fraud case both naming "FBI".
+# Match is whole-word/phrase via regex \b boundaries so substrings inside
+# real names ("sec" in "securities") don't false-positive.
+_AGENCY_PATTERNS: tuple[str, ...] = (
+    "fbi",
+    "federal bureau of investigation",
+    "doj",
+    "department of justice",
+    "justice department",
+    "criminal division",
+    "antitrust division",
+    "u.s. attorney",
+    "us attorney",
+    "attorney general",
+    "sec",
+    "securities and exchange commission",
+    "ftc",
+    "federal trade commission",
+    "fincen",
+    "financial crimes enforcement network",
+    "ofac",
+    "office of foreign assets control",
+    "ic3",
+    "internet crime complaint center",
+    "irs",
+    "irs-ci",
+    "internal revenue service",
+    "hhs",
+    "hhs-oig",
+    "office of inspector general",
+    "atf",
+    "drug enforcement administration",
+    "dea",
+    "secret service",
+    "u.s. secret service",
+    "cisa",
+    "homeland security",
+    "department of homeland security",
+    "dhs",
+    "u.s. postal",
+    "postal inspection service",
+    "u.s. postal inspection service",
+    "fraud control unit",
+    "task force",
+    "project safe childhood",
+    "operation",  # "Operation Winter SHIELD" etc.
+)
+
+_AGENCY_REGEX = re.compile(
+    r"\b(?:" + "|".join(re.escape(p) for p in _AGENCY_PATTERNS) + r")\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _is_agency_name(name: str) -> bool:
+    """Return True if the entity name refers to a prosecutor / regulator / agency.
+
+    Used to exclude agency mentions from primary-entity dedup
+    (`_primary_entity_key`) and from entity-overlap matching (`_entity_set`),
+    so two unrelated alerts that happen to both name "FBI" don't collapse
+    together in /top dedup or surface as related_signals peers.
+    """
+    if not name or not name.strip():
+        return False
+    return _AGENCY_REGEX.search(name) is not None
+
+
 def _entity_set(entities_json: Any) -> set[str]:
-    """Extract a normalized (lowercase, stripped) entity-name set from entities_json."""
-    return {e.strip().lower() for e in _flat_entities(entities_json) if e and e.strip()}
+    """Extract a normalized entity-name set from entities_json.
+
+    Excludes agency names so overlap reflects shared *subjects* (companies,
+    individuals, domains), not shared prosecutors. Otherwise nearly every
+    DOJ/FBI alert would overlap with every other DOJ/FBI alert and
+    `related_signals` would surface thematically unrelated peers.
+    """
+    return {
+        e.strip().lower()
+        for e in _flat_entities(entities_json)
+        if e and e.strip() and not _is_agency_name(e)
+    }
 
 
 def _credibility_label(score: int | None) -> str | None:
@@ -489,13 +571,16 @@ async def _related_signals(
 def _primary_entity_key(alert: ProcessedAlert) -> str:
     """Pick a stable dedup key for top-alerts.
 
-    First non-empty entity name from entities_json, normalized lowercase +
-    stripped. Falls back to "alert:{id}" so an alert with no entities is
-    unique rather than silently dropped.
+    First non-empty *non-agency* entity name from entities_json, normalized
+    lowercase + stripped. Agency names (FBI, DOJ, U.S. Attorney's Office, …)
+    are skipped because they appear in nearly every fraud alert and would
+    otherwise collapse unrelated alerts together. Falls back to "alert:{id}"
+    when the alert has no usable subject entity, so it remains unique rather
+    than silently dropped.
     """
     for name in _flat_entities(alert.entities_json):
         norm = name.strip().lower()
-        if norm:
+        if norm and not _is_agency_name(name):
             return norm
     return f"alert:{alert.id}"
 
