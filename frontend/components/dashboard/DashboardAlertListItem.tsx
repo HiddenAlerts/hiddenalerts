@@ -128,32 +128,38 @@ export const DashboardAlertListItem: FC<DashboardAlertListItemProps> = ({
           />
         </div>
 
-        <div className="min-w-0 flex-1">
-          <h3 className="font-heading text-foreground line-clamp-2 text-base font-semibold tracking-tight">
+        <div className="min-w-0 max-w-md flex-1 sm:max-w-lg lg:max-w-xl">
+          <h3
+            title={alert.title}
+            className="font-heading text-foreground line-clamp-1 text-base font-semibold tracking-tight"
+          >
             {alert.title}
           </h3>
 
           <div className="text-muted mt-1 flex flex-wrap items-center gap-3 text-xs font-medium">
             <span
-              className={cn('inline-flex flex-wrap items-center', scoreClass)}
+              className={cn('inline-flex min-w-0 max-w-full flex-wrap items-center', scoreClass)}
             >
               {scorePhrase}
             </span>
             <MetadataPipe />
-            <div>
+            <div className="min-w-0">
               <span className="text-muted shrink-0">Type:</span>
               <span className="text-foreground ml-1">{typeLabel}</span>
             </div>
             <MetadataPipe />
-            <div>
+            <div className="min-w-0">
               <span className="text-muted shrink-0">Source:</span>
-              <span className="text-foreground ml-1 min-w-0 break-words">
+              <span className="text-foreground ml-1 break-words">
                 {sourceShort}
               </span>
             </div>
           </div>
 
-          <p className="text-muted mt-1.5 line-clamp-2 text-xs leading-relaxed">
+          <p
+            title={alert.description}
+            className="text-muted mt-1.5 line-clamp-1 text-xs leading-relaxed"
+          >
             {alert.description}
           </p>
 
