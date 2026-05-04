@@ -1413,3 +1413,343 @@ async def test_client_alerts_endpoint_still_requires_auth(client):
     """/api/v1/client/alerts still requires authentication after this slice."""
     response = await client.get("/api/v1/client/alerts")
     assert response.status_code == 401
+
+
+# ===========================================================================
+# Public top alerts — GET /api/alerts/top  (M3 frontend completion)
+# ===========================================================================
+#
+# Threshold rationale: signal_score_total >= 15 maps Ken's "risk >= 60" to the
+# 0-25 scale (60% of 25). Sits intentionally below the high threshold (16) so
+# strong medium-high alerts qualify.
+#
+# Top-alerts tests need a clean DB per run because /top returns at most 3
+# alerts and asserts about exact ordering / count. The session-scoped engine
+# in conftest.py keeps committed data alive across tests, so we wipe the
+# alert tables at the start of each top-alerts test via the `clean_db`
+# fixture below.
+
+
+import pytest_asyncio
+
+
+@pytest_asyncio.fixture
+async def clean_db(db_session):
+    """Truncate alert/event/raw_item/source tables for deterministic /top tests."""
+    from sqlalchemy import delete
+
+    from app.models.event import Event, EventSource
+    from app.models.processed_alert import ProcessedAlert
+    from app.models.raw_item import RawItem
+    from app.models.source import Source
+
+    await db_session.execute(delete(EventSource))
+    await db_session.execute(delete(Event))
+    await db_session.execute(delete(ProcessedAlert))
+    await db_session.execute(delete(RawItem))
+    await db_session.execute(delete(Source))
+    await db_session.commit()
+    return db_session
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_no_auth_required(client):
+    """GET /api/alerts/top must succeed without any auth header or cookie."""
+    response = await client.get("/api/alerts/top")
+    assert response.status_code == 200
+    assert "alerts" in response.json()
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_returns_only_published(client, clean_db):
+    """Unpublished alerts must never appear in /top, even at high score."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    item_pub = await _seed_raw_item(clean_db, source, title="Pub", url="https://x.com/pub")
+    item_unpub = await _seed_raw_item(clean_db, source, title="Unpub", url="https://x.com/unpub")
+
+    a_pub = await _seed_alert(
+        clean_db, item_pub, is_published=True, signal_score=20,
+        entities_json={"names": ["Acme"]},
+    )
+    await _seed_alert(
+        clean_db, item_unpub, is_published=False, signal_score=20,
+        entities_json={"names": ["Beta"]},
+    )
+
+    response = await client.get("/api/alerts/top")
+    assert response.status_code == 200
+    ids = [a["id"] for a in response.json()["alerts"]]
+    assert ids == [a_pub.id]
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_max_three(client, clean_db):
+    """Even with 6 qualifying alerts, /top returns at most 3."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    now = datetime.now(timezone.utc)
+    for i in range(6):
+        item = await _seed_raw_item(
+            clean_db, source, title=f"Alert {i}", url=f"https://x.com/a{i}"
+        )
+        await _seed_alert(
+            clean_db, item, is_published=True, signal_score=20,
+            entities_json={"names": [f"Entity{i}"]},
+            published_at=now - timedelta(minutes=i),
+        )
+
+    response = await client.get("/api/alerts/top")
+    assert response.status_code == 200
+    assert len(response.json()["alerts"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_excludes_below_min_score(client, clean_db):
+    """Alerts at score=14 are excluded; score=15 qualifies."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    item_low = await _seed_raw_item(clean_db, source, title="Low", url="https://x.com/low")
+    item_qual = await _seed_raw_item(clean_db, source, title="Qual", url="https://x.com/qual")
+
+    await _seed_alert(
+        clean_db, item_low, is_published=True, signal_score=14,
+        entities_json={"names": ["X"]},
+    )
+    a_qual = await _seed_alert(
+        clean_db, item_qual, is_published=True, signal_score=15,
+        entities_json={"names": ["Y"]},
+    )
+
+    response = await client.get("/api/alerts/top")
+    ids = [a["id"] for a in response.json()["alerts"]]
+    assert ids == [a_qual.id]
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_ranks_by_score_desc(client, clean_db):
+    """Score is the dominant ranking key — highest score first."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    item16 = await _seed_raw_item(clean_db, source, title="S16", url="https://x.com/s16")
+    item18 = await _seed_raw_item(clean_db, source, title="S18", url="https://x.com/s18")
+    item20 = await _seed_raw_item(clean_db, source, title="S20", url="https://x.com/s20")
+
+    a16 = await _seed_alert(
+        clean_db, item16, is_published=True, signal_score=16,
+        entities_json={"names": ["A"]},
+    )
+    a18 = await _seed_alert(
+        clean_db, item18, is_published=True, signal_score=18,
+        entities_json={"names": ["B"]},
+    )
+    a20 = await _seed_alert(
+        clean_db, item20, is_published=True, signal_score=20,
+        entities_json={"names": ["C"]},
+    )
+
+    response = await client.get("/api/alerts/top")
+    ids = [a["id"] for a in response.json()["alerts"]]
+    assert ids == [a20.id, a18.id, a16.id]
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_tie_broken_by_signal_strength(client, clean_db):
+    """Same score → alert with more event_sources ranks first."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    item_strong = await _seed_raw_item(
+        clean_db, source, title="Strong", url="https://x.com/strong"
+    )
+    item_weak = await _seed_raw_item(
+        clean_db, source, title="Weak", url="https://x.com/weak"
+    )
+
+    a_strong = await _seed_alert(
+        clean_db, item_strong, is_published=True, signal_score=18,
+        entities_json={"names": ["Foo"]},
+    )
+    a_weak = await _seed_alert(
+        clean_db, item_weak, is_published=True, signal_score=18,
+        entities_json={"names": ["Bar"]},
+    )
+
+    # Give a_strong two event_sources bridges (different events)
+    await _seed_event_link(clean_db, None, a_strong)
+    await _seed_event_link(clean_db, None, a_strong)
+
+    response = await client.get("/api/alerts/top")
+    ids = [a["id"] for a in response.json()["alerts"]]
+    assert ids[0] == a_strong.id
+    assert ids[1] == a_weak.id
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_tie_broken_by_source_credibility(client, clean_db):
+    """Same score + signal strength → higher source credibility wins."""
+    src_high = await _seed_source(clean_db, name="Trusted", credibility_score=5)
+    src_low = await _seed_source(clean_db, name="Less Trusted", credibility_score=3)
+    item_high = await _seed_raw_item(
+        clean_db, src_high, title="High", url="https://x.com/high"
+    )
+    item_low = await _seed_raw_item(
+        clean_db, src_low, title="Low", url="https://x.com/low"
+    )
+
+    a_high = await _seed_alert(
+        clean_db, item_high, is_published=True, signal_score=18,
+        entities_json={"names": ["A"]},
+    )
+    a_low = await _seed_alert(
+        clean_db, item_low, is_published=True, signal_score=18,
+        entities_json={"names": ["B"]},
+    )
+
+    response = await client.get("/api/alerts/top")
+    ids = [a["id"] for a in response.json()["alerts"]]
+    assert ids[0] == a_high.id
+    assert ids[1] == a_low.id
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_tie_broken_by_recency(client, clean_db):
+    """Identical score / strength / credibility → newer source date wins."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    now = datetime.now(timezone.utc)
+    item_old = await _seed_raw_item(
+        clean_db, source, title="Old", url="https://x.com/old",
+        published_at=now - timedelta(days=2),
+    )
+    item_new = await _seed_raw_item(
+        clean_db, source, title="New", url="https://x.com/new",
+        published_at=now - timedelta(hours=1),
+    )
+
+    a_old = await _seed_alert(
+        clean_db, item_old, is_published=True, signal_score=18,
+        entities_json={"names": ["A"]},
+    )
+    a_new = await _seed_alert(
+        clean_db, item_new, is_published=True, signal_score=18,
+        entities_json={"names": ["B"]},
+    )
+
+    response = await client.get("/api/alerts/top")
+    ids = [a["id"] for a in response.json()["alerts"]]
+    assert ids[0] == a_new.id
+    assert ids[1] == a_old.id
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_dedups_primary_entity(client, clean_db):
+    """Two alerts whose primary entity is identical → only one is kept."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    item_a = await _seed_raw_item(clean_db, source, title="A", url="https://x.com/a")
+    item_b = await _seed_raw_item(clean_db, source, title="B", url="https://x.com/b")
+    item_c = await _seed_raw_item(clean_db, source, title="C", url="https://x.com/c")
+
+    now = datetime.now(timezone.utc)
+    # All three at the same score so dedup is the deciding factor.
+    a_a = await _seed_alert(
+        clean_db, item_a, is_published=True, signal_score=20,
+        entities_json={"names": ["Acme Corp"]},
+        published_at=now - timedelta(minutes=1),
+    )
+    # Same primary entity as A — must be suppressed.
+    await _seed_alert(
+        clean_db, item_b, is_published=True, signal_score=20,
+        entities_json={"names": ["Acme Corp", "FBI"]},
+        published_at=now - timedelta(minutes=2),
+    )
+    a_c = await _seed_alert(
+        clean_db, item_c, is_published=True, signal_score=20,
+        entities_json={"names": ["Beta Inc"]},
+        published_at=now - timedelta(minutes=3),
+    )
+
+    response = await client.get("/api/alerts/top")
+    ids = [a["id"] for a in response.json()["alerts"]]
+    assert a_a.id in ids
+    assert a_c.id in ids
+    # B is suppressed because its primary entity ("Acme Corp") was already claimed.
+    assert len(ids) == 2
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_alerts_without_entities_kept_unique(client, clean_db):
+    """Alerts with no entities use a per-alert fallback key — never silently dropped."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    item_a = await _seed_raw_item(clean_db, source, title="A", url="https://x.com/a")
+    item_b = await _seed_raw_item(clean_db, source, title="B", url="https://x.com/b")
+
+    a_a = await _seed_alert(
+        clean_db, item_a, is_published=True, signal_score=20,
+        entities_json=None,
+    )
+    a_b = await _seed_alert(
+        clean_db, item_b, is_published=True, signal_score=20,
+        entities_json=None,
+    )
+
+    response = await client.get("/api/alerts/top")
+    ids = [a["id"] for a in response.json()["alerts"]]
+    assert a_a.id in ids
+    assert a_b.id in ids
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_empty_when_none_qualify(client, clean_db):
+    """All alerts below threshold → 200 with {"alerts": []}."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    item = await _seed_raw_item(clean_db, source, title="Low", url="https://x.com/low")
+    await _seed_alert(
+        clean_db, item, is_published=True, signal_score=10,
+        entities_json={"names": ["X"]},
+    )
+
+    response = await client.get("/api/alerts/top")
+    assert response.status_code == 200
+    assert response.json() == {"alerts": []}
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_no_internal_field_leakage(client, clean_db):
+    """Top response items must contain only PublicAlertRead keys — no internal fields."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    item = await _seed_raw_item(clean_db, source, title="Leak Test", url="https://x.com/leak")
+    await _seed_alert(
+        clean_db, item, is_published=True, signal_score=20,
+        entities_json={"names": ["A"]},
+        secondary_category="Wire Fraud",
+        financial_impact_estimate="$5M",
+        victim_scale_raw="multiple",
+        matched_keywords=["fraud"],
+        score_source_credibility=5,
+        score_financial_impact=3,
+        score_victim_scale=3,
+        score_cross_source=3,
+        score_trend_acceleration=3,
+        ai_model="gpt-4o-mini",
+    )
+
+    response = await client.get("/api/alerts/top")
+    alerts = response.json()["alerts"]
+    assert len(alerts) == 1
+    item_resp = alerts[0]
+
+    forbidden = (
+        "score_source_credibility",
+        "score_financial_impact",
+        "score_victim_scale",
+        "score_cross_source",
+        "score_trend_acceleration",
+        "signal_score_total",
+        "entities_json",
+        "victim_scale_raw",
+        "financial_impact_estimate",
+        "is_published",
+        "is_relevant",
+        "published_by_user_id",
+        "review_status",
+        "ai_model",
+        "raw_item",
+        "raw_item_id",
+        "matched_keywords",
+    )
+    for key in forbidden:
+        assert key not in item_resp, f"Forbidden internal field leaked: {key!r}"

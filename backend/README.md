@@ -466,6 +466,7 @@ Authenticated endpoints accept either a valid `access_token` cookie **or** an `A
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/api/alerts` | No | Paginated published alert feed |
+| `GET` | `/api/alerts/top` | No | Curated top 3 published alerts (`signal_score_total >= 15`, ranked by score → signal-strength → credibility → recency, duplicate primary entities suppressed). Returns `{"alerts": []}` when none qualify. |
 | `GET` | `/api/alerts/{id}` | No | Enriched published alert detail (`confidence`, `why_it_matters`, `key_intelligence`, `risk_assessment`, `sources`, `published_date`, `subcategory`, `affected_group`, `timeline`, `related_signals` + backward-compat aliases). Optional sections omitted when empty. 404 if unpublished. |
 | `GET` | `/api/alerts/stats` | No | Published alert aggregate counts + category breakdown |
 
@@ -535,20 +536,21 @@ Tests use an in-memory SQLite database — no PostgreSQL or OpenAI key required.
 pytest tests/ -v
 ```
 
-**189 tests, 0 failures.** Test breakdown:
+**208 tests, 0 failures.** Test breakdown:
 
 | File | Tests | What it covers |
 |------|-------|---------------|
 | `test_normalizer.py` | 13 | URL normalization, SHA-256 hashing, text extraction, date parsing |
 | `test_keyword_filter.py` | 13 | Word boundary matching, case sensitivity, multi-word phrases, deduplication |
-| `test_ai_processor.py` | 5 | Mock OpenAI, rate-limit retry, max retries exhaustion, short text skip |
+| `test_ai_processor.py` | 8 | Mock OpenAI, rate-limit retry, max retries exhaustion, short text skip; SYSTEM_PROMPT financial-risk-intelligence scope (OFAC, sanctions, governance, liquidity, network exposure); cybercrime/organized-crime conditional relevance |
+| `test_alert_pipeline.py` | 4 | Tier1 auto-publish guard (allowed category + score + credibility + is_relevant); Other category never auto-publishes; irrelevant alert never auto-publishes; manual admin can publish Other |
 | `test_event_grouper.py` | 6 | Event creation, entity overlap matching, 7-day window, cross-source recalculation |
 | `test_health.py` | 5 | API health, sources, raw-items, stats smoke tests |
 | `test_auth.py` | 24 | Password/JWT utilities; JSON login (admin + subscriber); Bearer + cookie auth; change-password; role enforcement; inactive user; backwards compat |
 | `test_alerts_api.py` | 21 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation; publication state; approval publish; client feed access control |
-| `test_public_alerts.py` | 61 | Public list (no auth, published-only, field mapping, ordering, filters); enriched detail (Ken's frontend schema — confidence, why_it_matters, key_intelligence, risk_assessment with strong-factor enrichment, sources, timeline, related_signals; safe-fields-only); public stats (counts, breakdown, empty state); derived risk_level from score on every public endpoint; related_signals entity-overlap + 2–4 quantity rule |
+| `test_public_alerts.py` | 73 | Public list (no auth, published-only, field mapping, ordering, filters); enriched detail (Ken's frontend schema — confidence, why_it_matters, key_intelligence, risk_assessment with strong-factor enrichment, sources, timeline, related_signals; safe-fields-only); public stats (counts, breakdown, empty state); top alerts (no auth, published-only, max 3, score ≥15 threshold, score-then-strength-then-credibility-then-recency ranking, duplicate-entity suppression, fallback key for entity-less alerts, empty when none qualify, no internal-field leakage); derived risk_level from score on every public endpoint; related_signals entity-overlap + 2–4 quantity rule |
 | `test_signal_scorer.py` | 41 | All 5 scoring factors; M3 thresholds; boundary tests; recalibrated victim/financial buckets; realistic alert scenarios |
-| **Total** | **189** | |
+| **Total** | **208** | |
 
 ---
 
