@@ -42,8 +42,19 @@ Both admin and subscriber surfaces authenticate through the same backend. Token 
 
 ## 0. Public Feed
 
-> **Hasnain: Use the three endpoints below for the current frontend MVP phase.**  
+> **Hasnain: Please use the four endpoints below for the current frontend MVP phase.**
 > No authentication required on any of them. All return published (admin-approved) alerts only.
+>
+> | Endpoint | Purpose |
+> |---|---|
+> | `GET /api/alerts` | Paginated list for the main feed |
+> | `GET /api/alerts/top` | Curated top-3 panel (hero) |
+> | `GET /api/alerts/{id}` | Enriched detail page |
+> | `GET /api/alerts/stats` | Counts + category breakdown |
+>
+> Internal `/api/v1/alerts*` endpoints remain admin-only and the
+> subscriber `/api/v1/client/alerts*` set is reserved for future authenticated
+> flows — do not wire either into the current MVP frontend.
 
 Base URL: `http://localhost:8000/api/alerts` (local) / `https://hiddenalerts.com/api/alerts` (prod)
 
@@ -63,6 +74,7 @@ Base URL: `http://localhost:8000/api/alerts` (local) / `https://hiddenalerts.com
       "signal_score": 19,
       "source_name": "SEC Press Releases",
       "source_url": "https://sec.gov/news/press-release/...",
+      "source_published_at": "2026-04-22T08:00:00Z",
       "published_at": "2026-04-22T10:30:01Z"
     }
   ]
@@ -77,11 +89,12 @@ Base URL: `http://localhost:8000/api/alerts` (local) / `https://hiddenalerts.com
 | `title` | `string\|null` | Article/press release title |
 | `summary` | `string\|null` | AI-generated summary |
 | `category` | `string\|null` | Fraud category (see list below) |
-| `risk_level` | `string\|null` | `"low"`, `"medium"`, or `"high"` |
-| `signal_score` | `int\|null` | Composite risk score (1–25) |
+| `risk_level` | `string\|null` | `"low"`, `"medium"`, or `"high"` — derived from `signal_score` (M3 thresholds: ≥16 high, 9–15 medium, ≤8 low) |
+| `signal_score` | `int\|null` | Composite risk score (5–25) |
 | `source_name` | `string\|null` | Name of the originating source |
 | `source_url` | `string\|null` | Direct link to the original article |
-| `published_at` | `datetime\|null` | ISO 8601 UTC — when admin published it |
+| `source_published_at` | `datetime\|null` | ISO 8601 UTC — original article / press-release publication date. **Use this for the date shown on list cards and Top Alerts cards.** |
+| `published_at` | `datetime\|null` | ISO 8601 UTC — HiddenAlerts platform publish time. **Internal sort key only — do not render this as the article date.** |
 
 ### Optional Query Parameters
 
@@ -303,6 +316,9 @@ list-card UI can consume it.
 ```
 
 Field reference is identical to `0.1 GET /api/alerts` — see that table.
+**Use `source_published_at` for the date on Top Alerts cards** (same convention
+as the main list); `published_at` is the platform publish time and stays
+internal-only.
 
 **What `top` selects (deterministic, server-side):**
 
