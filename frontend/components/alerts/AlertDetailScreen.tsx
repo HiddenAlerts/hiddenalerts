@@ -13,6 +13,7 @@ import type { HttpRequestError } from '@/lib/api/client';
 import { formatAlertDatePublished } from '@/lib/formatAlertDate';
 import type { AlertApiRecord } from '@/types/alertsApi';
 import {
+  Calendar,
   Clock3,
   ExternalLink,
   Eye,
@@ -147,6 +148,10 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
   const confidence = confidenceLabelFromRisk(riskLabel);
   const updatedAt = data.processed_at ?? data.published_at;
   const updatedLabel = updatedAt ? formatAlertDatePublished(updatedAt) : '—';
+  const sourcePublishedRaw = data.source_published_at?.trim();
+  const sourcePublishedLabel = sourcePublishedRaw
+    ? formatAlertDatePublished(sourcePublishedRaw)
+    : null;
   const sourceLabel = data.source_name || 'Unknown';
 
   const sources: SourceRow[] = [
@@ -202,6 +207,12 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
             <Newspaper className="text-info/90 size-4" aria-hidden="true" />
             Source: {sourceLabel}
           </span>
+          {sourcePublishedLabel ? (
+            <span className="inline-flex items-center gap-2">
+              <Calendar className="text-warning/90 size-4" aria-hidden="true" />
+              Source published: {sourcePublishedLabel}
+            </span>
+          ) : null}
           <span className="inline-flex items-center gap-2">
             <Clock3 className="text-warning/90 size-4" aria-hidden="true" />
             Updated: {updatedLabel}

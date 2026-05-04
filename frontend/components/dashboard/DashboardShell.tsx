@@ -20,7 +20,7 @@ export const DashboardShell: FC<DashboardShellProps> = ({ children }) => {
         <button
           type="button"
           aria-label="Close menu"
-          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          className="fixed inset-0 z-30 cursor-pointer bg-black/50 lg:hidden"
           onClick={sidebar.closeMobile}
         />
       ) : null}

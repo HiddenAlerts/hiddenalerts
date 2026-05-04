@@ -1,6 +1,10 @@
 export { AlertRow } from './AlertRow';
 export { AlertsScreen } from './AlertsScreen';
 export { AlertTable } from './AlertTable';
+export { AlertsFiltersBar } from './AlertsFiltersBar';
+export { AlertsPageHeader } from './AlertsPageHeader';
+export { AlertsRiskLegendStrip } from './AlertsRiskLegendStrip';
+export { AlertsSummaryLine } from './AlertsSummaryLine';
 export { Badge } from './Badge';
 export { FilterDropdown } from './FilterDropdown';
 export { Pagination } from './Pagination';
