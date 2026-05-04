@@ -9,6 +9,7 @@ import {
   DASHBOARD_RISK_LEGEND_INFO,
   DASHBOARD_RISK_LEGEND_ITEMS,
 } from '@/data/dashboardRiskLegend';
+import { DASHBOARD_TOP_ALERTS } from '@/data/dashboardTopAlerts';
 import { MOCK_ALERTS } from '@/data/mockAlerts';
 import { partitionAlertsByRisk } from '@/lib/alertRisk';
 import { formatDashboardLastUpdatedUtc } from '@/lib/formatDashboardDate';
@@ -22,6 +23,7 @@ import { DashboardAlertListItem } from './DashboardAlertListItem';
 import { DashboardPageHeader } from './DashboardPageHeader';
 import { DashboardRiskScoreLegend } from './DashboardRiskScoreLegend';
 import { DashboardRiskSummaryCard } from './DashboardRiskSummaryCard';
+import { DashboardTopAlertsSection } from './DashboardTopAlertsSection';
 import { DashboardUnlockCta } from './DashboardUnlockCta';
 
 function pct(part: number, total: number) {
@@ -79,6 +81,15 @@ export const DashboardScreen: FC = () => {
           setLastUpdatedIso(new Date().toISOString());
           router.refresh();
         }}
+      />
+
+      <DashboardTopAlertsSection
+        title="Top Alerts You Should Know"
+        subtitle="The highest priority alerts based on risk score and recency"
+        viewAllHref="/alerts?risk=high"
+        viewAllLabel="View all high risk alerts"
+        riskTone="high"
+        alerts={DASHBOARD_TOP_ALERTS}
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

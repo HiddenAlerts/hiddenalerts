@@ -5,6 +5,8 @@ export { DashboardPageHeader } from './DashboardPageHeader';
 export { DashboardRiskScoreLegend } from './DashboardRiskScoreLegend';
 export { DashboardRiskSummaryCard } from './DashboardRiskSummaryCard';
 export { DashboardRiskTable } from './DashboardRiskTable';
+export { DashboardTopAlertCard } from './DashboardTopAlertCard';
+export { DashboardTopAlertsSection } from './DashboardTopAlertsSection';
 export { DashboardScreen } from './DashboardScreen';
 export { DashboardShell } from './DashboardShell';
 export { DashboardStatCard } from './DashboardStatCard';
