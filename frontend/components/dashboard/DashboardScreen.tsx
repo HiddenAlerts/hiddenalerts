@@ -12,6 +12,7 @@ import {
 import { DASHBOARD_TOP_ALERTS } from '@/data/dashboardTopAlerts';
 import { MOCK_ALERTS } from '@/data/mockAlerts';
 import { useAlertsStatsQuery } from '@/hooks/useAlertsStatsQuery';
+import { useDashboardRiskPreviewsQuery } from '@/hooks/useDashboardRiskPreviewsQuery';
 import { partitionAlertsByRisk } from '@/lib/alertRisk';
 import { mapAlertsStatsToRiskCounts } from '@/lib/api/alerts';
 import { formatDashboardLastUpdatedUtc } from '@/lib/formatDashboardDate';
@@ -33,9 +34,6 @@ function pct(part: number, total: number) {
   return Math.round((part / total) * 100);
 }
 
-/** Max alert rows per risk section on the dashboard (full totals still in stats / badge). */
-const DASHBOARD_ALERTS_PER_RISK = 3;
-
 export const DashboardScreen: FC = () => {
   const router = useRouter();
   const [earlyAccessOpen, setEarlyAccessOpen] = useState(false);
@@ -56,6 +54,16 @@ export const DashboardScreen: FC = () => {
     [statsData, statsError],
   );
 
+  const {
+    highQuery,
+    mediumQuery,
+    lowQuery,
+    highAlerts,
+    mediumAlerts,
+    lowAlerts,
+    refetchAll: refetchRiskPreviews,
+  } = useDashboardRiskPreviewsQuery();
+
   const { high, medium, low } = useMemo(
     () => partitionAlertsByRisk(MOCK_ALERTS),
     [],
@@ -72,19 +80,6 @@ export const DashboardScreen: FC = () => {
       : medium.length;
   const lowTotal =
     typeof statsCounts?.low === 'number' ? statsCounts.low : low.length;
-
-  const highSorted = useMemo(
-    () => [...high].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)),
-    [high],
-  );
-  const mediumSorted = useMemo(
-    () => [...medium].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)),
-    [medium],
-  );
-  const lowSorted = useMemo(
-    () => [...low].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)),
-    [low],
-  );
 
   const lastUpdatedLabel = useMemo(() => {
     if (statsDataUpdatedAt > 0 && statsData && !statsError) {
@@ -113,6 +108,7 @@ export const DashboardScreen: FC = () => {
         onRefresh={() => {
           setLastUpdatedIso(new Date().toISOString());
           void refetchStats();
+          void refetchRiskPreviews();
           router.refresh();
         }}
       />
@@ -175,9 +171,15 @@ export const DashboardScreen: FC = () => {
           riskTone="high"
           emptyMessage="No high-risk alerts."
         >
-          {highSorted.slice(0, DASHBOARD_ALERTS_PER_RISK).map(alert => (
-            <DashboardAlertListItem key={alert.id} alert={alert} />
-          ))}
+          {highQuery.isPending && !highQuery.data ? (
+            <p className="text-muted border-border rounded-lg border border-dashed px-4 py-8 text-center text-sm">
+              Loading alerts…
+            </p>
+          ) : (
+            highAlerts.map(alert => (
+              <DashboardAlertListItem key={alert.id} alert={alert} />
+            ))
+          )}
         </DashboardAlertGroup>
 
         <DashboardAlertGroup
@@ -187,9 +189,15 @@ export const DashboardScreen: FC = () => {
           riskTone="medium"
           emptyMessage="No medium-risk alerts."
         >
-          {mediumSorted.slice(0, DASHBOARD_ALERTS_PER_RISK).map(alert => (
-            <DashboardAlertListItem key={alert.id} alert={alert} />
-          ))}
+          {mediumQuery.isPending && !mediumQuery.data ? (
+            <p className="text-muted border-border rounded-lg border border-dashed px-4 py-8 text-center text-sm">
+              Loading alerts…
+            </p>
+          ) : (
+            mediumAlerts.map(alert => (
+              <DashboardAlertListItem key={alert.id} alert={alert} />
+            ))
+          )}
         </DashboardAlertGroup>
 
         <DashboardAlertGroup
@@ -202,9 +210,15 @@ export const DashboardScreen: FC = () => {
           defaultCollapsed
           collapsedSummary="Low risk alerts are collapsed by default"
         >
-          {lowSorted.slice(0, DASHBOARD_ALERTS_PER_RISK).map(alert => (
-            <DashboardAlertListItem key={alert.id} alert={alert} />
-          ))}
+          {lowQuery.isPending && !lowQuery.data ? (
+            <p className="text-muted border-border rounded-lg border border-dashed px-4 py-8 text-center text-sm">
+              Loading alerts…
+            </p>
+          ) : (
+            lowAlerts.map(alert => (
+              <DashboardAlertListItem key={alert.id} alert={alert} />
+            ))
+          )}
         </DashboardAlertGroup>
       </div>
 
