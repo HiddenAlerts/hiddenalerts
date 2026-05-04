@@ -38,6 +38,11 @@ export function mapApiAlertToAlertItem(record: AlertApiRecord): AlertItem {
     sourceUrl: record.source_url,
     category: record.category,
     occurredAt: record.published_at,
+    sourcePublishedAt:
+      typeof record.source_published_at === 'string' &&
+      record.source_published_at.trim().length > 0
+        ? record.source_published_at.trim()
+        : undefined,
   };
 }
 

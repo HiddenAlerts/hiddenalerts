@@ -14,6 +14,8 @@ export type PaginationProps = {
    * When `totalPages` is omitted, used for the Next control (server offset/limit).
    */
   hasNextPage?: boolean;
+  /** Class for the active numbered page (when `totalPages` is set). */
+  activePageClassName?: string;
 };
 
 export const Pagination: FC<PaginationProps> = ({
@@ -22,6 +24,7 @@ export const Pagination: FC<PaginationProps> = ({
   hasNextPage,
   onPageChange,
   className,
+  activePageClassName = 'bg-primary-500 text-white',
 }) => {
   const numbered = typeof totalPages === 'number' && totalPages > 0;
   const canPrev = page > 1;
@@ -65,7 +68,7 @@ export const Pagination: FC<PaginationProps> = ({
                 className={cn(
                   'h-9 min-w-9 cursor-pointer rounded-md px-2 text-sm font-medium transition-colors',
                   active
-                    ? 'bg-primary-500 text-white'
+                    ? activePageClassName
                     : 'text-muted hover:bg-surface hover:text-foreground',
                 )}
               >
