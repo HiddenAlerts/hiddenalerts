@@ -44,6 +44,27 @@ export function formatDashboardAlertTimeUtcLine(iso: string) {
   return `${timePart} UTC`;
 }
 
+/** Compact footer line for top-alert cards, e.g. `May 28, 2026 • 9:15 AM UTC`. */
+export function formatTopAlertFooterTimestampUtc(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+
+  const datePart = d.toLocaleString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+  const timePart = d.toLocaleString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'UTC',
+  });
+
+  return `${datePart} • ${timePart} UTC`;
+}
+
 /** Dashboard header “last updated” line. */
 export function formatDashboardLastUpdatedUtc(iso: string) {
   const d = new Date(iso);
