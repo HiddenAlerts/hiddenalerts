@@ -1,9 +1,14 @@
+import type { AlertsRiskFilterValue } from '@/data/alertRiskFilterOptions';
 import {
   formatRiskLevelLabel,
   simplifyAlertSourceName,
 } from '@/lib/alertDisplay';
 import type { AlertBadgeTone, AlertItem } from '@/types/alert';
-import type { AlertApiRecord, AlertsListResponse } from '@/types/alertsApi';
+import type {
+  AlertApiRecord,
+  AlertsListResponse,
+  AlertsStatsResponse,
+} from '@/types/alertsApi';
 
 import { apiGet } from './client';
 
@@ -68,4 +73,37 @@ export async function fetchAlertsPage(
 
 export async function fetchAlertDetail(alertId: string): Promise<AlertApiRecord> {
   return apiGet<AlertApiRecord>(buildAlertDetailPath(alertId));
+}
+
+export type FetchAlertsStatsParams = {
+  /** When set and not `all`, forwarded as `category` query param if the API supports scoped stats. */
+  category?: string;
+};
+
+export function buildAlertsStatsPath(params?: FetchAlertsStatsParams): string {
+  const search = new URLSearchParams();
+  const cat = params?.category?.trim();
+  if (cat && cat !== 'all') {
+    search.set('category', cat);
+  }
+  const qs = search.toString();
+  return qs ? `/alerts/stats?${qs}` : '/alerts/stats';
+}
+
+export async function fetchAlertsStats(
+  params?: FetchAlertsStatsParams,
+): Promise<AlertsStatsResponse> {
+  return apiGet<AlertsStatsResponse>(buildAlertsStatsPath(params));
+}
+
+/** Maps `/alerts/stats` payload to risk tab counts. */
+export function mapAlertsStatsToRiskCounts(
+  data: AlertsStatsResponse,
+): Record<AlertsRiskFilterValue, number> {
+  return {
+    all: data.total_alerts,
+    high: data.high_count,
+    medium: data.medium_count,
+    low: data.low_count,
+  };
 }

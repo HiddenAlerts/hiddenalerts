@@ -17,6 +17,20 @@ export type AlertApiRecord = {
   affected?: string | null;
 };
 
+export type AlertsStatsCategoryBreakdown = {
+  category: string;
+  count: number;
+};
+
+/** Response from `GET /alerts/stats` (risk totals and category breakdown). */
+export type AlertsStatsResponse = {
+  total_alerts: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  category_breakdown: AlertsStatsCategoryBreakdown[];
+};
+
 export type AlertsListResponse = {
   alerts: AlertApiRecord[];
 };

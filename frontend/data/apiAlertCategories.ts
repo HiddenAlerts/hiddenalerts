@@ -1,5 +1,5 @@
 export const API_ALERT_CATEGORY_OPTIONS = [
-  { value: 'all', label: 'All Categories' },
+  { value: 'all', label: 'All Type' },
   { value: 'Cybercrime', label: 'Cybercrime' },
   { value: 'Money Laundering', label: 'Money Laundering' },
   { value: 'Consumer Scam', label: 'Consumer Scam' },
