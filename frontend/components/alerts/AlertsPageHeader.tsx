@@ -70,7 +70,7 @@ export const AlertsPageHeader: FC<AlertsPageHeaderProps> = ({
           Get Early Access
         </Button>
       ) : null}
-      <Button
+      {/* <Button
         type="button"
         size="sm"
         leftIcon={<RefreshCw className="size-4" aria-hidden />}
@@ -78,7 +78,7 @@ export const AlertsPageHeader: FC<AlertsPageHeaderProps> = ({
         onClick={onRefresh}
       >
         Refresh
-      </Button>
+      </Button> */}
     </div>
   </div>
 );

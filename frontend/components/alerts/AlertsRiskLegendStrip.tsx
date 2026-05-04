@@ -15,7 +15,7 @@ export const AlertsRiskLegendStrip: FC<AlertsRiskLegendStripProps> = ({
 }) => (
   <div
     className={cn(
-      'border-border bg-surface/25 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border px-4 py-3',
+      'border-border bg-surface/25 flex flex-wrap items-center gap-12 rounded-md border px-4 py-3',
       className,
     )}
     role="list"
@@ -30,7 +30,9 @@ export const AlertsRiskLegendStrip: FC<AlertsRiskLegendStripProps> = ({
           className={cn('size-2.5 shrink-0 rounded-full', item.dotClass)}
           aria-hidden
         />
-        <span className="text-foreground text-sm font-medium">{item.label}</span>
+        <span className="text-foreground text-sm font-medium">
+          {item.label}
+        </span>
       </div>
     ))}
   </div>

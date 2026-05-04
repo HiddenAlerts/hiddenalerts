@@ -1,5 +1,6 @@
 'use client';
 
+import { RiskCountPill } from '@/components/ui/RiskCountPill';
 import { cn } from '@/lib/utils';
 import { ChevronDown } from 'lucide-react';
 import Link from 'next/link';
@@ -9,20 +10,17 @@ export type DashboardAlertGroupRiskTone = 'high' | 'medium' | 'low';
 
 const riskToneStyles: Record<
   DashboardAlertGroupRiskTone,
-  { badge: string; link: string; viewAllLabel: string }
+  { link: string; viewAllLabel: string }
 > = {
   high: {
-    badge: 'bg-danger-muted text-danger',
     link: 'text-danger hover:text-danger-300',
     viewAllLabel: 'View All High Risk',
   },
   medium: {
-    badge: 'bg-warning-muted text-warning',
     link: 'text-warning hover:text-warning-300',
     viewAllLabel: 'View All Medium Risk',
   },
   low: {
-    badge: 'bg-success-muted text-success',
     link: 'text-success hover:text-success-300',
     viewAllLabel: 'View All Low Risk',
   },
@@ -127,14 +125,7 @@ export const DashboardAlertGroup: FC<DashboardAlertGroupProps> = ({
           <h2 className="font-heading text-foreground font-semibold tracking-tight sm:text-base">
             {title}
           </h2>
-          <span
-            className={cn(
-              'inline-flex min-h-6 min-w-6 items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums',
-              tone.badge,
-            )}
-          >
-            {count}
-          </span>
+          <RiskCountPill variant={riskTone} count={count} />
         </div>
         <Link
           href={viewAllHref}
