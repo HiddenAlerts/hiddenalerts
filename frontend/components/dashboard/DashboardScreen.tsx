@@ -11,7 +11,9 @@ import {
 } from '@/data/dashboardRiskLegend';
 import { DASHBOARD_TOP_ALERTS } from '@/data/dashboardTopAlerts';
 import { MOCK_ALERTS } from '@/data/mockAlerts';
+import { useAlertsStatsQuery } from '@/hooks/useAlertsStatsQuery';
 import { partitionAlertsByRisk } from '@/lib/alertRisk';
+import { mapAlertsStatsToRiskCounts } from '@/lib/api/alerts';
 import { formatDashboardLastUpdatedUtc } from '@/lib/formatDashboardDate';
 import { AlertTriangle, Bell, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -41,11 +43,35 @@ export const DashboardScreen: FC = () => {
     DASHBOARD_DUMMY_LAST_UPDATED_ISO,
   );
 
+  const {
+    data: statsData,
+    dataUpdatedAt: statsDataUpdatedAt,
+    refetch: refetchStats,
+    isError: statsError,
+  } = useAlertsStatsQuery('all');
+
+  const statsCounts = useMemo(
+    () =>
+      statsData && !statsError ? mapAlertsStatsToRiskCounts(statsData) : null,
+    [statsData, statsError],
+  );
+
   const { high, medium, low } = useMemo(
     () => partitionAlertsByRisk(MOCK_ALERTS),
     [],
   );
-  const total = MOCK_ALERTS.length;
+  const mockTotal = MOCK_ALERTS.length;
+
+  const totalAlerts =
+    typeof statsCounts?.all === 'number' ? statsCounts.all : mockTotal;
+  const highTotal =
+    typeof statsCounts?.high === 'number' ? statsCounts.high : high.length;
+  const mediumTotal =
+    typeof statsCounts?.medium === 'number'
+      ? statsCounts.medium
+      : medium.length;
+  const lowTotal =
+    typeof statsCounts?.low === 'number' ? statsCounts.low : low.length;
 
   const highSorted = useMemo(
     () => [...high].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt)),
@@ -60,7 +86,14 @@ export const DashboardScreen: FC = () => {
     [low],
   );
 
-  const lastUpdatedLabel = formatDashboardLastUpdatedUtc(lastUpdatedIso);
+  const lastUpdatedLabel = useMemo(() => {
+    if (statsDataUpdatedAt > 0 && statsData && !statsError) {
+      return formatDashboardLastUpdatedUtc(
+        new Date(statsDataUpdatedAt).toISOString(),
+      );
+    }
+    return formatDashboardLastUpdatedUtc(lastUpdatedIso);
+  }, [statsDataUpdatedAt, statsData, statsError, lastUpdatedIso]);
 
   return (
     <div className="space-y-6 lg:space-y-8">
@@ -70,7 +103,7 @@ export const DashboardScreen: FC = () => {
         statusLine={
           <>
             <span className="text-danger font-semibold tabular-nums">
-              {total}
+              {totalAlerts}
             </span>
             <span> relevant alerts detected</span>
           </>
@@ -79,6 +112,7 @@ export const DashboardScreen: FC = () => {
         onViewAlerts={() => router.push('/alerts')}
         onRefresh={() => {
           setLastUpdatedIso(new Date().toISOString());
+          void refetchStats();
           router.refresh();
         }}
       />
@@ -95,32 +129,32 @@ export const DashboardScreen: FC = () => {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <DashboardRiskSummaryCard
           label="High risk"
-          value={high.length}
-          percentOfTotal={pct(high.length, total)}
+          value={highTotal}
+          percentOfTotal={pct(highTotal, totalAlerts)}
           tone="danger"
           href="/alerts?risk=high"
           icon={<ShieldAlert className="size-5 sm:size-[32px]" aria-hidden />}
         />
         <DashboardRiskSummaryCard
           label="Medium risk"
-          value={medium.length}
-          percentOfTotal={pct(medium.length, total)}
+          value={mediumTotal}
+          percentOfTotal={pct(mediumTotal, totalAlerts)}
           tone="warning"
           href="/alerts?risk=medium"
           icon={<AlertTriangle className="size-5 sm:size-[32px]" aria-hidden />}
         />
         <DashboardRiskSummaryCard
           label="Low risk"
-          value={low.length}
-          percentOfTotal={pct(low.length, total)}
+          value={lowTotal}
+          percentOfTotal={pct(lowTotal, totalAlerts)}
           tone="success"
           href="/alerts?risk=low"
           icon={<ShieldCheck className="size-5 sm:size-[32px]" aria-hidden />}
         />
         <DashboardRiskSummaryCard
           label="All alerts"
-          value={total}
-          percentOfTotal={total === 0 ? 0 : 100}
+          value={totalAlerts}
+          percentOfTotal={totalAlerts === 0 ? 0 : 100}
           tone="info"
           href="/alerts"
           icon={<Bell className="size-5 sm:size-[32px]" aria-hidden />}
@@ -136,7 +170,7 @@ export const DashboardScreen: FC = () => {
       <div className="space-y-8">
         <DashboardAlertGroup
           title="High Risk Alerts"
-          count={highSorted.length}
+          count={highTotal}
           viewAllHref="/alerts?risk=high"
           riskTone="high"
           emptyMessage="No high-risk alerts."
@@ -148,7 +182,7 @@ export const DashboardScreen: FC = () => {
 
         <DashboardAlertGroup
           title="Medium Risk Alerts"
-          count={mediumSorted.length}
+          count={mediumTotal}
           viewAllHref="/alerts?risk=medium"
           riskTone="medium"
           emptyMessage="No medium-risk alerts."
@@ -160,7 +194,7 @@ export const DashboardScreen: FC = () => {
 
         <DashboardAlertGroup
           title="Low Risk Alerts"
-          count={lowSorted.length}
+          count={lowTotal}
           viewAllHref="/alerts?risk=low"
           riskTone="low"
           emptyMessage="No low-risk alerts."
