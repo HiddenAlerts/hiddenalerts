@@ -14,18 +14,21 @@ export function LandingHero() {
       </div>
 
       <div className="mx-auto max-w-5xl text-center">
-        <h1 className="font-heading text-foreground text-balance text-4xl leading-tight font-bold tracking-tight sm:text-5xl lg:text-[3.6rem]">
+        <p className="bg-primary-500/12 text-primary-300 border-border/60 mx-auto mb-4 inline-flex items-center rounded-full border px-3 py-1 text-sm font-semibold tracking-wide">
+          Early Access Coming Soon
+        </p>
+        <h1 className="font-heading text-foreground text-4xl leading-tight font-bold tracking-tight text-balance sm:text-5xl lg:text-[3.6rem]">
           Detect fraud signals before they become headlines
         </h1>
         <p className="text-muted mx-auto mt-4 max-w-2xl text-lg sm:text-xl">
           AI-filtered alerts from DOJ, SEC, FBI and more — ranked by risk so you
           can act early.
         </p>
-        <div
+        {/* <div
           className="mx-auto mt-6 w-full max-w-md scroll-mt-24"
         >
           <WaitlistForm microText="Early access to high-risk fraud alerts. Limited rollout." />
-        </div>
+        </div> */}
       </div>
     </section>
   );

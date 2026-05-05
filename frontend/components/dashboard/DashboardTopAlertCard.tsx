@@ -7,6 +7,7 @@ import type {
 import { formatTopAlertFooterTimestampUtc } from '@/lib/formatDashboardDate';
 import { cn } from '@/lib/utils';
 import { Calendar, Landmark, Lock, UserRound, Wallet } from 'lucide-react';
+import Link from 'next/link';
 import type { FC } from 'react';
 
 const scoreToneStyles: Record<DashboardTopAlertRiskTone, { pill: string }> = {
@@ -127,48 +128,54 @@ export const DashboardTopAlertCard: FC<DashboardTopAlertCardProps> = ({
   const footer = formatTopAlertFooterTimestampUtc(alert.occurredAt);
 
   return (
-    <article
-      className={cn(
-        'border-border bg-background-alt/80 flex flex-col rounded-lg border p-3.5 shadow-xs sm:p-4',
-        className,
-      )}
+    <Link
+      href={`/alerts/${alert.id}`}
+      className="group block cursor-pointer"
+      aria-label={`Open alert details: ${alert.title}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="bg-danger flex size-6 shrink-0 items-center justify-center rounded text-xs font-bold text-white tabular-nums">
-          {alert.rank}
-        </span>
-        <span
-          className={cn(
-            'shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-semibold tabular-nums',
-            scoreStyle.pill,
-          )}
-        >
-          {alert.score}/100
-        </span>
-      </div>
-
-      <div className="mt-3 flex gap-3">
-        {iconBlock(alert.iconVariant, riskTone)}
-        <div className="min-w-0 flex-1">
-          <h3 className="font-heading text-foreground line-clamp-2 text-sm leading-snug font-semibold tracking-tight sm:text-[0.95rem]">
-            {alert.title}
-          </h3>
-          <TagSegments tags={alert.tags} />
+      <article
+        className={cn(
+          'border-border bg-background-alt/80 hover:border-primary-500/70 hover:shadow-md hover:-translate-y-0.5 flex h-full cursor-pointer flex-col rounded-lg border p-3.5 shadow-xs transition-[border-color,box-shadow,transform] duration-200 sm:p-4',
+          className,
+        )}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <span className="bg-danger flex size-6 shrink-0 items-center justify-center rounded text-xs font-bold text-white tabular-nums">
+            {alert.rank}
+          </span>
+          <span
+            className={cn(
+              'shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-semibold tabular-nums',
+              scoreStyle.pill,
+            )}
+          >
+            {alert.score}/100
+          </span>
         </div>
-      </div>
 
-      <p className="text-muted mt-2 line-clamp-3 text-xs leading-relaxed">
-        {alert.description}
-      </p>
+        <div className="mt-3 flex gap-3">
+          {iconBlock(alert.iconVariant, riskTone)}
+          <div className="min-w-0 flex-1">
+            <h3 className="font-heading text-foreground line-clamp-2 text-sm leading-snug font-semibold tracking-tight sm:text-[0.95rem]">
+              {alert.title}
+            </h3>
+            <TagSegments tags={alert.tags} />
+          </div>
+        </div>
 
-      <p className="text-muted mt-3 flex items-center gap-1.5 text-[0.7rem] leading-snug">
-        <Calendar
-          className="text-muted-foreground size-3.5 shrink-0"
-          strokeWidth={1.5}
-          aria-hidden
-        />
-        <span>{footer}</span>
-      </p>
-    </article>
+        <p className="text-muted mt-2 line-clamp-3 text-xs leading-relaxed">
+          {alert.description}
+        </p>
+
+        <p className="text-muted mt-3 flex items-center gap-1.5 text-[0.7rem] leading-snug">
+          <Calendar
+            className="text-muted-foreground size-3.5 shrink-0"
+            strokeWidth={1.5}
+            aria-hidden
+          />
+          <span>{footer}</span>
+        </p>
+      </article>
+    </Link>
   );
 };

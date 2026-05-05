@@ -75,6 +75,14 @@ export async function fetchAlertDetail(alertId: string): Promise<AlertApiRecord>
   return apiGet<AlertApiRecord>(buildAlertDetailPath(alertId));
 }
 
+export function buildTopAlertsPath() {
+  return '/alerts/top';
+}
+
+export async function fetchTopAlerts(): Promise<AlertsListResponse> {
+  return apiGet<AlertsListResponse>(buildTopAlertsPath());
+}
+
 export type FetchAlertsStatsParams = {
   /** When set and not `all`, forwarded as `category` query param if the API supports scoped stats. */
   category?: string;
