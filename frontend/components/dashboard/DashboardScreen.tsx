@@ -1,6 +1,9 @@
 'use client';
 
 import { EarlyAccessModal } from '@/components/alerts/EarlyAccessModal';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { LoadingState } from '@/components/ui/LoadingState';
 import {
   DASHBOARD_DUMMY_LAST_UPDATED_ISO,
   DASHBOARD_UNLOCK_CTA,
@@ -9,10 +12,10 @@ import {
   DASHBOARD_RISK_LEGEND_INFO,
   DASHBOARD_RISK_LEGEND_ITEMS,
 } from '@/data/dashboardRiskLegend';
-import { DASHBOARD_TOP_ALERTS } from '@/data/dashboardTopAlerts';
 import { MOCK_ALERTS } from '@/data/mockAlerts';
 import { useAlertsStatsQuery } from '@/hooks/useAlertsStatsQuery';
 import { useDashboardRiskPreviewsQuery } from '@/hooks/useDashboardRiskPreviewsQuery';
+import { useDashboardTopAlertsQuery } from '@/hooks/useDashboardTopAlertsQuery';
 import { partitionAlertsByRisk } from '@/lib/alertRisk';
 import { mapAlertsStatsToRiskCounts } from '@/lib/api/alerts';
 import { formatDashboardLastUpdatedUtc } from '@/lib/formatDashboardDate';
@@ -63,6 +66,12 @@ export const DashboardScreen: FC = () => {
     lowAlerts,
     refetchAll: refetchRiskPreviews,
   } = useDashboardRiskPreviewsQuery();
+  const {
+    data: topAlertsFromApi,
+    refetch: refetchTopAlerts,
+    isError: topAlertsError,
+    isPending: topAlertsPending,
+  } = useDashboardTopAlertsQuery();
 
   const { high, medium, low } = useMemo(
     () => partitionAlertsByRisk(MOCK_ALERTS),
@@ -90,6 +99,8 @@ export const DashboardScreen: FC = () => {
     return formatDashboardLastUpdatedUtc(lastUpdatedIso);
   }, [statsDataUpdatedAt, statsData, statsError, lastUpdatedIso]);
 
+  const topAlerts = topAlertsFromApi ?? [];
+
   return (
     <div className="space-y-6 lg:space-y-8">
       <DashboardPageHeader
@@ -109,6 +120,7 @@ export const DashboardScreen: FC = () => {
           setLastUpdatedIso(new Date().toISOString());
           void refetchStats();
           void refetchRiskPreviews();
+          void refetchTopAlerts();
           router.refresh();
         }}
       />
@@ -119,7 +131,27 @@ export const DashboardScreen: FC = () => {
         viewAllHref="/alerts?risk=high"
         viewAllLabel="View all high risk alerts"
         riskTone="high"
-        alerts={DASHBOARD_TOP_ALERTS}
+        alerts={topAlerts}
+        bodyContent={
+          topAlertsPending && !topAlertsFromApi ? (
+            <LoadingState label="Loading top alerts…" className="py-12" />
+          ) : topAlertsError ? (
+            <ErrorState
+              title="Unable to load top alerts"
+              message="We could not fetch the top alerts right now. Please try again."
+              onRetry={() => {
+                void refetchTopAlerts();
+              }}
+              className="py-10"
+            />
+          ) : topAlerts.length === 0 ? (
+            <EmptyState
+              title="No top alerts yet"
+              description="Top alerts will appear here once high-priority signals are available."
+              className="py-10"
+            />
+          ) : undefined
+        }
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
