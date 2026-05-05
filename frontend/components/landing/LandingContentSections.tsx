@@ -64,7 +64,7 @@ function AlertCard({
   return (
     <article className="border-border bg-surface/55 rounded-xl border p-4 sm:p-5">
       <div className="text-muted flex flex-wrap items-center justify-between gap-2 text-sm">
-        <p className="flex items-center gap-2 font-medium">
+        <p className="flex flex-wrap items-center gap-2 font-medium">
           <span aria-hidden>{isHigh ? '🔴' : '🟠'}</span>
           <span className={isHigh ? 'text-danger' : 'text-warning'}>
             {level}
@@ -72,6 +72,9 @@ function AlertCard({
           <span>— {source}</span>
           <span>— {timeAgo}</span>
         </p>
+        <span className="bg-primary-500/12 text-primary-300 border-border/60 shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium">
+          Preview
+        </span>
       </div>
       <h3 className="text-foreground mt-2 text-lg font-semibold">{title}</h3>
       <p className="text-body mt-2 text-sm sm:text-base">{description}</p>
@@ -252,7 +255,10 @@ export function LandingContentSections() {
         </p>
       </SectionBlock>
 
-      <section className="border-border-subtle border-t bg-[linear-gradient(180deg,rgba(30,41,59,0.38),rgba(15,23,42,0.32))] px-4 py-12 md:px-6">
+      <section
+        id="waitlist"
+        className="border-border-subtle scroll-mt-24 border-t bg-[linear-gradient(180deg,rgba(30,41,59,0.38),rgba(15,23,42,0.32))] px-4 py-12 md:px-6"
+      >
         <div className="mx-auto max-w-5xl text-center">
           <div className="bg-primary-500/12 text-primary-300 mx-auto flex size-11 items-center justify-center rounded-full border border-white/10">
             <Sparkles className="size-5" aria-hidden />
@@ -260,7 +266,7 @@ export function LandingContentSections() {
           <h2 className="font-heading text-foreground mt-4 text-2xl font-semibold tracking-tight sm:text-3xl">
             Stay ahead of financial threats
           </h2>
-          <div className="mt-6">
+          {/* <div className="mt-6">
             <a
               href={NEWSLETTER_URL}
               target="_blank"
@@ -272,11 +278,11 @@ export function LandingContentSections() {
             >
               Subscribe to newsletter
             </a>
-            {/* <WaitlistForm
+            <WaitlistForm
               formId="waitlist-final"
               microText="Be among the first to access real-time fraud intelligence."
-            /> */}
-          </div>
+            />
+          </div> */}
         </div>
       </section>
     </>
