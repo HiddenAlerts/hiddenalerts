@@ -34,6 +34,8 @@ export type DashboardTopAlertsSectionProps = {
   alerts: DashboardTopAlertItem[];
   /** Optional slot after subtitle (e.g. filters). */
   headerExtra?: ReactNode;
+  /** Optional replacement for cards grid body (loading/error/empty states). */
+  bodyContent?: ReactNode;
   className?: string;
 };
 
@@ -57,6 +59,7 @@ export const DashboardTopAlertsSection: FC<DashboardTopAlertsSectionProps> = ({
   riskTone = 'high',
   alerts,
   headerExtra,
+  bodyContent,
   className,
 }) => {
   const linkTone = headerLinkTone[riskTone];
@@ -101,15 +104,19 @@ export const DashboardTopAlertsSection: FC<DashboardTopAlertsSectionProps> = ({
         </Link>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
-        {alerts.map(item => (
-          <DashboardTopAlertCard
-            key={item.id}
-            alert={item}
-            riskTone={riskTone}
-          />
-        ))}
-      </div>
+      {bodyContent ? (
+        <div className="mt-5">{bodyContent}</div>
+      ) : (
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
+          {alerts.map(item => (
+            <DashboardTopAlertCard
+              key={item.id}
+              alert={item}
+              riskTone={riskTone}
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 };

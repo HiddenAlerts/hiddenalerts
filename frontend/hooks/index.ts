@@ -9,3 +9,7 @@ export {
   dashboardRiskPreviewQueryKey,
   useDashboardRiskPreviewsQuery,
 } from './useDashboardRiskPreviewsQuery';
+export {
+  dashboardTopAlertsQueryKey,
+  useDashboardTopAlertsQuery,
+} from './useDashboardTopAlertsQuery';
