@@ -53,18 +53,18 @@ export const DashboardUnlockCta: FC<DashboardUnlockCtaProps> = ({
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+      {/* <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
         <Button type="button" size="sm" onClick={onPrimaryClick}>
           {primaryLabel}
         </Button>
-        {/* <Link
+        <Link
           href={secondaryHref}
           className="text-foreground hover:text-body inline-flex cursor-pointer items-center gap-0.5 text-sm font-semibold transition-colors"
         >
           {secondaryLabel}
           <ChevronRight className="size-4 shrink-0" aria-hidden />
-        </Link> */}
-      </div>
+        </Link>
+      </div> */}
     </div>
   </div>
 );
