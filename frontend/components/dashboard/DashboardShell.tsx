@@ -4,6 +4,7 @@ import { useSidebar } from '@/hooks/useSidebar';
 import { cn } from '@/lib/utils';
 import type { FC, ReactNode } from 'react';
 
+import { DashboardFooter } from './DashboardFooter';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 
@@ -43,6 +44,7 @@ export const DashboardShell: FC<DashboardShellProps> = ({ children }) => {
         <main className="flex-1 px-3 py-4 sm:px-4 lg:px-6 lg:py-6">
           {children}
         </main>
+        <DashboardFooter />
       </div>
     </div>
   );
