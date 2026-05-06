@@ -1,5 +1,5 @@
-import { Input } from '@/components/ui/input';
 import { buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { Mail } from 'lucide-react';
 
@@ -10,8 +10,10 @@ type WaitlistFormProps = {
   microText: string;
 };
 
-export function WaitlistForm({ formId = 'waitlist', microText }: WaitlistFormProps) {
-
+export function WaitlistForm({
+  formId = 'waitlist',
+  microText,
+}: WaitlistFormProps) {
   return (
     <form
       id={formId}

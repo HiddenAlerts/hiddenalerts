@@ -1,7 +1,6 @@
-import Link from 'next/link';
-
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
 
 import { LandingLogo } from './LandingLogo';
 
@@ -15,7 +14,7 @@ export function LandingHeader() {
         >
           <LandingLogo />
         </Link>
-        <Link
+        {/* <Link
           href="#waitlist"
           className={cn(
             buttonVariants({ variant: 'default', size: 'sm' }),
@@ -23,7 +22,7 @@ export function LandingHeader() {
           )}
         >
           Get Early Access
-        </Link>
+        </Link> */}
       </div>
     </header>
   );

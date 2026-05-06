@@ -58,7 +58,7 @@ export const AlertsPageHeader: FC<AlertsPageHeaderProps> = ({
         </p>
       ) : null}
     </div>
-    <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
+    {/* <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
       {onEarlyAccess ? (
         <Button
           type="button"
@@ -70,15 +70,15 @@ export const AlertsPageHeader: FC<AlertsPageHeaderProps> = ({
           Get Early Access
         </Button>
       ) : null}
-      {/* <Button
+      <Button
         type="button"
         size="sm"
         leftIcon={<RefreshCw className="size-4" aria-hidden />}
-        className="border-white/25 bg-white text-primary-500 hover:bg-white/92 hover:text-primary-600 active:bg-white/85 border"
+        className="text-primary-500 hover:text-primary-600 border border-white/25 bg-white hover:bg-white/92 active:bg-white/85"
         onClick={onRefresh}
       >
         Refresh
-      </Button> */}
-    </div>
+      </Button>
+    </div> */}
   </div>
 );

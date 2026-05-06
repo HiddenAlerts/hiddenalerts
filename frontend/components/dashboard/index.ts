@@ -8,6 +8,7 @@ export { DashboardRiskTable } from './DashboardRiskTable';
 export { DashboardTopAlertCard } from './DashboardTopAlertCard';
 export { DashboardTopAlertsSection } from './DashboardTopAlertsSection';
 export { DashboardScreen } from './DashboardScreen';
+export { DashboardFooter } from './DashboardFooter';
 export { DashboardShell } from './DashboardShell';
 export { DashboardStatCard } from './DashboardStatCard';
 export { DashboardUnlockCta } from './DashboardUnlockCta';
