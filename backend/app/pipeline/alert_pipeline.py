@@ -48,6 +48,11 @@ ALLOWED_PUBLISH_CATEGORIES = {
     "Cryptocurrency Fraud",
 }
 
+# Tier 1 auto-publish minimum (M3 final, Ken-approved May 06): >=10 internal
+# == >=40 on the 0-100 risk_score == Medium-and-above. Ken explicitly approved
+# Medium auto-publish; Low alerts remain in admin/manual review.
+_TIER1_MIN_SCORE = 10
+
 # Module-level lock to prevent concurrent pipeline runs from manual triggers
 _processing_lock = asyncio.Lock()
 
@@ -220,14 +225,16 @@ async def _process_single_item(
     )
 
     # --- Step 4: Create ProcessedAlert ---
-    # Tier 1 auto-publish: relevant + score >= 16 + source credibility >= 4 + allowed category.
+    # Tier 1 auto-publish (M3 final): relevant + score >= 10 (Medium-and-above)
+    # + source credibility >= 4 + allowed category. Ken approved Medium
+    # auto-publish on May 06; Low alerts remain admin-manual-only.
     # Uses source.credibility_score directly (authoritative) rather than the
     # derived score_source_credibility field which maps the same value 1-5.
-    
+
     _now = datetime.now(timezone.utc)
     tier1 = (
         ai_result.is_relevant
-        and score_result.signal_score_total >= 16
+        and score_result.signal_score_total >= _TIER1_MIN_SCORE
         and (source.credibility_score or 0) >= 4
         and ai_result.primary_category in ALLOWED_PUBLISH_CATEGORIES
     )

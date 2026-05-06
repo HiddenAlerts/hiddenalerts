@@ -8,8 +8,10 @@ Computes a structured risk score for each processed alert based on:
   5. Trend Acceleration (keyword frequency comparison: last 7d vs prior 7d)
 
 Score range: 5–24 (source/cross/trend 1–5; financial 1/2/3/5; victim 1/2/4)
-Risk levels: ≤8 → low, 9–15 → medium, ≥16 → high
-Tier 1 auto-publish threshold (M3 Slice 2): ≥16 — aligned with HIGH threshold.
+Risk levels (M3 final, Ken-approved May 06): ≤9 → low, 10–17 → medium, ≥18 → high.
+These bands match the frontend 0–100 risk_score (>=70 high, 40-69 medium, 1-39
+low) when risk_score = round(signal_score_total / 25 * 100).
+Tier 1 auto-publish threshold (M3 final): ≥10 — Medium-and-above auto-publishes.
 """
 from __future__ import annotations
 
@@ -38,7 +40,7 @@ class SignalScoreResult:
     score_cross_source: int  # 1-5
     score_trend_acceleration: int  # 1-5
     signal_score_total: int  # 5-25
-    risk_level: str  # "low" | "medium" | "high"
+    risk_level: str  # "low" | "medium" | "high" — derived from 0-100 frontend bands
 
 
 # ---------------------------------------------------------------------------
@@ -161,15 +163,19 @@ def compute_cross_source_score(event_source_count: int) -> int:
 def derive_risk_level(signal_score_total: int) -> str:
     """Derive risk level from total signal score.
 
-    ≤8 → low, 9–15 → medium, ≥16 → high.
-    Aligned with Tier 1 auto-publish threshold (≥16) from M3 Slice 2.
+    M3 final bands (Ken-approved May 06), aligned with the frontend 0–100
+    risk_score where risk_score = round(signal_score_total / 25 * 100):
+      score >= 18 -> high   (risk_score >= 70)
+      10 <= score <= 17 -> medium  (risk_score 40-69)
+      score <= 9  -> low    (risk_score 1-39)
+
+    Tier 1 auto-publish gate is ≥10 (Medium-and-above).
     """
-    if signal_score_total >= 16:
+    if signal_score_total >= 18:
         return "high"
-    elif signal_score_total >= 9:
+    if signal_score_total >= 10:
         return "medium"
-    else:
-        return "low"
+    return "low"
 
 
 # ---------------------------------------------------------------------------

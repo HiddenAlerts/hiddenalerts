@@ -20,6 +20,7 @@ from sqlalchemy import Text, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api._risk import risk_level_from_score, risk_score_100
 from app.auth import get_current_user
 from app.database import get_db, AsyncSessionLocal
 from app.models.review import AlertReview
@@ -64,6 +65,33 @@ def publish_alert(alert: ProcessedAlert, user_id: int) -> None:
 # ---------------------------------------------------------------------------
 
 
+# Internal-score equivalents of Ken's M3 final 0–100 bands
+# (>=70 high, 40-69 medium, 1-39 low). Centralized in app.api._risk too, but
+# duplicated here for filter expressions that operate on the raw column.
+_RISK_HIGH_INTERNAL = 18
+_RISK_MEDIUM_INTERNAL = 10
+
+
+def _score_filter_for_risk_level(risk_level: str):
+    """Return a SQLAlchemy filter clause matching alerts whose *displayed*
+    risk level (derived from signal_score_total via M3 final bands) equals
+    the requested value. Falls back to a no-op for unknown values so the
+    endpoint still returns rather than 422-ing.
+    """
+    norm = risk_level.lower().strip()
+    if norm == "high":
+        return ProcessedAlert.signal_score_total >= _RISK_HIGH_INTERNAL
+    if norm == "medium":
+        return (ProcessedAlert.signal_score_total >= _RISK_MEDIUM_INTERNAL) & (
+            ProcessedAlert.signal_score_total < _RISK_HIGH_INTERNAL
+        )
+    if norm == "low":
+        return ProcessedAlert.signal_score_total < _RISK_MEDIUM_INTERNAL
+    # Unknown filter value — fall back to stored column to keep behaviour
+    # explicit instead of silently returning everything.
+    return ProcessedAlert.risk_level == norm
+
+
 def _alert_to_read(alert: ProcessedAlert) -> ProcessedAlertRead:
     """Map ORM ProcessedAlert to ProcessedAlertRead schema with joined fields."""
     title = None
@@ -78,10 +106,20 @@ def _alert_to_read(alert: ProcessedAlert) -> ProcessedAlertRead:
         if alert.raw_item.source:
             source_name = alert.raw_item.source.name
 
+    # `relevance_score` stays computed from the internal 5–25 sum so legacy
+    # consumers see the same 0.0–1.0 ratio they always have.
     relevance_score = (
         round(alert.signal_score_total / 25, 2)
         if alert.signal_score_total is not None
         else None
+    )
+
+    # Re-derive risk_level from the internal score so admin views always
+    # reflect the M3 final 0–100 bands, even for alerts processed before the
+    # band shift (stored risk_level may be stale). Falls back to stored value
+    # when score is missing entirely.
+    derived_risk_level = (
+        risk_level_from_score(alert.signal_score_total) or alert.risk_level
     )
 
     return ProcessedAlertRead(
@@ -90,9 +128,11 @@ def _alert_to_read(alert: ProcessedAlert) -> ProcessedAlertRead:
         title=title,
         source_name=source_name,
         item_url=item_url,
-        risk_level=alert.risk_level,
+        risk_level=derived_risk_level,
         primary_category=alert.primary_category,
-        signal_score_total=alert.signal_score_total,
+        # `signal_score_total` is exposed on the 0–100 frontend scale here.
+        # The DB column remains the internal 5–25 sum.
+        signal_score_total=risk_score_100(alert.signal_score_total),
         relevance_score=relevance_score,
         matched_keywords=alert.matched_keywords,
         is_relevant=alert.is_relevant,
@@ -164,7 +204,7 @@ async def list_alerts(
         stmt = stmt.join(RawItem, RawItem.id == ProcessedAlert.raw_item_id)
 
     if risk_level is not None:
-        stmt = stmt.where(ProcessedAlert.risk_level == risk_level.lower())
+        stmt = stmt.where(_score_filter_for_risk_level(risk_level))
     if category is not None:
         stmt = stmt.where(ProcessedAlert.primary_category == category)
     if since is not None:

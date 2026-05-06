@@ -33,6 +33,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api._risk import risk_level_from_score, risk_score_100
 from app.database import get_db
 from app.models.event import EventSource
 from app.models.processed_alert import ProcessedAlert
@@ -86,32 +87,37 @@ def _detail_stmt():
 # Pure derivation helpers (frontend-facing detail enrichment)
 # ---------------------------------------------------------------------------
 
-# M3 thresholds — public endpoints derive risk_level from signal_score_total
-# rather than reading the stored risk_level column. This guards against stale
-# values on alerts that were processed before threshold recalibration.
-_RISK_HIGH_THRESHOLD = 16
-_RISK_MEDIUM_THRESHOLD = 9
+# M3 final (Ken-approved May 06) — public endpoints derive risk_level from
+# signal_score_total rather than reading the stored risk_level column. This
+# guards against stale values on alerts that were processed before threshold
+# recalibration. Bands are applied on the 0–100 risk_score scale (>=70 high,
+# 40-69 medium, 1-39 low). Internal-score equivalents on the 5–25 scale:
+#   >=18 internal -> >=72 on 0-100 -> high
+#   10-17 internal -> 40-68 on 0-100 -> medium
+#   <=9 internal -> <=36 on 0-100 -> low
+_RISK_HIGH_THRESHOLD = 18    # internal score equivalent of risk_score 70
+_RISK_MEDIUM_THRESHOLD = 10  # internal score equivalent of risk_score 40
+
+
+def _risk_score_100(score: int | None) -> int | None:
+    """Public-side alias for risk_score_100 — keeps the public module self-contained
+    while delegating to the shared formula in app.api._risk."""
+    return risk_score_100(score)
 
 
 def _risk_from_score(score: int | None, *, title_case: bool = False) -> str | None:
-    """Derive displayed risk level from signal_score_total per current M3 thresholds.
+    """Derive displayed risk level from signal_score_total per Ken's M3 final bands.
 
-    Thresholds:
-      score >= 16 -> high
-      9 <= score <= 15 -> medium
-      score < 9 -> low
+    Maps the internal 5–25 score to the 0–100 risk_score and applies Ken's bands:
+      risk_score >= 70 -> high   (internal >=18)
+      40 <= risk_score <= 69 -> medium  (internal 10-17)
+      risk_score < 40 -> low     (internal <=9)
 
     Returns None when score is None — frontend treats absence as unknown.
     Used by all public endpoints; do NOT use the stored risk_level column for
     public display.
     """
-    if score is None:
-        return None
-    if score >= _RISK_HIGH_THRESHOLD:
-        return "High" if title_case else "high"
-    if score >= _RISK_MEDIUM_THRESHOLD:
-        return "Medium" if title_case else "medium"
-    return "Low" if title_case else "low"
+    return risk_level_from_score(score, title_case=title_case)
 
 
 def _title_case_level(level: str | None) -> str | None:
@@ -219,13 +225,14 @@ def _credibility_label(score: int | None) -> str | None:
 def _confidence(alert: ProcessedAlert) -> str:
     """Derive confidence from source credibility + signal score + relevance flag.
 
-    Rules:
+    Thresholds align with the M3 final risk bands (>=18 internal == high,
+    >=10 internal == medium). Rules:
       - With credibility known:
-          High   if credibility >= 5 AND is_relevant AND signal_score >= 16
-          Medium if credibility >= 4 OR signal_score >= 9
+          High   if credibility >= 5 AND is_relevant AND signal_score >= 18
+          Medium if credibility >= 4 OR signal_score >= 10
           Low    otherwise
       - Without credibility, fall back to score-only:
-          High >= 16, Medium 9..15, Low otherwise
+          High >= 18, Medium 10..17, Low otherwise
     """
     cred = (
         alert.raw_item.source.credibility_score
@@ -234,14 +241,14 @@ def _confidence(alert: ProcessedAlert) -> str:
     )
     score = alert.signal_score_total or 0
     if cred is not None:
-        if cred >= 5 and alert.is_relevant and score >= 16:
+        if cred >= 5 and alert.is_relevant and score >= _RISK_HIGH_THRESHOLD:
             return "High"
-        if cred >= 4 or score >= 9:
+        if cred >= 4 or score >= _RISK_MEDIUM_THRESHOLD:
             return "Medium"
         return "Low"
-    if score >= 16:
+    if score >= _RISK_HIGH_THRESHOLD:
         return "High"
-    if score >= 9:
+    if score >= _RISK_MEDIUM_THRESHOLD:
         return "Medium"
     return "Low"
 
@@ -474,9 +481,10 @@ def _sources_list(alert: ProcessedAlert) -> list[dict] | None:
 _RELATED_SIGNALS_MIN = 2
 _RELATED_SIGNALS_MAX = 4
 
-# Top Alerts — Ken's "risk >= 60" maps to signal_score_total >= 15 on the 0-25
-# scale (60% of 25). Sits intentionally below the high threshold (16) so genuinely
-# strong medium-high alerts qualify.
+# Top Alerts — Ken's "risk_score >= 60" on the 0-100 frontend scale maps to
+# signal_score_total >= 15 internal (60% of 25). Sits intentionally below the
+# high threshold (internal 18, risk_score 70) so genuinely strong medium-high
+# alerts qualify.
 _TOP_ALERTS_MIN_SCORE = 15
 _TOP_ALERTS_LIMIT = 3
 # SQL fetches this many candidates; Python applies the full multi-key sort and
@@ -556,7 +564,8 @@ async def _related_signals(
         {
             "id": a.id,
             "title": a.raw_item.title if a.raw_item else None,
-            "score": a.signal_score_total,
+            # `score` is exposed on the 0–100 frontend scale (Ken's M3 final spec).
+            "score": _risk_score_100(a.signal_score_total),
             "risk_level": _risk_from_score(a.signal_score_total, title_case=True),
         }
         for a in related
@@ -657,10 +666,13 @@ def _to_public_read(alert: ProcessedAlert) -> PublicAlertRead:
         title=title,
         summary=alert.summary,
         category=alert.primary_category,
-        # Derived from signal_score_total (M3 thresholds) — not the stored
-        # risk_level column. Older alerts may have stale stored values.
+        # Derived from signal_score_total (M3 final 0–100 bands) — not the
+        # stored risk_level column. Older alerts may have stale stored values.
         risk_level=_risk_from_score(alert.signal_score_total),
-        signal_score=alert.signal_score_total,
+        # `signal_score` is normalized to 0–100 here. The DB column remains the
+        # raw 5–25 sum; mapper normalizes on the way out so the frontend never
+        # sees the internal scale.
+        signal_score=_risk_score_100(alert.signal_score_total),
         source_name=source_name,
         source_url=source_url,
         source_published_at=source_published_at,
@@ -685,12 +697,16 @@ async def _to_public_detail(
         if alert.raw_item.source:
             source_name = alert.raw_item.source.name
 
+    # Normalize once and reuse — `score` (primary) and the legacy `signal_score`
+    # alias both expose the 0–100 frontend value.
+    _score_100 = _risk_score_100(alert.signal_score_total)
+
     return PublicAlertDetail(
         # Ken's primary fields
         id=alert.id,
         title=title,
-        score=alert.signal_score_total,
-        # Title case + derived from signal_score_total (M3 thresholds).
+        score=_score_100,
+        # Title case + derived from signal_score_total (M3 final 0–100 bands).
         risk_level=_risk_from_score(alert.signal_score_total, title_case=True),
         confidence=_confidence(alert),
         summary=alert.summary,
@@ -704,8 +720,10 @@ async def _to_public_detail(
         affected_group=_affected_group(alert.victim_scale_raw),
         timeline=_timeline(alert),
         related_signals=await _related_signals(db, alert),
-        # Backward-compatibility additive fields
-        signal_score=alert.signal_score_total,
+        # Backward-compatibility additive fields. `signal_score` is also on the
+        # 0–100 scale here so any frontend reading the legacy alias gets the
+        # same value as `score`.
+        signal_score=_score_100,
         secondary_category=alert.secondary_category,
         source_name=source_name,
         source_url=source_url,

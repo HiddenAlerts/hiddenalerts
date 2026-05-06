@@ -136,14 +136,23 @@ async def dashboard_index(
     if category:
         base_stmt = base_stmt.where(ProcessedAlert.primary_category == category)
 
-    async def _get_alerts_by_risk(risk_level: str):
-        stmt = base_stmt.where(ProcessedAlert.risk_level == risk_level).offset(offset).limit(limit)
+    # M3 final risk bands (Ken-approved May 06) — match the displayed risk_level
+    # by filtering on signal_score_total ranges rather than the stored risk_level
+    # column (which can be stale on alerts processed before the band shift).
+    _high_filter = ProcessedAlert.signal_score_total >= 18
+    _medium_filter = (ProcessedAlert.signal_score_total >= 10) & (
+        ProcessedAlert.signal_score_total < 18
+    )
+    _low_filter = ProcessedAlert.signal_score_total < 10
+
+    async def _get_alerts_by_risk(level_filter):
+        stmt = base_stmt.where(level_filter).offset(offset).limit(limit)
         result = await db.execute(stmt)
         return result.scalars().all()
 
-    high_alerts = await _get_alerts_by_risk("high")
-    medium_alerts = await _get_alerts_by_risk("medium")
-    low_alerts = await _get_alerts_by_risk("low")
+    high_alerts = await _get_alerts_by_risk(_high_filter)
+    medium_alerts = await _get_alerts_by_risk(_medium_filter)
+    low_alerts = await _get_alerts_by_risk(_low_filter)
 
     # Stats
     count_result = await db.execute(
@@ -154,21 +163,21 @@ async def dashboard_index(
     high_count_result = await db.execute(
         select(func.count())
         .where(ProcessedAlert.is_relevant.is_(True))
-        .where(ProcessedAlert.risk_level == "high")
+        .where(_high_filter)
     )
     high_count = high_count_result.scalar() or 0
 
     medium_count_result = await db.execute(
         select(func.count())
         .where(ProcessedAlert.is_relevant.is_(True))
-        .where(ProcessedAlert.risk_level == "medium")
+        .where(_medium_filter)
     )
     medium_count = medium_count_result.scalar() or 0
 
     low_count_result = await db.execute(
         select(func.count())
         .where(ProcessedAlert.is_relevant.is_(True))
-        .where(ProcessedAlert.risk_level == "low")
+        .where(_low_filter)
     )
     low_count = low_count_result.scalar() or 0
 
