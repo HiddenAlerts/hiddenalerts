@@ -294,8 +294,8 @@ http://localhost:8000/docs           → Swagger UI (all endpoints)
 | `score_victim_scale` | INTEGER | 1–5 |
 | `score_cross_source` | INTEGER | 1–5 |
 | `score_trend_acceleration` | INTEGER | 1–5 |
-| `signal_score_total` | INTEGER | Sum of 5 factors (5–25) |
-| `risk_level` | VARCHAR | M3 thresholds: `low` (≤8) / `medium` (9–15) / `high` (≥16). Public endpoints derive risk from `signal_score_total` rather than this stored value, so legacy rows with stale levels still display correctly. |
+| `signal_score_total` | INTEGER | Internal sum of 5 factors (5–25). API responses normalize this to 0–100 before exposing it (the field name in the response is also `signal_score` / `signal_score_total`, but the value is on a 0–100 scale). |
+| `risk_level` | VARCHAR | M3 final 0–100 bands (Ken-approved May 06): `low` (1–39) / `medium` (40–69) / `high` (≥70). Public, admin, and client endpoints all derive risk from the score at read time rather than from this stored column, so legacy rows with stale levels still display correctly. |
 
 ### Migrations
 
@@ -377,8 +377,9 @@ Step 3 — Signal Scoring (signal_scorer.py)
     score_victim_scale        = map(victim_scale)
     score_cross_source        = f(event_source_count)
     score_trend_acceleration  = compare keyword freq last 7d vs prior 7d
-    signal_score_total        = sum(5 factors)
-    risk_level                = low(≤8) / medium(9–15) / high(≥16)   # M3 thresholds
+    signal_score_total        = sum(5 factors)         # internal 5–25 (in DB)
+    # API exposes the same field as 0–100: round(total / 25 * 100)
+    risk_level                = low(<40) / medium(40–69) / high(≥70)  # M3 final bands
 
 Step 4 — Event Grouping (event_grouper.py)
     Match: same primary_category + entity name overlap + within 7 days
@@ -400,12 +401,23 @@ Each processed alert receives five independent scores (1–5 each):
 | Cross-Source | 1 source→1, 2 sources→3, 3+→5 (updated as events gain more sources) |
 | Trend Acceleration | Compare keyword matches last 7d vs prior 7d — stable→1, 25–99% increase→3, 100%+ surge→5 |
 
-**Risk level (M3 Slice 3):** total ≤ 8 → `low` — total 9–15 → `medium` — total ≥ 16 → `high`
+**Risk bands (M3 final, Ken-approved May 06)** — the DB column
+`signal_score_total` is on the internal 5–25 scale; every API response (public,
+admin, subscriber) normalizes that value to a 0–100 score before exposing it.
+The field name on the response stays `signal_score` / `signal_score_total` /
+`score` so no frontend change is required. `risk_level` is derived from the
+0–100 value:
+
+| Band | API score (0–100) | DB `signal_score_total` (5–25) |
+|------|-------------------|-------------------------------|
+| High | 70–100 | ≥18 |
+| Medium | 40–69 | 10–17 |
+| Low | 1–39 | ≤9 |
 
 **Tier 1 auto-publish rule:** an alert is auto-published only when **all four** conditions hold:
 
 1. `ai_result.is_relevant == True` — AI confirmed the article describes a real fraud / financial-crime mechanism (defensive guard against any code path that lets an irrelevant alert reach scoring).
-2. `signal_score_total ≥ 16` — high-risk signal under M3 thresholds.
+2. `signal_score_total ≥ 10` — Medium-and-above under M3 final bands. Ken explicitly approved Medium auto-publish on May 06; Low alerts remain admin-manual-only.
 3. `source.credibility_score ≥ 4` — government / regulator / law-enforcement source.
 4. `primary_category` is in the auto-publish allowlist:
    `Investment Fraud`, `Cybercrime`, `Consumer Scam`, `Money Laundering`, `Cryptocurrency Fraud`.
@@ -544,21 +556,21 @@ Tests use an in-memory SQLite database — no PostgreSQL or OpenAI key required.
 pytest tests/ -v
 ```
 
-**216 tests, 0 failures.** Test breakdown:
+**226 tests, 0 failures.** Test breakdown:
 
 | File | Tests | What it covers |
 |------|-------|---------------|
 | `test_normalizer.py` | 13 | URL normalization, SHA-256 hashing, text extraction, date parsing |
 | `test_keyword_filter.py` | 13 | Word boundary matching, case sensitivity, multi-word phrases, deduplication |
 | `test_ai_processor.py` | 8 | Mock OpenAI, rate-limit retry, max retries exhaustion, short text skip; SYSTEM_PROMPT financial-risk-intelligence scope (OFAC, sanctions, governance, liquidity, network exposure); cybercrime/organized-crime conditional relevance |
-| `test_alert_pipeline.py` | 4 | Tier1 auto-publish guard (allowed category + score + credibility + is_relevant); Other category never auto-publishes; irrelevant alert never auto-publishes; manual admin can publish Other |
+| `test_alert_pipeline.py` | 7 | Tier1 auto-publish guard (allowed category + score + credibility + is_relevant); Other category never auto-publishes; irrelevant alert never auto-publishes; manual admin can publish Other; M3 final tier1 — Medium score auto-publishes from credible source, Medium score from low-credibility source does NOT auto-publish, Low score never auto-publishes |
 | `test_event_grouper.py` | 6 | Event creation, entity overlap matching, 7-day window, cross-source recalculation |
 | `test_health.py` | 5 | API health, sources, raw-items, stats smoke tests |
 | `test_auth.py` | 24 | Password/JWT utilities; JSON login (admin + subscriber); Bearer + cookie auth; change-password; role enforcement; inactive user; backwards compat |
 | `test_alerts_api.py` | 21 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation; publication state; approval publish; client feed access control |
-| `test_public_alerts.py` | 81 | Public list (no auth, published-only, field mapping, ordering, filters); enriched detail (Ken's frontend schema — confidence, why_it_matters, key_intelligence, risk_assessment with strong-factor enrichment, sources, timeline, related_signals; safe-fields-only); public stats (counts, breakdown, empty state); top alerts (no auth, published-only, max 3, score ≥15 threshold, score-then-strength-then-credibility-then-recency ranking, duplicate-entity suppression, fallback key for entity-less alerts, empty when none qualify, no internal-field leakage); agency stoplist (FBI/DOJ/SEC/etc. excluded from primary-entity dedup and entity-overlap matching); derived risk_level from score on every public endpoint; related_signals entity-overlap + 2–4 quantity rule |
-| `test_signal_scorer.py` | 41 | All 5 scoring factors; M3 thresholds; boundary tests; recalibrated victim/financial buckets; realistic alert scenarios |
-| **Total** | **216** | |
+| `test_public_alerts.py` | 87 | Public list (no auth, published-only, field mapping, ordering, filters); enriched detail (Ken's frontend schema — confidence, why_it_matters, key_intelligence, risk_assessment with strong-factor enrichment, sources, timeline, related_signals; safe-fields-only); public stats (counts, breakdown, empty state); top alerts (no auth, published-only, max 3, score ≥15 threshold, score-then-strength-then-credibility-then-recency ranking, duplicate-entity suppression, fallback key for entity-less alerts, empty when none qualify, no internal-field leakage); agency stoplist (FBI/DOJ/SEC/etc. excluded from primary-entity dedup and entity-overlap matching); derived risk_level from score on every public endpoint; related_signals entity-overlap + 2–4 quantity rule; **M3 final score normalization to 0–100** — `signal_score` / `score` exposed as 0–100, Ken's worked examples (17→68, 19→76, 21→84), band-boundary checks at 9/10 and 17/18 |
+| `test_signal_scorer.py` | 42 | All 5 scoring factors; M3 final 0–100-aligned bands (≤9 low, 10–17 medium, ≥18 high); boundary tests including the new band-shift cases (16/17 now Medium, 18 is the new High floor); recalibrated victim/financial buckets; realistic alert scenarios |
+| **Total** | **226** | |
 
 ---
 
@@ -666,6 +678,7 @@ curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit
 | **M3 — Top Alerts + Inclusion Criteria** | GET /api/alerts/top with score≥15 / strength / credibility / recency ranking + duplicate-entity suppression; AI prompt extended with financial-risk-intelligence scope (OFAC, sanctions, governance, liquidity, network exposure); cybercrime/organized-crime conditional relevance; defensive `is_relevant` guard on auto-publish; agency stoplist excludes FBI/DOJ/SEC/etc. from entity dedup so unrelated alerts no longer collapse together | ✅ Complete |
 | **M3 — Public-feed cleanup** | Off-topic legacy alerts (CSAM / terrorism / weapons / drug-trafficking) reviewed and unpublished manually; `audit_offtopic_alerts.py` reports the live feed as clean; new pipeline guards prevent these from re-publishing | ✅ Complete |
 | **M3 — QA + VPS deployment handoff** | Backend deployed on VPS, smoke tests green, public endpoints verified live, frontend handoff docs updated | ✅ Complete |
+| **M3 — Risk score normalization (0–100)** | API responses now expose `signal_score` / `signal_score_total` / `score` on a 0–100 scale (normalized server-side from the internal 5–25 sum). No frontend change required. `risk_level` derived from the 0–100 value with Ken-approved bands (≥70 high, 40–69 medium, 1–39 low). Tier 1 auto-publish gate moved from ≥16 to ≥10 so Medium-and-above auto-publishes. Admin and client mappers re-derive `risk_level` so legacy stored values stay consistent with the displayed value. Admin Jinja templates updated to show 0–100 too. | ✅ Complete |
 | **M3 — Slice 5** | Full-text search across alerts | 🔄 Next |
 | **Future / Paused** | Email alerts (HIGH immediate + MEDIUM daily digest), weekly fraud intelligence report generation, subscriber login + gating for the public frontend | Paused — out of scope for current MVP; revisit after search ships |
 
