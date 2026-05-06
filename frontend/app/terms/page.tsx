@@ -1,13 +1,12 @@
+import { LegalPage } from '@/components/legal/LegalPage';
+import { termsDocument } from '@/content/legal/terms';
+
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Terms of Use — HiddenAlerts',
+  title: `${termsDocument.title} — HiddenAlerts`,
 };
 
 export default function TermsPage() {
-  return (
-    <main className="bg-background text-foreground mx-auto max-w-3xl px-4 py-12 sm:px-6">
-      <h1>Terms of Use</h1>
-    </main>
-  );
+  return <LegalPage document={termsDocument} />;
 }
