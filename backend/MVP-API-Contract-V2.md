@@ -60,6 +60,37 @@ Base URL: `http://localhost:8000/api/alerts` (local) / `https://hiddenalerts.com
 
 ---
 
+### Risk Score & Risk Level (M3 final, Ken-approved 2026-05-06)
+
+The score returned in every API response — `signal_score` on list endpoints,
+`score` on detail, `signal_score_total` on admin / subscriber endpoints — is
+**already on the 0–100 frontend scale**. The frontend displays this number
+directly; no client-side normalization needed.
+
+`risk_level` is derived strictly from that 0–100 value with these bands:
+
+| Band | Score (0–100) |
+|------|---------------|
+| `high` | ≥ 70 |
+| `medium` | 40 – 69 |
+| `low` | 1 – 39 |
+
+**Worked examples** (per Ken's spec): the underlying 5-factor signal sum gets
+normalized to `round(sum / 25 * 100)` server-side, so internal `17 → 68`
+(Medium), `19 → 76` (High), `21 → 84` (High), `18 → 72` (High band floor).
+Frontend never sees the 5–25 internal scale.
+
+The server re-derives `risk_level` from the score on every read (public, admin,
+client) so legacy alerts with stale stored `risk_level` values still display
+under the new bands without reprocessing.
+
+**Auto-publish rule (server-side):** alerts auto-publish to the public feed when
+all of the following hold — `is_relevant`, score normalizes to ≥ 40 on 0–100
+(Medium-and-above), source credibility ≥ 4, and an allowed fraud category.
+Low-band alerts (score < 40) stay in admin-manual review.
+
+---
+
 ### 0.1 GET /api/alerts — Published Alert List
 
 ```json
@@ -71,7 +102,7 @@ Base URL: `http://localhost:8000/api/alerts` (local) / `https://hiddenalerts.com
       "summary": "The SEC charged a New York-based firm...",
       "category": "Investment Fraud",
       "risk_level": "high",
-      "signal_score": 19,
+      "signal_score": 76,
       "source_name": "SEC Press Releases",
       "source_url": "https://sec.gov/news/press-release/...",
       "source_published_at": "2026-04-22T08:00:00Z",
@@ -89,8 +120,8 @@ Base URL: `http://localhost:8000/api/alerts` (local) / `https://hiddenalerts.com
 | `title` | `string\|null` | Article/press release title |
 | `summary` | `string\|null` | AI-generated summary |
 | `category` | `string\|null` | Fraud category (see list below) |
-| `risk_level` | `string\|null` | `"low"`, `"medium"`, or `"high"` — derived from `signal_score` (M3 thresholds: ≥16 high, 9–15 medium, ≤8 low) |
-| `signal_score` | `int\|null` | Composite risk score (5–25) |
+| `risk_level` | `string\|null` | `"low"`, `"medium"`, or `"high"` — derived from `signal_score` (M3 final bands: ≥70 high, 40–69 medium, 1–39 low) |
+| `signal_score` | `int\|null` | **Risk score on a 0–100 scale.** Use this for the score badge / progress bar. |
 | `source_name` | `string\|null` | Name of the originating source |
 | `source_url` | `string\|null` | Direct link to the original article |
 | `source_published_at` | `datetime\|null` | ISO 8601 UTC — original article / press-release publication date. **Use this for the date shown on list cards and Top Alerts cards.** |
@@ -124,8 +155,9 @@ curl "http://localhost:8000/api/alerts?limit=10&offset=0"
 - If `"alerts": []`, no alerts have been published yet — the admin reviews and publishes them.
 - Do NOT use `/api/v1/alerts` or `/api/v1/client/alerts` for this phase — those require auth.
 - `risk_level` values are lowercase here: `"low"`, `"medium"`, `"high"` — capitalise in the UI.
-  **Derived from `signal_score` on the server** (M3 thresholds: `≥16` high, `9..15` medium, `<9` low).
+  **Derived from `signal_score` on the server** (M3 final bands: `≥70` high, `40..69` medium, `<40` low).
   Older alerts whose stored value is stale will still display correctly. Filtering on `risk_level=high` also uses the derived bucket.
+- `signal_score` is the **0–100 frontend score** — render it directly on the badge / progress bar. The 5-factor internal sum (5–25) is normalized server-side and never exposed in API responses.
 - Category values: `Investment Fraud`, `Cybercrime`, `Consumer Scam`, `Money Laundering`, `Cryptocurrency Fraud`, `Other`.
   `Other` is a real value — when shown, render it as a low-emphasis label (don't promote it to a primary fraud-type badge).
 - **Use `source_published_at` for the date shown on list cards** (it's the article/press-release date — what readers expect). `published_at` is the platform publish time and is mainly an internal/sort key.
@@ -151,9 +183,10 @@ have to filter blanks on the frontend.
 > `"Medium"`, `"Low"`) on the detail endpoint to match Ken's design spec. The
 > list endpoint (`GET /api/alerts`) keeps the lowercase form for backward
 > compatibility — convert as needed when navigating list → detail.
-> `risk_level` is **derived from `score` on the server** (M3 thresholds: `≥16`
-> High, `9..15` Medium, `<9` Low) — do not compute it on the client and do not
-> trust the legacy stored value.
+> `risk_level` is **derived from `score` on the server** (M3 final bands:
+> `≥70` High, `40..69` Medium, `<40` Low) — do not compute it on the client and
+> do not trust the legacy stored value. The `score` and `signal_score` fields
+> are both on the 0–100 scale; render either directly on the badge.
 
 > **Timestamp reference (read this — frequently confused):**
 > | Field | Meaning | Use it for |
@@ -181,7 +214,7 @@ have to filter blanks on the frontend.
 {
   "id": 42,
   "title": "SEC Charges Investment Firm with $4.2M Fraud",
-  "score": 20,
+  "score": 80,
   "risk_level": "High",
   "confidence": "High",
   "summary": "The SEC charged a New York-based firm with defrauding investors...",
@@ -218,7 +251,7 @@ have to filter blanks on the frontend.
   ],
 
   "related_signals": [
-    { "id": 38, "title": "DOJ indicts related actor", "score": 17, "risk_level": "High" }
+    { "id": 38, "title": "DOJ indicts related actor", "score": 68, "risk_level": "Medium" }
   ],
 
   "signal_score": 20,
@@ -238,8 +271,8 @@ have to filter blanks on the frontend.
 |-------|------|-------------|
 | `id` | `int` | Unique alert ID |
 | `title` | `string\|null` | Article/press release title |
-| `score` | `int\|null` | Composite signal score (0–25) |
-| `risk_level` | `string\|null` | **Title case**: `"High"`, `"Medium"`, or `"Low"` |
+| `score` | `int\|null` | **Risk score on a 0–100 scale.** Use this for the score badge / progress bar. |
+| `risk_level` | `string\|null` | **Title case**: `"High"`, `"Medium"`, or `"Low"` — derived from `score` (≥70 high, 40–69 medium, <40 low) |
 | `confidence` | `string\|null` | **Title case** — derived from source credibility + score + relevance |
 | `summary` | `string\|null` | AI-generated summary |
 | `why_it_matters` | `string[]?` | 1–3 short bullets — omitted if no qualifying signals |
@@ -251,7 +284,7 @@ have to filter blanks on the frontend.
 | `subcategory` | `string?` | Secondary classification — omitted if absent |
 | `affected_group` | `string?` | Human-readable victim scope — omitted if absent |
 | `timeline` | `{date,event}[]?` | Source-pub + platform-pub timestamps — omitted if no timestamps |
-| `related_signals` | `{id,title,score,risk_level}[]?` | 2–4 published peers via shared event **and** entity overlap — omitted when fewer than 2 qualifying peers exist |
+| `related_signals` | `{id,title,score,risk_level}[]?` | 2–4 published peers via shared event **and** entity overlap — omitted when fewer than 2 qualifying peers exist. `score` is on the 0–100 scale, `risk_level` is title case. |
 
 **Backward-compatibility additive fields** (kept from the prior contract; safe to keep using if your frontend already references them):
 
@@ -305,7 +338,7 @@ list-card UI can consume it.
       "summary": "...",
       "category": "Money Laundering",
       "risk_level": "high",
-      "signal_score": 22,
+      "signal_score": 88,
       "source_name": "DOJ Press Releases",
       "source_url": "https://justice.gov/...",
       "source_published_at": "2026-04-21T13:00:00Z",
@@ -322,10 +355,10 @@ internal-only.
 
 **What `top` selects (deterministic, server-side):**
 
-1. **Threshold:** only published alerts with `signal_score_total >= 15`. This
-   maps Ken's "risk ≥ 60" target to the 0–25 backend scale (60% of 25). The
-   threshold sits intentionally below the high cutoff (16) so genuinely strong
-   medium-high alerts qualify.
+1. **Threshold:** only published alerts whose normalized `signal_score >= 60`
+   on the 0–100 frontend scale. The threshold sits intentionally below the
+   high cutoff (`signal_score >= 70`) so genuinely strong medium-high alerts
+   qualify.
 2. **Ranking** (descending priority):
    1. `signal_score_total` — score wins.
    2. **Signal strength** — number of `event_sources` bridges attached to the
@@ -394,9 +427,9 @@ Returns aggregate counts for published alerts only. Use this to drive a summary 
 | Field | Type | Description |
 |-------|------|-------------|
 | `total_alerts` | `int` | Total number of published alerts |
-| `high_count` | `int` | Published alerts with `risk_level = "high"` |
-| `medium_count` | `int` | Published alerts with `risk_level = "medium"` |
-| `low_count` | `int` | Published alerts with `risk_level = "low"` |
+| `high_count` | `int` | Published alerts with `risk_level = "high"` (`signal_score ≥ 70`) |
+| `medium_count` | `int` | Published alerts with `risk_level = "medium"` (`signal_score` 40–69) |
+| `low_count` | `int` | Published alerts with `risk_level = "low"` (`signal_score < 40`) |
 | `category_breakdown` | `array` | Per-category counts, ordered by count descending |
 | `category_breakdown[].category` | `string` | Fraud category name |
 | `category_breakdown[].count` | `int` | Number of published alerts in that category |
@@ -599,7 +632,7 @@ GET /api/v1/alerts
     "item_url": "https://www.fbi.gov/news/...",
     "risk_level": "high",
     "primary_category": "Consumer Scam",
-    "signal_score_total": 18,
+    "signal_score_total": 72,
     "relevance_score": 0.72,
     "matched_keywords": ["elder fraud", "wire transfer"],
     "is_relevant": true,
@@ -764,7 +797,7 @@ GET /api/v1/client/alerts
     "item_url": "https://www.fbi.gov/news/...",
     "risk_level": "high",
     "primary_category": "Consumer Scam",
-    "signal_score_total": 18,
+    "signal_score_total": 72,
     "summary": "The FBI reports a significant increase...",
     "processed_at": "2026-04-22T14:00:00Z",
     "published_at": "2026-04-22T14:35:00Z",
@@ -794,7 +827,7 @@ Returns `404` if the alert exists but is not published (subscriber cannot see un
   "risk_level": "high",
   "primary_category": "Consumer Scam",
   "secondary_category": "Wire Fraud",
-  "signal_score_total": 18,
+  "signal_score_total": 72,
   "summary": "The FBI reports a significant increase...",
   "processed_at": "2026-04-22T14:00:00Z",
   "published_at": "2026-04-22T14:35:00Z",
@@ -1266,9 +1299,9 @@ The following `primary_category` values are used in the system:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `signal_score_total` | `int` (1–25) | Composite risk score from AI + heuristics |
-| `relevance_score` | `float` (0.0–1.0) | `signal_score_total / 25` for frontend display |
-| `risk_level` | `string` | `low` ≤8, `medium` 9–15, `high` ≥16 |
+| `signal_score_total` | `int` (0–100) | **Risk score on a 0–100 scale.** Normalized server-side from the 5-factor internal sum. Use this for any UI score display. |
+| `relevance_score` | `float` (0.0–1.0) | Legacy ratio derived from the internal sum. Prefer `signal_score_total` (0–100). |
+| `risk_level` | `string` | M3 final bands derived from the 0–100 score: `low` (1–39), `medium` (40–69), `high` (≥70). |
 | `is_relevant` | `bool` | AI determined this alert is actionable |
 | `is_published` | `bool` | Admin approved and published to subscriber feed |
 | `primary_category` | `string` | Main fraud category |
