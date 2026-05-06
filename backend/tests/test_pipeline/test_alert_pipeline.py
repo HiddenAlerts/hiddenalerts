@@ -95,10 +95,10 @@ async def test_irrelevant_article_never_auto_publishes(mock_session, mock_raw_it
 
 @pytest.mark.asyncio
 async def test_manual_admin_approval_can_publish_other(mock_session):
-    # This proves the pipeline auto-publish guard does not prevent 
+    # This proves the pipeline auto-publish guard does not prevent
     # the ProcessedAlert model from being manually published if an admin chooses.
     from app.models.processed_alert import ProcessedAlert
-    
+
     alert = ProcessedAlert(
         raw_item_id=1,
         summary="Test",
@@ -110,3 +110,84 @@ async def test_manual_admin_approval_can_publish_other(mock_session):
     mock_session.add(alert)
     assert alert.is_published is True
     assert alert.primary_category == "Other"
+
+
+# ---------------------------------------------------------------------------
+# M3 final tier1 gate (Ken-approved May 06): score >= 10 (Medium-and-above)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_medium_score_trusted_allowed_category_auto_publishes(mock_session, mock_raw_item):
+    """Score 12 (Medium) on a credibility-5 source with allowed category should
+    auto-publish under M3 final bands. This was NOT auto-published under the
+    prior tier1 gate (>=16)."""
+    stats = ProcessingStats()
+    with patch("app.pipeline.alert_pipeline.filter_by_keywords", return_value=["fraud"]):
+        mock_ai_result = AIAnalysisResult(
+            summary="Test", primary_category="Cybercrime", secondary_category=None,
+            entities=[], financial_impact_estimate="unknown", victim_scale="single",
+            is_relevant=True, ai_model="test-model",
+        )
+        with patch("app.pipeline.alert_pipeline.analyze_article", return_value=mock_ai_result):
+            mock_score_result = SignalScoreResult(
+                signal_score_total=12, risk_level="medium", score_source_credibility=5,
+                score_financial_impact=2, score_victim_scale=2, score_cross_source=1,
+                score_trend_acceleration=2,
+            )
+            with patch("app.pipeline.alert_pipeline.compute_signal_score", return_value=mock_score_result):
+                with patch("app.pipeline.alert_pipeline.find_or_create_event", new_callable=AsyncMock):
+                    await _process_single_item(mock_raw_item, mock_session, stats)
+                    saved = mock_session.add.call_args[0][0]
+                    assert saved.is_published is True
+                    assert saved.signal_score_total == 12
+
+
+@pytest.mark.asyncio
+async def test_medium_score_low_credibility_does_not_auto_publish(mock_session):
+    """Medium score from a credibility-3 source must NOT auto-publish — the
+    credibility >= 4 gate is unchanged."""
+    krebs = Source(id=2, name="Krebs", credibility_score=3, keywords=["fraud"])
+    raw_item = RawItem(id=1, title="Test", raw_text="Fraud " * 20, source=krebs)
+    stats = ProcessingStats()
+    with patch("app.pipeline.alert_pipeline.filter_by_keywords", return_value=["fraud"]):
+        mock_ai_result = AIAnalysisResult(
+            summary="Test", primary_category="Cybercrime", secondary_category=None,
+            entities=[], financial_impact_estimate="unknown", victim_scale="single",
+            is_relevant=True, ai_model="test-model",
+        )
+        with patch("app.pipeline.alert_pipeline.analyze_article", return_value=mock_ai_result):
+            mock_score_result = SignalScoreResult(
+                signal_score_total=12, risk_level="medium", score_source_credibility=3,
+                score_financial_impact=2, score_victim_scale=2, score_cross_source=1,
+                score_trend_acceleration=4,
+            )
+            with patch("app.pipeline.alert_pipeline.compute_signal_score", return_value=mock_score_result):
+                with patch("app.pipeline.alert_pipeline.find_or_create_event", new_callable=AsyncMock):
+                    await _process_single_item(raw_item, mock_session, stats)
+                    saved = mock_session.add.call_args[0][0]
+                    assert saved.is_published is False
+
+
+@pytest.mark.asyncio
+async def test_low_score_does_not_auto_publish(mock_session, mock_raw_item):
+    """Low score (<10 internal == <40 on 0-100) never auto-publishes regardless
+    of credibility, category, or relevance."""
+    stats = ProcessingStats()
+    with patch("app.pipeline.alert_pipeline.filter_by_keywords", return_value=["fraud"]):
+        mock_ai_result = AIAnalysisResult(
+            summary="Test", primary_category="Cybercrime", secondary_category=None,
+            entities=[], financial_impact_estimate="unknown", victim_scale="single",
+            is_relevant=True, ai_model="test-model",
+        )
+        with patch("app.pipeline.alert_pipeline.analyze_article", return_value=mock_ai_result):
+            mock_score_result = SignalScoreResult(
+                signal_score_total=8, risk_level="low", score_source_credibility=5,
+                score_financial_impact=1, score_victim_scale=1, score_cross_source=0,
+                score_trend_acceleration=1,
+            )
+            with patch("app.pipeline.alert_pipeline.compute_signal_score", return_value=mock_score_result):
+                with patch("app.pipeline.alert_pipeline.find_or_create_event", new_callable=AsyncMock):
+                    await _process_single_item(mock_raw_item, mock_session, stats)
+                    saved = mock_session.add.call_args[0][0]
+                    assert saved.is_published is False

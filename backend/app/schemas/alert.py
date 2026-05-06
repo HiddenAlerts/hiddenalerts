@@ -20,8 +20,12 @@ class ProcessedAlertRead(BaseModel):
     # Core alert fields
     risk_level: str | None
     primary_category: str | None
+    # M3 final (Ken-approved 2026-05-06): API exposes signal_score_total on the
+    # 0–100 frontend scale. Internal sum is still 5–25 in the DB; mappers
+    # normalize on the way out so no frontend change is required.
     signal_score_total: int | None
-    # Normalized 0.0–1.0 score for frontend convenience (signal_score_total / 25)
+    # Normalized 0.0–1.0 score (legacy convenience). Computed from the internal
+    # 5–25 sum, not the exposed 0–100 value.
     relevance_score: float | None = None
     matched_keywords: list[str] | None
     is_relevant: bool
@@ -117,6 +121,7 @@ class ClientAlertRead(BaseModel):
     item_url: str | None = None
     risk_level: str | None
     primary_category: str | None
+    # 0–100 (Ken-approved 2026-05-06). DB column is 5–25 internally; mapper normalizes.
     signal_score_total: int | None
     summary: str | None = None
     processed_at: datetime
@@ -152,6 +157,7 @@ class PublicAlertRead(BaseModel):
     summary: str | None = None
     category: str | None = None
     risk_level: str | None = None
+    # 0–100 score (Ken-approved 2026-05-06). Internal sum is 5–25; mapper normalizes.
     signal_score: int | None = None
     source_name: str | None = None
     source_url: str | None = None
@@ -183,6 +189,7 @@ class PublicRelatedSignal(BaseModel):
 
     id: int
     title: str | None = None
+    # 0–100 score (Ken-approved 2026-05-06).
     score: int | None = None
     risk_level: str | None = None  # Title case: "High" | "Medium" | "Low"
 
@@ -217,6 +224,7 @@ class PublicAlertDetail(BaseModel):
     # ----- Ken's primary fields -----
     id: int
     title: str | None = None
+    # 0–100 score (Ken-approved 2026-05-06). Internal sum is 5–25; mapper normalizes.
     score: int | None = None
     risk_level: str | None = None  # Title case: "High" | "Medium" | "Low"
     confidence: str | None = None  # Title case: "High" | "Medium" | "Low" — derived

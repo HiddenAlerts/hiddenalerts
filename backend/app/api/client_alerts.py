@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api._risk import risk_level_from_score, risk_score_100
 from app.auth import require_subscriber_or_admin
 from app.database import get_db
 from app.models.processed_alert import ProcessedAlert
@@ -27,6 +28,27 @@ from app.schemas.alert import ClientAlertDetail, ClientAlertRead
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/client", tags=["client"])
+
+
+# Internal-score equivalents of Ken's M3 final 0–100 bands.
+_RISK_HIGH_INTERNAL = 18
+_RISK_MEDIUM_INTERNAL = 10
+
+
+def _score_filter_for_risk_level(risk_level: str):
+    """Return a SQLAlchemy filter that matches alerts whose *displayed* risk
+    level (derived from signal_score_total) equals the requested value. Mirrors
+    the helper in app/api/alerts.py to keep client and admin filtering aligned."""
+    norm = risk_level.lower().strip()
+    if norm == "high":
+        return ProcessedAlert.signal_score_total >= _RISK_HIGH_INTERNAL
+    if norm == "medium":
+        return (ProcessedAlert.signal_score_total >= _RISK_MEDIUM_INTERNAL) & (
+            ProcessedAlert.signal_score_total < _RISK_HIGH_INTERNAL
+        )
+    if norm == "low":
+        return ProcessedAlert.signal_score_total < _RISK_MEDIUM_INTERNAL
+    return ProcessedAlert.risk_level == norm
 
 
 # ---------------------------------------------------------------------------
@@ -45,14 +67,22 @@ def _to_client_read(alert: ProcessedAlert) -> ClientAlertRead:
         if alert.raw_item.source:
             source_name = alert.raw_item.source.name
 
+    # Re-derive risk_level from signal_score_total so subscriber views always
+    # reflect the M3 final 0–100 bands, even for alerts processed before the
+    # band shift. Falls back to stored value when score is missing.
+    derived_risk_level = (
+        risk_level_from_score(alert.signal_score_total) or alert.risk_level
+    )
+
     return ClientAlertRead(
         id=alert.id,
         title=title,
         source_name=source_name,
         item_url=item_url,
-        risk_level=alert.risk_level,
+        risk_level=derived_risk_level,
         primary_category=alert.primary_category,
-        signal_score_total=alert.signal_score_total,
+        # `signal_score_total` is exposed on the 0–100 frontend scale.
+        signal_score_total=risk_score_100(alert.signal_score_total),
         summary=alert.summary,
         processed_at=alert.processed_at,
         source_published_at=source_published_at,
@@ -109,7 +139,7 @@ async def list_client_alerts(
         )
 
     if risk_level is not None:
-        stmt = stmt.where(ProcessedAlert.risk_level == risk_level.lower())
+        stmt = stmt.where(_score_filter_for_risk_level(risk_level))
     if category is not None:
         stmt = stmt.where(ProcessedAlert.primary_category == category)
 

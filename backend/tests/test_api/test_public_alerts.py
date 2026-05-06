@@ -251,7 +251,8 @@ async def test_public_feed_field_mapping(client, db_session):
     assert match["summary"] == "Mapped summary"
     assert match["category"] == "Investment Fraud"
     assert match["risk_level"] == "high"
-    assert match["signal_score"] == 19
+    # signal_score is normalized to 0-100 (Ken's M3 final spec): 19/25 → 76.
+    assert match["signal_score"] == 76
     assert match["source_name"] == "Test Source"
     assert match["source_url"] == "https://example.com/article"
     assert match["published_at"] is not None
@@ -284,7 +285,7 @@ async def test_public_feed_filter_risk_level(client, db_session):
     item_medium = await _seed_raw_item(db_session, source, title="Medium Risk")
     item_unpub = await _seed_raw_item(db_session, source, title="Unpublished High")
 
-    # Filter is derived from signal_score_total (M3 thresholds): >=16 high.
+    # Filter is derived from signal_score_total (M3 final 0–100 bands): >=18 high.
     await _seed_alert(db_session, item_high, is_published=True, signal_score=20)
     await _seed_alert(db_session, item_medium, is_published=True, signal_score=10)
     await _seed_alert(db_session, item_unpub, is_published=False, signal_score=20)
@@ -379,10 +380,10 @@ async def test_public_detail_published_returns_200(client, db_session):
     assert data["category"] == "Investment Fraud"
     # Title case in the enriched detail (Ken's schema)
     assert data["risk_level"] == "High"
-    # Ken's primary score key
-    assert data["score"] == 20
-    # Backward-compat alias
-    assert data["signal_score"] == 20
+    # Ken's primary score key — normalized to 0-100 (20/25 → 80).
+    assert data["score"] == 80
+    # Backward-compat alias — same 0-100 value.
+    assert data["signal_score"] == 80
     assert data["source_name"] == "Test Source"
     assert data["source_url"] == "https://example.com/article"
     # Both new (subcategory) and old (secondary_category) names present
@@ -531,7 +532,7 @@ async def test_public_detail_enriched_includes_kens_fields(client, db_session):
     # Ken's primary fields
     assert data["id"] == alert.id
     assert data["title"] == "SEC Charges Investment Firm with $4.2M Fraud"
-    assert data["score"] == 20
+    assert data["score"] == 80  # 20 internal → 80/100
     assert data["risk_level"] == "High"
     assert data["confidence"] == "High"  # cred=5, score=20, is_relevant=True
     assert data["summary"].startswith("The SEC charged")
@@ -551,7 +552,7 @@ async def test_public_detail_enriched_includes_kens_fields(client, db_session):
 
 @pytest.mark.asyncio
 async def test_public_detail_confidence_high(client, db_session):
-    """Credibility 5 + relevant + score >= 16 → confidence 'High'."""
+    """Credibility 5 + relevant + score >= 18 → confidence 'High' (M3 final bands)."""
     source = await _seed_source(db_session, credibility_score=5)
     item = await _seed_raw_item(db_session, source)
     alert = await _seed_alert(
@@ -583,7 +584,7 @@ async def test_public_detail_confidence_low(client, db_session):
 
 @pytest.mark.asyncio
 async def test_public_detail_confidence_medium_via_score(client, db_session):
-    """Credibility 3 + score >= 9 → confidence 'Medium' (score-tier path)."""
+    """Credibility 3 + score >= 10 → confidence 'Medium' via score-tier path (M3 final bands)."""
     source = await _seed_source(db_session, credibility_score=3)
     item = await _seed_raw_item(db_session, source)
     alert = await _seed_alert(db_session, item, is_published=True, signal_score=10)
@@ -848,11 +849,11 @@ async def test_public_detail_risk_level_derived_from_score(client, db_session):
     item = await _seed_raw_item(db_session, source, title="Stale High Detail")
     alert = await _seed_alert(
         db_session, item, is_published=True,
-        risk_level="high", signal_score=15,  # 15 < 16 → medium per M3
+        risk_level="high", signal_score=15,  # 15 → 60/100 → medium per M3 final bands
     )
     data = (await client.get(f"/api/alerts/{alert.id}")).json()
     assert data["risk_level"] == "Medium"
-    assert data["score"] == 15
+    assert data["score"] == 60  # 15 internal → 60/100
 
 
 @pytest.mark.asyncio
@@ -1256,7 +1257,8 @@ async def test_public_stats_risk_level_counts(client, db_session):
 
     source = await _seed_source(db_session)
 
-    # Buckets derived from signal_score_total (M3): >=16 high, 9..15 medium, <9 low.
+    # Buckets derived from signal_score_total (M3 final 0–100 bands):
+    # >=18 high, 10..17 medium, <10 low.
     for _ in range(2):
         item = await _seed_raw_item(db_session, source, title="High rl")
         await _seed_alert(db_session, item, is_published=True, signal_score=20)
@@ -1913,3 +1915,112 @@ async def test_related_signals_requires_non_agency_overlap(client, clean_db):
     # agencies, so its non-agency entity_set is empty and the section is
     # skipped per the existing "no current_entities → no peers" guard.
     assert "related_signals" not in data
+
+
+# ===========================================================================
+# Risk score normalization (M3 final, Ken-approved May 06)
+# ===========================================================================
+#
+# `signal_score` (list) and `score` (detail) are normalized to 0–100 on the
+# way out — the DB column is still 5–25 internal but the API exposes the
+# frontend-facing value directly. Bands: >=70 high, 40-69 medium, <40 low.
+
+
+@pytest.mark.asyncio
+async def test_signal_score_normalized_on_list(client, db_session):
+    """Every list item's signal_score must be the 0–100 normalized value."""
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Normalized List")
+    await _seed_alert(db_session, item, is_published=True, signal_score=18)
+
+    body = (await client.get("/api/alerts")).json()
+    match = next((a for a in body["alerts"] if a["title"] == "Normalized List"), None)
+    assert match is not None
+    assert isinstance(match["signal_score"], int)
+    assert 0 <= match["signal_score"] <= 100
+    assert match["signal_score"] == 72  # 18/25 → 72
+
+
+@pytest.mark.asyncio
+async def test_score_normalized_on_detail(client, db_session):
+    """Detail endpoint's `score` and backward-compat `signal_score` are both 0–100."""
+    source = await _seed_source(db_session)
+    item = await _seed_raw_item(db_session, source, title="Normalized Detail")
+    alert = await _seed_alert(db_session, item, is_published=True, signal_score=20)
+
+    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    assert data["score"] == 80  # 20/25 → 80
+    assert data["signal_score"] == 80
+    assert data["risk_level"] == "High"
+
+
+@pytest.mark.asyncio
+async def test_score_formula_kens_examples(client, db_session):
+    """Reproduce Ken's worked examples: 17→68 Medium, 19→76 High, 21→84 High."""
+    source = await _seed_source(db_session)
+    cases = [(17, 68, "Medium"), (19, 76, "High"), (21, 84, "High")]
+    for score, expected_100, expected_lvl in cases:
+        item = await _seed_raw_item(
+            db_session, source, title=f"K{score}", url=f"https://x.com/k{score}",
+        )
+        alert = await _seed_alert(
+            db_session, item, is_published=True, signal_score=score,
+        )
+        data = (await client.get(f"/api/alerts/{alert.id}")).json()
+        assert data["score"] == expected_100, f"score {score}"
+        assert data["risk_level"] == expected_lvl, f"score {score}"
+
+
+@pytest.mark.asyncio
+async def test_score_band_boundaries_low_to_medium(client, db_session):
+    """Internal 9 → 36 → low; 10 → 40 → medium."""
+    source = await _seed_source(db_session)
+    item9 = await _seed_raw_item(db_session, source, title="Band 9", url="https://x.com/b9")
+    item10 = await _seed_raw_item(db_session, source, title="Band 10", url="https://x.com/b10")
+    a9 = await _seed_alert(db_session, item9, is_published=True, signal_score=9)
+    a10 = await _seed_alert(db_session, item10, is_published=True, signal_score=10)
+
+    d9 = (await client.get(f"/api/alerts/{a9.id}")).json()
+    d10 = (await client.get(f"/api/alerts/{a10.id}")).json()
+    assert d9["score"] == 36
+    assert d9["risk_level"] == "Low"
+    assert d10["score"] == 40
+    assert d10["risk_level"] == "Medium"
+
+
+@pytest.mark.asyncio
+async def test_score_band_boundaries_medium_to_high(client, db_session):
+    """Internal 17 → 68 → medium; 18 → 72 → high.
+
+    Critical band shift: under prior bands, internal 17 was high. Under M3
+    final bands (Ken-approved), 17 → 68 is medium and 18 → 72 is the new
+    high boundary.
+    """
+    source = await _seed_source(db_session)
+    item17 = await _seed_raw_item(db_session, source, title="Band 17", url="https://x.com/b17")
+    item18 = await _seed_raw_item(db_session, source, title="Band 18", url="https://x.com/b18")
+    a17 = await _seed_alert(db_session, item17, is_published=True, signal_score=17)
+    a18 = await _seed_alert(db_session, item18, is_published=True, signal_score=18)
+
+    d17 = (await client.get(f"/api/alerts/{a17.id}")).json()
+    d18 = (await client.get(f"/api/alerts/{a18.id}")).json()
+    assert d17["score"] == 68
+    assert d17["risk_level"] == "Medium"
+    assert d18["score"] == 72
+    assert d18["risk_level"] == "High"
+
+
+@pytest.mark.asyncio
+async def test_top_alerts_signal_score_normalized(client, clean_db):
+    """/api/alerts/top items expose signal_score on the 0–100 scale."""
+    source = await _seed_source(clean_db, credibility_score=5)
+    item = await _seed_raw_item(clean_db, source, title="Top RS", url="https://x.com/toprs")
+    await _seed_alert(
+        clean_db, item, is_published=True, signal_score=18,
+        entities_json={"names": ["Acme"]},
+    )
+
+    body = (await client.get("/api/alerts/top")).json()
+    assert len(body["alerts"]) == 1
+    item0 = body["alerts"][0]
+    assert item0["signal_score"] == 72
