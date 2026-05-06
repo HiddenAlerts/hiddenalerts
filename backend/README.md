@@ -684,6 +684,112 @@ curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit
 
 ---
 
+## VPS Deployment & Testing (Hostinger)
+
+Production runs on a Hostinger VPS at `/opt/hiddenalerts` via Docker Compose.
+The app container is named `hiddenalerts_app`. Public URL:
+`https://hiddenalerts.com`.
+
+### Standard deploy (after pushing code to `main`)
+
+SSH to the VPS, then from `/opt/hiddenalerts`:
+
+```bash
+cd /opt/hiddenalerts
+
+# 1. Pull latest code
+git pull
+
+# 2. Rebuild the app image and restart the container.
+#    Use --no-deps so the postgres container (with live data) is NOT touched.
+docker compose build app
+docker compose up -d --no-deps app
+
+# 3. Confirm the container came up cleanly
+docker compose ps
+docker compose logs --tail=100 app
+
+# 4. Run the test suite inside the container
+docker exec hiddenalerts_app pytest tests/ -q
+
+# 5. Smoke-test the public endpoints from the host
+curl -s https://hiddenalerts.com/api/alerts        | python3 -m json.tool | head -40
+curl -s https://hiddenalerts.com/api/alerts/top    | python3 -m json.tool
+curl -s https://hiddenalerts.com/api/alerts/stats  | python3 -m json.tool
+```
+
+### Code-only changes vs. dependency / Dockerfile changes
+
+- **Code only** (Python files, templates, docs, no `requirements.txt` /
+  `Dockerfile` / `docker-compose.yml` change): step 2's
+  `docker compose build app` is fast (cached layers) and step 3 restarts
+  cleanly. This is the common path.
+- **Dependency or Dockerfile change**: same commands; the `build` step will
+  reinstall packages. Watch the build log for failures before restarting.
+- **`docker-compose.yml` change**: re-run `docker compose up -d` (no
+  `--no-deps`) so the orchestration picks up the new compose config.
+- **Migration** (`alembic` revision added): after step 3, run
+  `docker exec hiddenalerts_app alembic upgrade head`, then re-run step 4.
+
+### Rollback if a deploy goes bad
+
+```bash
+cd /opt/hiddenalerts
+git log --oneline -5                  # find the last good commit
+git checkout <good-sha>
+docker compose build app
+docker compose up -d --no-deps app
+docker exec hiddenalerts_app pytest tests/ -q
+```
+
+### Useful diagnostic commands
+
+```bash
+# Tail live application logs
+docker compose logs -f app
+
+# See the scheduler / pipeline activity
+docker exec hiddenalerts_app tail -f logs/app.log    # if file-logging is on
+
+# Open a Python shell inside the container (DB access, ad-hoc queries)
+docker exec -it hiddenalerts_app python
+
+# Run any maintenance script inside the container
+docker exec hiddenalerts_app python scripts/audit_offtopic_alerts.py
+docker exec hiddenalerts_app python scripts/audit_offtopic_alerts.py --json
+
+# Postgres shell (read-only browsing — be careful with writes)
+docker exec -it hiddenalerts_db psql -U hiddenalerts -d hiddenalerts
+
+# Container resource use
+docker stats --no-stream
+```
+
+### What's safe to run, what isn't
+
+| Command | Safe? | Notes |
+|---------|-------|-------|
+| `docker compose build app` | Always | Builds a new image; doesn't replace the running container yet. |
+| `docker compose up -d --no-deps app` | Yes | Recreates only the app container — Postgres untouched. |
+| `docker compose up -d` (no `--no-deps`) | Cautious | Will recreate Postgres if its image/config changed. Don't use unless you intend that. |
+| `docker compose down` | **No** | Stops everything. Only use if you mean to take the site offline. |
+| `docker compose down -v` | **NEVER** | Deletes volumes — wipes the production database. |
+| `docker exec hiddenalerts_app pytest tests/ -q` | Always | Tests run in isolated session-scoped SQLite, not the prod DB. |
+| `docker exec hiddenalerts_app alembic upgrade head` | Yes | Idempotent; only applies pending migrations. |
+| `docker exec hiddenalerts_app alembic downgrade …` | **No** without backup | Downgrades can drop columns. Take a DB dump first. |
+
+### Quick sanity check that scoring is on the 0–100 scale (M3 final)
+
+```bash
+# Should show signal_score values in the 40–95 range (not 5–25).
+curl -s https://hiddenalerts.com/api/alerts | python3 -c \
+  "import json, sys; \
+   d = json.load(sys.stdin); \
+   for a in d['alerts'][:5]: print(a['signal_score'], a['risk_level'])"
+```
+
+---
+
 ## Maintenance Scripts
 
 | Script | Purpose | Default mode |
