@@ -486,7 +486,7 @@ Authenticated endpoints accept either a valid `access_token` cookie **or** an `A
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/api/alerts` | No | Paginated published alert feed |
-| `GET` | `/api/alerts/top` | No | Curated top 3 published alerts (`signal_score_total >= 15`, ranked by score → signal-strength → credibility → recency, duplicate primary entities suppressed). Returns `{"alerts": []}` when none qualify. |
+| `GET` | `/api/alerts/top` | No | Curated top 3 published alerts (`signal_score >= 60` on the 0–100 API scale; equivalent to internal `signal_score_total >= 15`). Ranked by score → signal-strength → credibility → recency, duplicate primary entities suppressed. Returns `{"alerts": []}` when none qualify. |
 | `GET` | `/api/alerts/{id}` | No | Enriched published alert detail (`confidence`, `why_it_matters`, `key_intelligence`, `risk_assessment`, `sources`, `published_date`, `subcategory`, `affected_group`, `timeline`, `related_signals` + backward-compat aliases). Optional sections omitted when empty. 404 if unpublished. |
 | `GET` | `/api/alerts/stats` | No | Published alert aggregate counts + category breakdown |
 
@@ -604,7 +604,7 @@ INFO  app.pipeline.alert_pipeline — Alert pipeline: processing 5 unprocessed i
 INFO  httpx — HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
 INFO  httpx — HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
 INFO  app.pipeline.alert_pipeline — raw_item 8 → alert 9 [MEDIUM score=12]
-INFO  app.pipeline.alert_pipeline — raw_item 11 → alert 11 [HIGH score=14]
+INFO  app.pipeline.alert_pipeline — raw_item 11 → alert 11 [HIGH score=20]
 INFO  app.pipeline.alert_pipeline — Alert pipeline complete: examined=5, processed=2, ...
 
 === Results ===
@@ -614,6 +614,14 @@ INFO  app.pipeline.alert_pipeline — Alert pipeline complete: examined=5, proce
   Skipped (AI said no) : 2
   Failed               : 0
 ```
+
+> **Note on score values in CLI / internal logs:** the `score=` value in
+> pipeline log lines is the raw internal `signal_score_total` on the 5–25
+> scale (12 above maps to risk_score 48 → Medium; 20 maps to 80 → High).
+> Public, admin, and subscriber API responses always normalize to the 0–100
+> frontend scale (Ken-approved M3 final). Logs show internal sums; APIs and
+> UIs show 0–100. Risk band cutoffs on the internal scale: ≤9 Low, 10–17
+> Medium, ≥18 High.
 
 **Understanding the results:**
 

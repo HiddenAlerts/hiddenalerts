@@ -254,7 +254,7 @@ have to filter blanks on the frontend.
     { "id": 38, "title": "DOJ indicts related actor", "score": 68, "risk_level": "Medium" }
   ],
 
-  "signal_score": 20,
+  "signal_score": 80,
   "secondary_category": "Wire Fraud",
   "source_name": "SEC Press Releases",
   "source_url": "https://sec.gov/news/press-release/...",
@@ -290,7 +290,7 @@ have to filter blanks on the frontend.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `signal_score` | `int\|null` | Alias for `score` |
+| `signal_score` | `int\|null` | Alias for `score` — same 0–100 value. Both fields always carry the normalized score; never the raw 5–25 internal sum. |
 | `secondary_category` | `string\|null` | Alias for `subcategory` |
 | `source_name` | `string\|null` | First source's name (mirrors `sources[0].name`) |
 | `source_url` | `string\|null` | First source's url (mirrors `sources[0].url`) |
@@ -349,6 +349,10 @@ list-card UI can consume it.
 ```
 
 Field reference is identical to `0.1 GET /api/alerts` — see that table.
+`signal_score` is on the 0–100 scale; `risk_level` follows the same bands
+(≥70 High, 40–69 Medium, <40 Low) and is server-derived. Same response shape
+as `GET /api/alerts`, so the existing list-card UI can render Top Alerts
+without changes.
 **Use `source_published_at` for the date on Top Alerts cards** (same convention
 as the main list); `published_at` is the platform publish time and stays
 internal-only.
@@ -360,7 +364,7 @@ internal-only.
    high cutoff (`signal_score >= 70`) so genuinely strong medium-high alerts
    qualify.
 2. **Ranking** (descending priority):
-   1. `signal_score_total` — score wins.
+   1. **Score** — the 0–100 `signal_score` wins; higher first.
    2. **Signal strength** — number of `event_sources` bridges attached to the
       alert (more sources confirming the event ranks higher).
    3. **Source credibility** (1–5 from `sources.credibility_score`).
@@ -646,8 +650,8 @@ GET /api/v1/alerts
 **Field Reference:**
 | Field | Description |
 |-------|-------------|
-| `signal_score_total` | Raw score out of 25 |
-| `relevance_score` | Normalised `signal_score_total / 25` (0.0–1.0) |
+| `signal_score_total` | **Risk score on the 0–100 frontend scale** (Ken-approved M3 final). Normalized server-side from the internal 5-factor sum so admin, subscriber, and public responses all agree. The internal database column still stores the raw 5–25 sum; only the API response value is normalized. |
+| `relevance_score` | Legacy ratio (`internal_sum / 25`, 0.0–1.0) preserved for backward compatibility. **Do not use for risk badge or risk level logic.** Prefer `signal_score_total` (0–100) for any UI display. |
 | `is_published` | Whether admin has approved and published this alert |
 | `is_relevant` | Whether AI determined the alert is relevant (Tier 1/2 vs Tier 3) |
 
@@ -669,7 +673,7 @@ GET /api/v1/alerts/{alert_id}
   "risk_level": "high",
   "primary_category": "Consumer Scam",
   "secondary_category": "Wire Fraud",
-  "signal_score_total": 18,
+  "signal_score_total": 72,
   "relevance_score": 0.72,
   "matched_keywords": ["elder fraud", "wire transfer"],
   "is_relevant": true,
@@ -772,6 +776,12 @@ Manually triggers the AI processing pipeline for unprocessed raw items. Runs in 
 These endpoints only return **published** alerts (`is_published = true`). Safe for subscriber-facing mobile/web apps.
 
 **Auth required:** Bearer token OR cookie (`subscriber` or `admin` role)
+
+> **Score fields on subscriber endpoints are already normalized** to the
+> 0–100 frontend scale (Ken-approved M3 final). `signal_score_total` carries
+> the same 0–100 value the public feed exposes. `risk_level` is server-derived
+> from that value with the bands ≥70 high, 40–69 medium, <40 low. No
+> client-side normalization is required.
 
 ### 4.1 List Published Alerts
 ```
@@ -903,7 +913,7 @@ GET /api/v1/events/{event_id}
       "id": 42,
       "title": "FBI warns...",
       "risk_level": "high",
-      "signal_score_total": 18,
+      "signal_score_total": 72,
       "is_published": true,
       "processed_at": "2026-04-22T14:00:00Z"
     }
