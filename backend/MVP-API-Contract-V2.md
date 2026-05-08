@@ -450,6 +450,207 @@ curl http://localhost:8000/api/alerts/stats
 
 ---
 
+### 0.5 GET /api/search/alerts — Search Published Alerts *(NEW)*
+
+```
+GET /api/search/alerts?q=binance&min_score=40&limit=50&group_limit=20
+```
+
+**No authentication required.**
+Free-text search across published alerts only. Returns entity-grouped results plus a flat top-level `alerts` list for drilldown. Powered by PostgreSQL ILIKE — no fuzzy / typo / semantic search, no Elasticsearch, no vector DB.
+
+**Query Parameters:**
+
+| Param | Type | Required | Default | Behavior |
+|-------|------|----------|---------|----------|
+| `q` | string | yes | — | Trimmed; empty/whitespace → `422`. Case-insensitive. Multi-word treated as a literal phrase. |
+| `min_score` | int | no | `0` | Normalized 0–100 score threshold. Default 0 returns all matching published alerts; pass 40/60/70 for higher-risk filtering. |
+| `limit` | int | no | `50` | Cap on the top-level `alerts` list. Values `> 100` are **clamped** to 100. Values `< 1` are rejected with 422. |
+| `group_limit` | int | no | `20` | Cap on alerts inside each group. Values `> 50` are **clamped** to 50. Values `< 1` are rejected with 422. |
+
+**Response `200 OK`:**
+```json
+{
+  "query": "binance",
+  "normalized_query": "binance",
+  "total_alerts": 7,
+  "group_count": 2,
+  "groups": [
+    {
+      "entity": "binance",
+      "group_type": "entity",
+      "alertCount": 5,
+      "sourceCount": 3,
+      "sources": [
+        "DOJ Press Releases",
+        "FTC RSS Feeds",
+        "SEC Press Releases"
+      ],
+      "earliest": "2025-11-12T10:00:00Z",
+      "latest": "2026-04-28T15:30:00Z",
+      "alerts": [
+        {
+          "id": 42,
+          "title": "SEC Charges Binance in Crypto Fraud Case",
+          "summary": "Short alert summary here.",
+          "category": "Cryptocurrency Fraud",
+          "risk_level": "high",
+          "signal_score": 84,
+          "source_name": "SEC Press Releases",
+          "source_url": "https://www.sec.gov/news/press-release/2026-42",
+          "source_published_at": "2026-04-28T15:30:00Z",
+          "published_at": "2026-04-28T16:00:00Z",
+          "matched_entity": "binance"
+        }
+      ]
+    },
+    {
+      "entity": "binance",
+      "group_type": "keyword",
+      "alertCount": 2,
+      "sourceCount": 1,
+      "sources": ["KrebsOnSecurity"],
+      "earliest": "2026-02-10T09:00:00Z",
+      "latest": "2026-03-04T11:00:00Z",
+      "alerts": [
+        {
+          "id": 51,
+          "title": "Binance scandal hits market",
+          "summary": "...",
+          "category": "Cybercrime",
+          "risk_level": "medium",
+          "signal_score": 52,
+          "source_name": "KrebsOnSecurity",
+          "source_url": "https://krebsonsecurity.com/2026/03/...",
+          "source_published_at": "2026-03-04T11:00:00Z",
+          "published_at": "2026-03-04T12:00:00Z",
+          "matched_entity": null
+        }
+      ]
+    }
+  ],
+  "alerts": [
+    {
+      "id": 42,
+      "title": "SEC Charges Binance in Crypto Fraud Case",
+      "summary": "Short alert summary here.",
+      "category": "Cryptocurrency Fraud",
+      "risk_level": "high",
+      "signal_score": 84,
+      "source_name": "SEC Press Releases",
+      "source_url": "https://www.sec.gov/news/press-release/2026-42",
+      "source_published_at": "2026-04-28T15:30:00Z",
+      "published_at": "2026-04-28T16:00:00Z",
+      "matched_entity": "binance"
+    }
+  ]
+}
+```
+
+**Empty Response (no matches):**
+```json
+{
+  "query": "unknown-company",
+  "normalized_query": "unknown-company",
+  "total_alerts": 0,
+  "group_count": 0,
+  "groups": [],
+  "alerts": []
+}
+```
+
+**Field Reference — top level:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `query` | `string` | The query string as the client sent it. |
+| `normalized_query` | `string` | Trimmed + lowercased query — useful when the frontend echoes the search term. |
+| `total_alerts` | `int` | Number of **unique** matching alerts (deduped by id). |
+| `group_count` | `int` | Number of returned groups (entity groups + the keyword fallback group when present). |
+| `groups` | `array` | Grouped results. Entity groups first, keyword fallback last. |
+| `alerts` | `array` | Flat unique-by-id list of all matching alerts, capped at `limit`. Ranked by `signal_score` DESC then recency DESC. |
+
+**Field Reference — `groups[*]`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entity` | `string` | Group key — the matched entity name (lowercased + trimmed) for entity groups, or the normalized query for keyword fallback. |
+| `group_type` | `string` | `"entity"` or `"keyword"`. |
+| `alertCount` | `int` | Total alerts in this group **before** `group_limit` truncation. |
+| `sourceCount` | `int` | Number of unique source names in this group. |
+| `sources` | `array<string>` | Unique source names (sorted). |
+| `earliest` | `datetime\|null` | Earliest timestamp across this group's alerts. Resolves in priority order: `source_published_at` → `published_at` → `processed_at`. |
+| `latest` | `datetime\|null` | Latest timestamp (same priority order). |
+| `alerts` | `array` | Alerts in this group, ranked the same way as the top-level list, capped at `group_limit`. |
+
+**Field Reference — `alerts[*]` and `groups[*].alerts[*]`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `int` | Unique alert ID. |
+| `title` | `string\|null` | Article / press-release title. |
+| `summary` | `string\|null` | AI summary (3–5 sentences). |
+| `category` | `string\|null` | Primary fraud category. |
+| `risk_level` | `string\|null` | Derived from `signal_score`: `"high"` ≥ 70, `"medium"` 40–69, `"low"` < 40. Lowercase. |
+| `signal_score` | `int\|null` | Normalized 0–100 score. The DB stores 5–25 internally; the API normalizes on the way out. |
+| `source_name` | `string\|null` | Publisher (e.g. "SEC Press Releases"). |
+| `source_url` | `string\|null` | Article URL — same as the source link on `/api/alerts/{id}`. |
+| `source_published_at` | `datetime\|null` | Original press-release / article date. |
+| `published_at` | `datetime\|null` | When HiddenAlerts published the alert. |
+| `matched_entity` | `string\|null` | The entity that matched (lowercased) when the alert sits in an entity group; the alert's primary parsed-entity match in the top-level list; `null` when the match was on title/summary/source only. |
+
+**Matching rules:**
+- Case-insensitive `ILIKE %q%` on title, summary, source name, and `cast(entities_json AS TEXT)`.
+- The JSON-text match is only a SQL candidate filter; `matched_entity` is always sourced from the parsed entity list, never from raw JSON text.
+- Multi-word `q` must appear contiguous in some field — no per-word OR, no fuzzy.
+- Unpublished alerts are excluded by design.
+
+**Grouping rules (entity-first, mixed):**
+- Alerts whose parsed entities contain `q` produce one `group_type="entity"` group per distinct matched entity (lowercased + trimmed).
+- An alert tagged with multiple matching entities appears in **every** relevant entity group. `total_alerts` counts unique alerts, so the sum of `alertCount` across groups can exceed `total_alerts`.
+- Alerts that match only via title / summary / source go into a single `group_type="keyword"` fallback group keyed by the normalized query — they are **never dropped**.
+- When no candidate has a parsed entity match, only the keyword fallback group is returned.
+- Entity groups are sorted by `alertCount` DESC, then top-alert `signal_score` DESC. The keyword fallback group is appended last.
+
+**Ranking (groups and full list):**
+1. `signal_score` DESC.
+2. Effective recency DESC = `source_published_at` ?? `published_at` ?? `processed_at`.
+
+**Risk filter:**
+- `min_score=0` (default) → no filtering.
+- `min_score=40` → high + most-medium alerts (internal `signal_score_total >= 10`).
+- `min_score=70` → high alerts only (internal `signal_score_total >= 18`).
+- Resolution is in steps of 4 on the public scale because the internal scale is integer 5–25.
+
+**Frontend-safe — never returned:**
+review history · score-factor breakdowns · raw `entities_json` · `ai_model` · `victim_scale_raw` · `financial_impact_estimate` · `is_published` · `is_relevant` · `matched_keywords` · `published_by_user_id` · raw HTML / text / hashes.
+
+**Quick Tests:**
+```bash
+# Basic search
+curl "http://localhost:8000/api/search/alerts?q=binance" | python -m json.tool
+
+# Empty query is rejected
+curl -s -o /dev/null -w "%{http_code}\n" "http://localhost:8000/api/search/alerts?q="
+# expect: 422
+
+# Higher-risk filter
+curl "http://localhost:8000/api/search/alerts?q=fraud&min_score=70" | python -m json.tool
+
+# Unknown query → empty envelope
+curl "http://localhost:8000/api/search/alerts?q=zzunknownzz" | python -m json.tool
+```
+
+**Notes for Hasnain:**
+- The API is unauthenticated for this MVP. Do not gate the search UI behind login.
+- `signal_score` is already on the 0–100 scale — do not divide or multiply on the frontend.
+- Prefer `groups[*].alerts` for an entity-clustered view, and the top-level `alerts` for "show all matches" / pagination-style displays.
+- Display the top entity groups first (entity-first ordering is enforced by the API). The keyword fallback group is appended last.
+- An alert may appear in multiple entity groups when it has several matching tags — that's intentional. Use `id` for client-side dedup if you need a single "list view".
+- Multi-word search is a literal phrase. If a user types `binance ftx`, suggest a UX hint or perform two separate searches client-side.
+
+---
+
 ## 1. Authentication Overview
 
 ### How Auth Works

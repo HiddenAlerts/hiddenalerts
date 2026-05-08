@@ -489,11 +489,20 @@ Authenticated endpoints accept either a valid `access_token` cookie **or** an `A
 | `GET` | `/api/alerts/top` | No | Curated top 3 published alerts (`signal_score >= 60` on the 0–100 API scale; equivalent to internal `signal_score_total >= 15`). Ranked by score → signal-strength → credibility → recency, duplicate primary entities suppressed. Returns `{"alerts": []}` when none qualify. |
 | `GET` | `/api/alerts/{id}` | No | Enriched published alert detail (`confidence`, `why_it_matters`, `key_intelligence`, `risk_assessment`, `sources`, `published_date`, `subcategory`, `affected_group`, `timeline`, `related_signals` + backward-compat aliases). Optional sections omitted when empty. 404 if unpublished. |
 | `GET` | `/api/alerts/stats` | No | Published alert aggregate counts + category breakdown |
+| `GET` | `/api/search/alerts` | No | Free-text search across published alerts. Required `q`; optional `min_score` (0–100, default 0), `limit` (default 50, max 100), `group_limit` (default 20, max 50). Matches title, summary, source name, and parsed entities (case-insensitive ILIKE). Returns entity-grouped results plus a unique top-level `alerts` list; non-entity matches collect into a single `keyword` fallback group. See `MVP-API-Contract-V2.md` §0.5. |
 
 > Detail-endpoint conventions: `risk_level` and `confidence` are returned in
 > Title Case (`"High"|"Medium"|"Low"`); `published_date` resolves in priority
 > order `source_published_at` → `published_at` → `processed_at`. See
 > `MVP-API-Contract-V2.md` §0.2 for the full schema.
+
+> Search-endpoint conventions: `q` is trimmed and required (empty/whitespace
+> → 422). `limit > 100` and `group_limit > 50` are clamped (200 OK), values
+> `< 1` are rejected with 422. `min_score` is on the same 0–100 scale used
+> elsewhere; default 0 returns all matching published alerts (low + medium +
+> high). Multi-word queries are matched as a literal phrase — no fuzzy /
+> typo / semantic search. An alert tagged with multiple matching entities
+> appears in multiple entity groups; `total_alerts` counts unique alerts.
 
 ### Alerts (M2)
 
@@ -556,7 +565,7 @@ Tests use an in-memory SQLite database — no PostgreSQL or OpenAI key required.
 pytest tests/ -v
 ```
 
-**226 tests, 0 failures.** Test breakdown:
+**265 tests, 0 failures.** Test breakdown:
 
 | File | Tests | What it covers |
 |------|-------|---------------|
@@ -570,7 +579,8 @@ pytest tests/ -v
 | `test_alerts_api.py` | 21 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation; publication state; approval publish; client feed access control |
 | `test_public_alerts.py` | 87 | Public list (no auth, published-only, field mapping, ordering, filters); enriched detail (Ken's frontend schema — confidence, why_it_matters, key_intelligence, risk_assessment with strong-factor enrichment, sources, timeline, related_signals; safe-fields-only); public stats (counts, breakdown, empty state); top alerts (no auth, published-only, max 3, score ≥15 threshold, score-then-strength-then-credibility-then-recency ranking, duplicate-entity suppression, fallback key for entity-less alerts, empty when none qualify, no internal-field leakage); agency stoplist (FBI/DOJ/SEC/etc. excluded from primary-entity dedup and entity-overlap matching); derived risk_level from score on every public endpoint; related_signals entity-overlap + 2–4 quantity rule; **M3 final score normalization to 0–100** — `signal_score` / `score` exposed as 0–100, Ken's worked examples (17→68, 19→76, 21→84), band-boundary checks at 9/10 and 17/18 |
 | `test_signal_scorer.py` | 42 | All 5 scoring factors; M3 final 0–100-aligned bands (≤9 low, 10–17 medium, ≥18 high); boundary tests including the new band-shift cases (16/17 now Medium, 18 is the new High floor); recalibrated victim/financial buckets; realistic alert scenarios |
-| **Total** | **226** | |
+| `test_search_api.py` | 39 | GET /api/search/alerts — auth-free 200/422 envelope, matching across title/summary/source/parsed entities (case-insensitive, partial, multi-word literal phrase), unpublished excluded, entity grouping with multi-entity dedup, mixed-mode entity + keyword fallback, group ordering (entity-first), `alertCount`/`sourceCount` correctness, source-published-at earliest/latest, `group_limit` cap; `signal_score` DESC + recency-tiebreaker ranking; `min_score` 0–100 boundary checks (60 → internal 15, 70 → internal 18); `limit`/`group_limit` clamping above max + 422 below 1; no-leak frontend safety; regression on /api/alerts list/top/stats/detail |
+| **Total** | **265** | |
 
 ---
 
