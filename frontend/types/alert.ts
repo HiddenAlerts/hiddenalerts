@@ -20,4 +20,6 @@ export type AlertItem = {
   occurredAt: string;
   /** From API `source_published_at` when set; drives source-facing date/time in lists. */
   sourcePublishedAt?: string;
+  /** From entity-aware search (`matched_entity`); omitted when absent or keyword match. */
+  matchedEntity?: string;
 };

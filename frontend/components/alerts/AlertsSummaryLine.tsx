@@ -25,6 +25,8 @@ export type AlertsSummaryLineProps = {
   filterTotal?: number;
   /** When known (from list `total` or stats-derived page count), show “Page X of Y”. */
   totalPages?: number;
+  /** Trimmed `q` URL param — enables search-oriented summary copy. */
+  activeSearchQuery?: string | null;
   className?: string;
 };
 
@@ -33,6 +35,7 @@ export const AlertsSummaryLine: FC<AlertsSummaryLineProps> = ({
   page,
   filterTotal,
   totalPages,
+  activeSearchQuery,
   className,
 }) => {
   const phrase = riskPhraseLabel(risk);
@@ -42,6 +45,11 @@ export const AlertsSummaryLine: FC<AlertsSummaryLineProps> = ({
   const totalWord =
     hasTotal && filterTotal === 1 ? 'alert' : 'alerts';
 
+  const searchHeadline =
+    typeof activeSearchQuery === 'string' && activeSearchQuery.trim().length > 0
+      ? activeSearchQuery.trim()
+      : null;
+
   return (
     <div
       className={cn(
@@ -50,7 +58,17 @@ export const AlertsSummaryLine: FC<AlertsSummaryLineProps> = ({
       )}
     >
       <p>
-        <span className="text-muted">Showing </span>
+        {searchHeadline ? (
+          <>
+            <span className="text-muted">Search </span>
+            <span className="text-foreground font-semibold">
+              &ldquo;{searchHeadline}&rdquo;
+            </span>
+            <span className="text-muted-foreground mx-1.5">•</span>
+          </>
+        ) : (
+          <span className="text-muted">Showing </span>
+        )}
         <span className={cn('font-semibold', phraseClass)}>{phrase}</span>
         <span className="text-muted"> alerts</span>
         <span className="text-muted-foreground mx-1.5">•</span>
