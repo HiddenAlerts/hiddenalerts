@@ -72,7 +72,7 @@ export const AlertRow: FC<AlertRowProps> = ({
         className,
       )}
     >
-      <div className="flex max-w-[50%] min-w-0 flex-1 items-start gap-3 sm:gap-4">
+      <div className="flex w-full min-w-0 flex-1 items-start gap-3 sm:max-w-[50%] sm:gap-4">
         <div
           className={cn(
             'flex size-11 shrink-0 items-center justify-center rounded-full sm:size-16',
@@ -104,7 +104,7 @@ export const AlertRow: FC<AlertRowProps> = ({
         </div>
       </div>
 
-      <div className="flex w-[45%] max-w-[45%] min-w-[45%] flex-wrap items-end justify-between gap-4 sm:w-auto sm:shrink-0 sm:flex-nowrap sm:items-center sm:gap-6">
+      <div className="flex w-full min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-3 sm:w-auto sm:shrink-0 sm:flex-nowrap sm:items-center sm:gap-6">
         <div className="flex items-end gap-6 sm:min-w-[5rem]">
           <RiskBadge label={alert.riskLevelLabel} variant="outline" />
           <p className="flex items-baseline gap-0.5 tabular-nums">
@@ -128,9 +128,12 @@ export const AlertRow: FC<AlertRowProps> = ({
           </p>
         </div>
 
-        <div className="bg-muted h-10 w-px"></div>
+        <div
+          aria-hidden
+          className="bg-muted shrink-0 max-sm:my-0.5 max-sm:h-px max-sm:w-full max-sm:basis-full sm:h-10 sm:w-px"
+        />
 
-        <div className="flex min-w-0 gap-12">
+        <div className="flex min-w-0 gap-4 sm:gap-12">
           <div className="">
             <p className="text-muted text-xs font-medium">Source</p>
             <p className="text-foreground mt-0.5 line-clamp-2 text-sm font-medium">
