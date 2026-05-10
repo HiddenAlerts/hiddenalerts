@@ -7,7 +7,12 @@ export function alertsStatsQueryKey(categoryFilter: string) {
   return ['alerts', 'stats', categoryFilter] as const;
 }
 
-export function useAlertsStatsQuery(categoryFilter: string) {
+export function useAlertsStatsQuery(
+  categoryFilter: string,
+  options?: { enabled?: boolean },
+) {
+  const enabled = options?.enabled ?? true;
+
   return useQuery({
     queryKey: alertsStatsQueryKey(categoryFilter),
     queryFn: () =>
@@ -15,5 +20,6 @@ export function useAlertsStatsQuery(categoryFilter: string) {
         categoryFilter !== 'all' ? { category: categoryFilter } : {},
       ),
     staleTime: 60_000,
+    enabled,
   });
 }
