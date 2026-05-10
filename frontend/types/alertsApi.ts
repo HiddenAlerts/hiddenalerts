@@ -15,6 +15,8 @@ export type AlertApiRecord = {
   entities?: string[];
   /** When present, shown in the header “Affected” line; omitted from API until backend supplies it. */
   affected?: string | null;
+  /** Search hits (`GET /search/alerts`); null for keyword-style matches. */
+  matched_entity?: string | null;
 };
 
 export type AlertsStatsCategoryBreakdown = {
@@ -40,4 +42,25 @@ export type AlertsListResponse = {
   total?: number;
   /** Alternative field name some APIs use for the same value as `total`. */
   total_count?: number;
+};
+
+export type AlertsSearchGroup = {
+  entity: string;
+  group_type: string;
+  alertCount: number;
+  sourceCount: number;
+  sources: string[];
+  earliest: string;
+  latest: string;
+  alerts: AlertApiRecord[];
+};
+
+/** Response from `GET /search/alerts`. */
+export type AlertsSearchResponse = {
+  query: string;
+  normalized_query: string;
+  total_alerts: number;
+  group_count: number;
+  groups: AlertsSearchGroup[];
+  alerts: AlertApiRecord[];
 };

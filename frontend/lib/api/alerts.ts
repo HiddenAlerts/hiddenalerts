@@ -7,6 +7,7 @@ import type { AlertBadgeTone, AlertItem } from '@/types/alert';
 import type {
   AlertApiRecord,
   AlertsListResponse,
+  AlertsSearchResponse,
   AlertsStatsResponse,
 } from '@/types/alertsApi';
 
@@ -31,6 +32,12 @@ function riskLevelToBadge(risk: string): AlertBadgeTone {
 }
 
 export function mapApiAlertToAlertItem(record: AlertApiRecord): AlertItem {
+  const matchedRaw = record.matched_entity;
+  const matchedEntity =
+    typeof matchedRaw === 'string' && matchedRaw.trim().length > 0
+      ? matchedRaw.trim()
+      : undefined;
+
   return {
     id: String(record.id),
     title: record.title,
@@ -48,6 +55,7 @@ export function mapApiAlertToAlertItem(record: AlertApiRecord): AlertItem {
       record.source_published_at.trim().length > 0
         ? record.source_published_at.trim()
         : undefined,
+    ...(matchedEntity !== undefined ? { matchedEntity } : {}),
   };
 }
 
@@ -102,6 +110,42 @@ export async function fetchAlertsStats(
   params?: FetchAlertsStatsParams,
 ): Promise<AlertsStatsResponse> {
   return apiGet<AlertsStatsResponse>(buildAlertsStatsPath(params));
+}
+
+export type FetchAlertsSearchParams = {
+  q: string;
+  min_score?: number;
+  limit?: number;
+  group_limit?: number;
+};
+
+/** Builds path for `GET /search/alerts` (base URL already includes `/api`). */
+export function buildAlertsSearchPath(params: FetchAlertsSearchParams): string {
+  const q = params.q.trim();
+  const searchParams = new URLSearchParams({
+    q,
+    min_score: String(params.min_score ?? 0),
+    limit: String(params.limit ?? 50),
+    group_limit: String(params.group_limit ?? 20),
+  });
+  return `/search/alerts?${searchParams.toString()}`;
+}
+
+export async function fetchAlertsSearch(
+  params: FetchAlertsSearchParams,
+): Promise<AlertsSearchResponse> {
+  const q = params.q.trim();
+  if (!q) {
+    return {
+      query: '',
+      normalized_query: '',
+      total_alerts: 0,
+      group_count: 0,
+      groups: [],
+      alerts: [],
+    };
+  }
+  return apiGet<AlertsSearchResponse>(buildAlertsSearchPath(params));
 }
 
 /** Maps `/alerts/stats` payload to risk tab counts. */

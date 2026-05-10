@@ -6,7 +6,7 @@ import {
   ALERTS_RISK_FILTER_OPTIONS,
   type AlertsRiskFilterValue,
 } from '@/data/alertRiskFilterOptions';
-import { parseAsInteger, parseAsStringLiteral } from 'nuqs';
+import { parseAsInteger, parseAsString, parseAsStringLiteral } from 'nuqs';
 
 const ALERT_LIST_RISK_IN_ORDER = ALERTS_RISK_FILTER_OPTIONS.map(
   o => o.value,
@@ -30,4 +30,5 @@ export const alertsListQueryParsers = {
     'all',
   ),
   page: parseAsInteger.withDefault(1),
+  q: parseAsString.withDefault('').withOptions({ clearOnDefault: true }),
 } as const;

@@ -19,6 +19,9 @@ export type AlertsFiltersBarProps = {
   riskCounts?: Partial<Record<AlertsRiskFilterValue, number>>;
   onRiskChange: (risk: AlertsRiskFilterValue) => void;
   onCategoryChange: (category: string) => void;
+  /** Trimmed search query from URL — shows a clear control when set. */
+  activeSearchQuery?: string | null;
+  onClearSearch?: () => void;
   className?: string;
 };
 
@@ -55,8 +58,16 @@ export const AlertsFiltersBar: FC<AlertsFiltersBarProps> = ({
   riskCounts,
   onRiskChange,
   onCategoryChange,
+  activeSearchQuery,
+  onClearSearch,
   className,
-}) => (
+}) => {
+  const searchTrim =
+    typeof activeSearchQuery === 'string' ? activeSearchQuery.trim() : '';
+  const showClearSearch =
+    searchTrim.length > 0 && typeof onClearSearch === 'function';
+
+  return (
   <div
     className={cn(
       'border-border bg-surface/25 flex flex-col gap-4 overflow-hidden rounded-sm border px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-4 sm:py-3',
@@ -64,7 +75,9 @@ export const AlertsFiltersBar: FC<AlertsFiltersBarProps> = ({
     )}
   >
     <div
-      className="border-border bg-background-alt/60 flex w-full min-w-0 overflow-x-auto rounded-sm border sm:w-auto sm:flex-1 sm:justify-start lg:max-w-max"
+      className={cn(
+        'grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:min-w-0 sm:flex-1 sm:gap-0 sm:overflow-x-auto sm:rounded-sm sm:border sm:border-border sm:bg-background-alt/60 sm:justify-start lg:max-w-max',
+      )}
       role="group"
       aria-label="Filter by risk level"
     >
@@ -77,24 +90,25 @@ export const AlertsFiltersBar: FC<AlertsFiltersBarProps> = ({
             onClick={() => onRiskChange(opt.value)}
             aria-pressed={selected}
             className={cn(
-              'flex min-h-[44px] min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 rounded-sm px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors sm:min-h-0 sm:flex-none sm:px-5',
+              'border-border bg-background-alt/50 flex min-h-[44px] w-full cursor-pointer flex-row items-center justify-center gap-2 rounded-md border px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors sm:min-h-0 sm:w-auto sm:min-w-0 sm:flex-none sm:rounded-none sm:border-0 sm:bg-transparent sm:px-5',
               'focus-visible:ring-primary-500/50 focus-visible:ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none',
-              index > 0 && 'border-border border-l',
+              index > 0 && 'sm:border-border sm:border-l',
               segmentSurface(selected, opt.value),
               segmentLabelTone(opt.value, selected),
             )}
           >
-            <span>{opt.label}</span>
+            <span className="shrink-0">{opt.label}</span>
             <RiskCountPill
               variant={opt.value}
               count={riskCounts?.[opt.value]}
+              className="shrink-0"
             />
           </button>
         );
       })}
     </div>
 
-    <div className="flex min-w-0 shrink-0 flex-col gap-1.5 sm:w-[min(100%,18rem)]">
+    <div className="flex min-w-0 shrink-0 flex-col gap-2 sm:w-[min(100%,18rem)] sm:items-end">
       <FilterDropdown
         id="alerts-category-filter"
         label="Filter by Type"
@@ -102,8 +116,18 @@ export const AlertsFiltersBar: FC<AlertsFiltersBarProps> = ({
         options={API_ALERT_CATEGORY_OPTIONS}
         onChange={onCategoryChange}
         leftIcon={<Filter aria-hidden />}
-        className="min-w-0"
+        className="min-w-0 w-full"
       />
+      {showClearSearch ? (
+        <button
+          type="button"
+          onClick={onClearSearch}
+          className="text-muted hover:text-foreground focus-visible:ring-primary-500/50 text-xs font-medium underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none sm:text-right"
+        >
+          Clear search
+        </button>
+      ) : null}
     </div>
   </div>
-);
+  );
+};

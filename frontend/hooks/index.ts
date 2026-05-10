@@ -1,5 +1,6 @@
 export { useAlertDetailQuery } from './useAlertDetailQuery';
 export { useAlertsPageQuery } from './useAlertsPageQuery';
+export { alertsSearchQueryKey, useAlertsSearchQuery } from './useAlertsSearchQuery';
 export {
   alertsStatsQueryKey,
   useAlertsStatsQuery,

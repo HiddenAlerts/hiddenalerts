@@ -93,6 +93,14 @@ export const AlertRow: FC<AlertRowProps> = ({
           <p className="text-muted mt-0.5 line-clamp-1 text-xs leading-relaxed sm:text-sm">
             {alert.description}
           </p>
+          {alert.matchedEntity ? (
+            <p className="text-muted mt-1 line-clamp-1 text-xs">
+              Matched entity:{' '}
+              <span className="text-body font-medium">
+                {alert.matchedEntity}
+              </span>
+            </p>
+          ) : null}
         </div>
       </div>
 

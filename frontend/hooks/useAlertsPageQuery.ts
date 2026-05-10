@@ -15,6 +15,7 @@ export function useAlertsPageQuery(
   page: number,
   risk: string,
   category: string,
+  options?: { enabled?: boolean },
 ) {
   const offset = (page - 1) * ALERTS_PAGE_SIZE;
 
@@ -28,5 +29,6 @@ export function useAlertsPageQuery(
         ...(category !== 'all' ? { category } : {}),
       }),
     placeholderData: keepPreviousData,
+    enabled: options?.enabled ?? true,
   });
 }
