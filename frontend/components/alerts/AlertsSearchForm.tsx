@@ -13,6 +13,13 @@ import { useEffect, useState } from 'react';
 
 const ALERTS_SEARCH_DEBOUNCE_MS = 400;
 
+/** Routes where `q` is kept in the URL and synced from the search field (debounced). */
+const SEARCH_QUERY_SYNC_PATHS = ['/alerts', '/dashboard'] as const;
+
+function pathnameSyncsSearchQuery(pathname: string): boolean {
+  return (SEARCH_QUERY_SYNC_PATHS as readonly string[]).includes(pathname);
+}
+
 type AlertsSearchFormInnerProps = {
   router: ReturnType<typeof useRouter>;
   pathname: string;
@@ -26,40 +33,60 @@ const AlertsSearchFormInner: FC<AlertsSearchFormInnerProps> = ({
   searchParams,
   className,
 }) => {
+  const syncSearchQuery = pathnameSyncsSearchQuery(pathname);
   const isAlertsPage = pathname === '/alerts';
-  const urlQ = isAlertsPage ? (searchParams.get('q') ?? '') : '';
+  const isDashboardPage = pathname === '/dashboard';
+
+  const urlQ = syncSearchQuery ? (searchParams.get('q') ?? '') : '';
 
   const [draft, setDraft] = useState(urlQ);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
-      if (!isAlertsPage) {
+      if (!syncSearchQuery) {
         setDraft('');
         return;
       }
       setDraft(urlQ);
     }, 0);
     return () => window.clearTimeout(id);
-  }, [isAlertsPage, urlQ]);
+  }, [syncSearchQuery, urlQ]);
 
   useEffect(() => {
-    if (!isAlertsPage) return;
+    if (!syncSearchQuery) return;
 
     const term = draft.trim();
     const urlTrim = urlQ.trim();
     if (term === urlTrim) return;
 
     const id = window.setTimeout(() => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (term) params.set('q', term);
-      else params.delete('q');
-      params.set('page', '1');
-      const qs = params.toString();
-      router.replace(qs ? `/alerts?${qs}` : '/alerts');
+      if (isAlertsPage) {
+        const params = new URLSearchParams(searchParams.toString());
+        if (term) params.set('q', term);
+        else params.delete('q');
+        params.set('page', '1');
+        const qs = params.toString();
+        router.replace(qs ? `/alerts?${qs}` : '/alerts');
+        return;
+      }
+      if (isDashboardPage) {
+        const params = new URLSearchParams();
+        if (term) params.set('q', term);
+        const qs = params.toString();
+        router.replace(qs ? `/dashboard?${qs}` : '/dashboard');
+      }
     }, ALERTS_SEARCH_DEBOUNCE_MS);
 
     return () => window.clearTimeout(id);
-  }, [draft, isAlertsPage, router, searchParams, urlQ]);
+  }, [
+    draft,
+    isAlertsPage,
+    isDashboardPage,
+    router,
+    searchParams,
+    syncSearchQuery,
+    urlQ,
+  ]);
 
   const submitSearch = () => {
     const term = draft.trim();
@@ -70,6 +97,13 @@ const AlertsSearchFormInner: FC<AlertsSearchFormInnerProps> = ({
       params.set('page', '1');
       const qs = params.toString();
       router.replace(qs ? `/alerts?${qs}` : '/alerts');
+      return;
+    }
+    if (isDashboardPage) {
+      const params = new URLSearchParams();
+      if (term) params.set('q', term);
+      const qs = params.toString();
+      router.replace(qs ? `/dashboard?${qs}` : '/dashboard');
       return;
     }
     if (!term) return;

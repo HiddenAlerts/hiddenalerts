@@ -72,3 +72,10 @@ export function alertDisplayedAtIso(alert: {
   if (s) return s;
   return alert.occurredAt;
 }
+
+/** Newest-first ordering for compact dashboard preview lists. */
+export function sortAlertsByDisplayedAtDesc<
+  T extends { sourcePublishedAt?: string; occurredAt: string },
+>(a: T, b: T): number {
+  return alertDisplayedAtIso(b).localeCompare(alertDisplayedAtIso(a));
+}
