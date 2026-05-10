@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 
-const LOGO_SRC = '/images/logo-symbol.png';
+const LOGO_SRC = '/images/logo.png';
 
 type LandingLogoProps = {
   className?: string;

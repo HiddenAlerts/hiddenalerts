@@ -62,7 +62,7 @@ export const Sidebar: FC<SidebarProps> = ({
         >
           <span className="bg-primary-500/15 text-primary-500 inline-flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md p-0.5">
             <img
-              src="/images/logo-symbol.png"
+              src="/images/logo.png"
               alt=""
               width={36}
               height={36}
