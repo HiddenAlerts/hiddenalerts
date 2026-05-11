@@ -10,9 +10,6 @@ const legalLinks = [
   { href: c.linkPrivacyHref, label: c.linkPrivacyLabel },
 ] as const;
 
-const contactLinkClass =
-  'text-body hover:text-foreground text-sm font-medium underline decoration-transparent underline-offset-2 transition-[color,text-decoration-color] hover:decoration-foreground/30 focus-visible:ring-primary-500 rounded-sm focus-visible:ring-2 focus-visible:outline-none';
-
 const legalLinkClass =
   'text-muted-foreground hover:text-body text-sm underline decoration-transparent underline-offset-2 transition-[color,text-decoration-color] hover:decoration-body/40 focus-visible:ring-primary-500 rounded-sm focus-visible:ring-2 focus-visible:outline-none';
 
@@ -48,10 +45,10 @@ export function LandingFooter() {
             </p>
           </div>
 
-          <div className="flex flex-col items-center gap-6 md:items-end">
+          <div className="flex flex-col items-center md:items-end">
             <nav
               className="flex flex-wrap items-center justify-center gap-y-1 md:justify-end"
-              aria-label="Legal links"
+              aria-label="Legal links and contact"
             >
               {legalLinks.map((item, index) => (
                 <Fragment key={item.href}>
@@ -68,33 +65,34 @@ export function LandingFooter() {
                   </Link>
                 </Fragment>
               ))}
-            </nav>
-            <nav
-              className="flex flex-col items-center gap-2 sm:gap-6 md:items-end"
-              aria-label="Contact"
-            >
-              <div className="flex flex-col">
-                <span className="text-muted text-semibold text-sm">
-                  Support
-                </span>
-                <a
-                  href="mailto:support@covertlytics.com"
-                  className={contactLinkClass}
-                >
-                  support@covertlytics.com
-                </a>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-muted text-semibold text-sm">
-                  Contact
-                </span>
-                <a
-                  href="mailto:contact@covertlytics.com"
-                  className={contactLinkClass}
-                >
-                  contact@covertlytics.com
-                </a>
-              </div>
+              <span
+                aria-hidden
+                className="text-muted-foreground/40 px-2 text-[0.65rem] leading-none select-none"
+              >
+                ·
+              </span>
+              <a
+                href={c.linkSupportHref}
+                className={legalLinkClass}
+                title={c.linkSupportEmail}
+                aria-label={`${c.linkSupportLabel}, ${c.linkSupportEmail}`}
+              >
+                {c.linkSupportLabel}
+              </a>
+              <span
+                aria-hidden
+                className="text-muted-foreground/40 px-2 text-[0.65rem] leading-none select-none"
+              >
+                ·
+              </span>
+              <a
+                href={c.linkContactHref}
+                className={legalLinkClass}
+                title={c.linkContactEmail}
+                aria-label={`${c.linkContactLabel}, ${c.linkContactEmail}`}
+              >
+                {c.linkContactLabel}
+              </a>
             </nav>
           </div>
         </div>
