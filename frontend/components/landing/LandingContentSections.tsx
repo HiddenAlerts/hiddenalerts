@@ -1,5 +1,6 @@
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
 import {
   BellRing,
   BriefcaseBusiness,
@@ -13,8 +14,6 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
-
-// import { WaitlistForm } from './WaitlistForm';
 
 type AlertCardProps = {
   level: 'HIGH' | 'MEDIUM';
@@ -129,7 +128,8 @@ const sourceCards = [
   },
 ] as const;
 
-const NEWSLETTER_URL = 'https://hiddenalerts.beehiiv.com';
+/** Subscription / checkout entry — wire to Stripe when ready. */
+export const SUBSCRIPTION_FLOW_PATH = '/subscribe' as const;
 
 export function LandingContentSections() {
   return (
@@ -256,33 +256,32 @@ export function LandingContentSections() {
       </SectionBlock>
 
       <section
-        id="waitlist"
+        id="subscribe"
         className="border-border-subtle scroll-mt-24 border-t bg-[linear-gradient(180deg,rgba(30,41,59,0.38),rgba(15,23,42,0.32))] px-4 py-12 md:px-6"
+        aria-labelledby="subscribe-heading"
       >
-        <div className="mx-auto max-w-5xl text-center">
+        <div className="mx-auto max-w-3xl text-center">
           <div className="bg-primary-500/12 text-primary-300 mx-auto flex size-11 items-center justify-center rounded-full border border-white/10">
             <Sparkles className="size-5" aria-hidden />
           </div>
-          <h2 className="font-heading text-foreground mt-4 text-2xl font-semibold tracking-tight sm:text-3xl">
-            Stay ahead of financial threats
+          <h2
+            id="subscribe-heading"
+            className="font-heading text-foreground mt-4 text-2xl font-semibold tracking-tight text-balance sm:text-3xl"
+          >
+            Subscribe Now to Unlock Full Intelligence Coverage
           </h2>
-          {/* <div className="mt-6">
-            <a
-              href={NEWSLETTER_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+          <div className="mt-8 flex flex-col items-center gap-3">
+            <Link
+              href={SUBSCRIPTION_FLOW_PATH}
+              prefetch={false}
               className={cn(
                 buttonVariants({ variant: 'default', size: 'md' }),
-                'inline-flex h-11 min-w-[220px] items-center justify-center py-0',
+                'inline-flex h-11 w-auto shrink-0 items-center justify-center px-6 py-0 text-sm font-semibold sm:px-8 sm:text-base',
               )}
             >
-              Subscribe to newsletter
-            </a>
-            <WaitlistForm
-              formId="waitlist-final"
-              microText="Be among the first to access real-time fraud intelligence."
-            />
-          </div> */}
+              Subscribe now
+            </Link>
+          </div>
         </div>
       </section>
     </>

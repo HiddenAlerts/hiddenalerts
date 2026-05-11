@@ -14,7 +14,7 @@ const items = [
   {
     question: 'How does access work?',
     answer:
-      'Join the waitlist and get early access as we roll out to initial users.',
+      'Subscribe for full intelligence coverage. Account signup and billing will be available as we complete the rollout.',
   },
 ] as const;
 

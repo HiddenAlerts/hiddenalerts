@@ -6,12 +6,15 @@ type LandingLogoProps = {
   className?: string;
   iconClassName?: string;
   textClassName?: string;
+  /** When true, appends ™ after the wordmark (e.g. footer attribution). */
+  trademark?: boolean;
 };
 
 export function LandingLogo({
   className,
   iconClassName,
   textClassName,
+  trademark = false,
 }: LandingLogoProps) {
   return (
     <span className={cn('inline-flex items-center gap-2', className)}>
@@ -37,6 +40,11 @@ export function LandingLogo({
         )}
       >
         HiddenAlerts
+        {trademark ? (
+          <span className="align-super ml-0.5 text-[0.65em] font-normal leading-none">
+            ™
+          </span>
+        ) : null}
       </span>
     </span>
   );
