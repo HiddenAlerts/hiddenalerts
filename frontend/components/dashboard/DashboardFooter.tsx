@@ -1,6 +1,6 @@
 import { dashboardFooterContent as c } from '@/content/legal/dashboard-footer';
 import Link from 'next/link';
-import { Fragment, type FC } from 'react';
+import { type FC, Fragment } from 'react';
 
 const companyEmphasisClass = 'text-foreground font-semibold';
 
@@ -12,6 +12,9 @@ const legalLinks = [
 
 const footerLinkClass =
   'text-muted-foreground hover:text-body underline decoration-transparent underline-offset-2 transition-[color,text-decoration-color] hover:decoration-body/40 focus-visible:text-body focus-visible:ring-primary-500 rounded-sm focus-visible:ring-2 focus-visible:outline-none';
+
+const contactLinkClass =
+  'text-body hover:text-foreground text-sm font-medium underline decoration-transparent underline-offset-2 transition-[color,text-decoration-color] hover:decoration-foreground/30 focus-visible:ring-primary-500 rounded-sm focus-visible:ring-2 focus-visible:outline-none';
 
 export const DashboardFooter: FC = () => {
   return (
@@ -31,7 +34,7 @@ export const DashboardFooter: FC = () => {
           <p>{c.descriptionLine2}</p>
         </div>
 
-        <div className="flex flex-col items-end gap-3 text-right sm:shrink-0">
+        <div className="flex flex-col items-end gap-6 text-right sm:shrink-0">
           <nav
             className="flex flex-wrap justify-end gap-y-1"
             aria-label="Legal links"
@@ -41,7 +44,7 @@ export const DashboardFooter: FC = () => {
                 {index > 0 ? (
                   <span
                     aria-hidden
-                    className="text-muted-foreground/40 select-none px-2 text-[0.65rem] leading-none"
+                    className="text-muted-foreground/40 px-2 text-[0.65rem] leading-none select-none"
                   >
                     ·
                   </span>
@@ -53,16 +56,29 @@ export const DashboardFooter: FC = () => {
             ))}
           </nav>
 
-          <p className="text-muted-foreground/75 max-w-full">
-            {c.lastUpdatedLabel} {c.lastUpdated}
-            <span aria-hidden className="text-muted-foreground/40 px-1.5">
-              ·
-            </span>
-            {c.copyrightPrefix}
-            <strong className={`${companyEmphasisClass} tracking-normal`}>
-              {c.copyrightCompany}
-            </strong>
-          </p>
+          <nav
+            className="flex flex-col items-end gap-2 sm:gap-6"
+            aria-label="Contact"
+          >
+            <div className="flex flex-col items-end">
+              <span className="text-muted text-semibold text-sm">Support</span>
+              <a
+                href="mailto:support@covertlytics.com"
+                className={contactLinkClass}
+              >
+                support@covertlytics.com
+              </a>
+            </div>
+            <div className="flex flex-col items-end">
+              <span className="text-muted text-semibold text-sm">Contact</span>
+              <a
+                href="mailto:contact@covertlytics.com"
+                className={contactLinkClass}
+              >
+                contact@covertlytics.com
+              </a>
+            </div>
+          </nav>
         </div>
       </div>
     </footer>
