@@ -50,24 +50,6 @@ export function LandingFooter() {
 
           <div className="flex flex-col items-center gap-6 md:items-end">
             <nav
-              className="flex flex-col items-center gap-2 sm:flex-row sm:gap-6 md:items-end"
-              aria-label="Contact"
-            >
-              <a
-                href="mailto:support@covertlytics.com"
-                className={contactLinkClass}
-              >
-                Support
-              </a>
-              <a
-                href="mailto:contact@covertlytics.com"
-                className={contactLinkClass}
-              >
-                Contact
-              </a>
-            </nav>
-
-            <nav
               className="flex flex-wrap items-center justify-center gap-y-1 md:justify-end"
               aria-label="Legal links"
             >
@@ -76,7 +58,7 @@ export function LandingFooter() {
                   {index > 0 ? (
                     <span
                       aria-hidden
-                      className="text-muted-foreground/40 select-none px-2 text-[0.65rem] leading-none"
+                      className="text-muted-foreground/40 px-2 text-[0.65rem] leading-none select-none"
                     >
                       ·
                     </span>
@@ -86,6 +68,33 @@ export function LandingFooter() {
                   </Link>
                 </Fragment>
               ))}
+            </nav>
+            <nav
+              className="flex flex-col items-center gap-2 sm:gap-6 md:items-end"
+              aria-label="Contact"
+            >
+              <div className="flex flex-col">
+                <span className="text-muted text-semibold text-sm">
+                  Support
+                </span>
+                <a
+                  href="mailto:support@covertlytics.com"
+                  className={contactLinkClass}
+                >
+                  support@covertlytics.com
+                </a>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-muted text-semibold text-sm">
+                  Contact
+                </span>
+                <a
+                  href="mailto:contact@covertlytics.com"
+                  className={contactLinkClass}
+                >
+                  contact@covertlytics.com
+                </a>
+              </div>
             </nav>
           </div>
         </div>
