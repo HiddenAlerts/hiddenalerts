@@ -1,44 +1,92 @@
+import { dashboardFooterContent as c } from '@/content/legal/dashboard-footer';
 import Link from 'next/link';
+import { Fragment } from 'react';
 
 import { LandingLogo } from './LandingLogo';
 
-export function LandingFooter() {
-  const year = new Date().getFullYear();
+const legalLinks = [
+  { href: c.linkDisclaimerHref, label: c.linkDisclaimerLabel },
+  { href: c.linkTermsHref, label: c.linkTermsLabel },
+  { href: c.linkPrivacyHref, label: c.linkPrivacyLabel },
+] as const;
 
+const contactLinkClass =
+  'text-body hover:text-foreground text-sm font-medium underline decoration-transparent underline-offset-2 transition-[color,text-decoration-color] hover:decoration-foreground/30 focus-visible:ring-primary-500 rounded-sm focus-visible:ring-2 focus-visible:outline-none';
+
+const legalLinkClass =
+  'text-muted-foreground hover:text-body text-sm underline decoration-transparent underline-offset-2 transition-[color,text-decoration-color] hover:decoration-body/40 focus-visible:ring-primary-500 rounded-sm focus-visible:ring-2 focus-visible:outline-none';
+
+export function LandingFooter() {
   return (
     <footer
       className="border-border-subtle bg-background-alt/95 mt-auto border-t"
       aria-label="Site footer"
     >
       <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-12 md:py-14">
-        <div className="flex flex-col gap-8 md:flex-row md:items-stretch md:justify-between md:gap-12 lg:gap-16">
-          <div className="flex flex-col items-center gap-4 md:items-start">
+        <div className="flex flex-col gap-10 md:flex-row md:justify-between md:gap-14 lg:gap-20">
+          <div className="flex max-w-md flex-col gap-3 text-center md:text-left">
             <Link
               href="/"
-              className="focus-visible:ring-primary-500 inline-flex w-fit rounded-md focus-visible:ring-2 focus-visible:outline-none"
+              className="focus-visible:ring-primary-500 mx-auto inline-flex w-fit rounded-md focus-visible:ring-2 focus-visible:outline-none md:mx-0"
             >
-              <LandingLogo />
+              <LandingLogo trademark />
             </Link>
-            <nav
-              className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 md:justify-start"
-              aria-label="Footer"
-            >
-              <Link
-                href="#waitlist"
-                className="text-body hover:text-foreground text-sm font-medium transition-colors"
-              >
-                Early access
-              </Link>
-            </nav>
-          </div>
-
-          <div className="border-border-subtle flex flex-col gap-3 border-t pt-8 md:max-w-md md:border-t-0 md:border-l md:pt-0 md:pl-10 lg:pl-14">
-            <p className="text-body text-center text-sm leading-snug md:text-left">
-              © {year} HiddenAlerts. All rights reserved.
+            <p className="text-body text-sm leading-relaxed">
+              Early warning intelligence and hidden risk monitoring.
             </p>
-            <p className="text-muted-foreground text-center text-sm leading-relaxed md:text-left">
+            <p className="text-body text-sm leading-relaxed">
               HiddenAlerts is a product of Covertlytics, LLC.
             </p>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              Signal-based intelligence derived from public data.
+            </p>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              For informational purposes only. Not financial or legal advice.
+            </p>
+            <p className="text-muted-foreground mt-1 text-sm">
+              © 2026 Covertlytics LLC
+            </p>
+          </div>
+
+          <div className="flex flex-col items-center gap-6 md:items-end">
+            <nav
+              className="flex flex-col items-center gap-2 sm:flex-row sm:gap-6 md:items-end"
+              aria-label="Contact"
+            >
+              <a
+                href="mailto:support@covertlytics.com"
+                className={contactLinkClass}
+              >
+                Support
+              </a>
+              <a
+                href="mailto:contact@covertlytics.com"
+                className={contactLinkClass}
+              >
+                Contact
+              </a>
+            </nav>
+
+            <nav
+              className="flex flex-wrap items-center justify-center gap-y-1 md:justify-end"
+              aria-label="Legal links"
+            >
+              {legalLinks.map((item, index) => (
+                <Fragment key={item.href}>
+                  {index > 0 ? (
+                    <span
+                      aria-hidden
+                      className="text-muted-foreground/40 select-none px-2 text-[0.65rem] leading-none"
+                    >
+                      ·
+                    </span>
+                  ) : null}
+                  <Link href={item.href} className={legalLinkClass}>
+                    {item.label}
+                  </Link>
+                </Fragment>
+              ))}
+            </nav>
           </div>
         </div>
       </div>
