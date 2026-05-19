@@ -697,8 +697,10 @@ curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit
 | **M3 — Public-feed cleanup** | Off-topic legacy alerts (CSAM / terrorism / weapons / drug-trafficking) reviewed and unpublished manually; `audit_offtopic_alerts.py` reports the live feed as clean; new pipeline guards prevent these from re-publishing | ✅ Complete |
 | **M3 — QA + VPS deployment handoff** | Backend deployed on VPS, smoke tests green, public endpoints verified live, frontend handoff docs updated | ✅ Complete |
 | **M3 — Risk score normalization (0–100)** | API responses now expose `signal_score` / `signal_score_total` / `score` on a 0–100 scale (normalized server-side from the internal 5–25 sum). No frontend change required. `risk_level` derived from the 0–100 value with Ken-approved bands (≥70 high, 40–69 medium, 1–39 low). Tier 1 auto-publish gate moved from ≥16 to ≥10 so Medium-and-above auto-publishes. Admin and client mappers re-derive `risk_level` so legacy stored values stay consistent with the displayed value. Admin Jinja templates updated to show 0–100 too. | ✅ Complete |
-| **M3 — Slice 5** | Full-text search across alerts | 🔄 Next |
-| **Future / Paused** | Email alerts (HIGH immediate + MEDIUM daily digest), weekly fraud intelligence report generation, subscriber login + gating for the public frontend | Paused — out of scope for current MVP; revisit after search ships |
+| **M3 — Slice 5** | Full-text search across alerts | ✅ Complete |
+| **Auth/Payment Phase 1 — Slice 1** | DB + config foundation for Supabase Auth + Stripe subscriptions: new `subscriber_profiles`, `subscriptions`, `stripe_webhook_events` tables (migration `0007`); new Supabase / Stripe / billing settings on `app/config.py` (all secrets default to empty); pure `has_active_subscription_access` helper encoding the access matrix; Pydantic schemas for `/subscriber/me` and `/billing/*` ready for later slices. No endpoints exposed yet; no public behavior changed. | ✅ Complete |
+| **Auth/Payment Phase 1 — Slice 2+** | Supabase JWT validation, Stripe checkout / portal / webhook endpoints, `/api/v1/subscriber/*` paid feed, access guard, frontend integration | 🔄 Next |
+| **Future / Paused** | Email alerts (HIGH immediate + MEDIUM daily digest), weekly fraud intelligence report generation | Paused — revisit after Auth/Payment ships |
 
 ---
 
