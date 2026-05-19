@@ -3,6 +3,11 @@
 Supports HTTP-only cookie auth (primary) and Authorization: Bearer token (fallback).
 JWT stored in HTTP-only cookie ('access_token') for browser sessions.
 Bearer token accepted for API integrations and cross-domain frontend use.
+
+This module is the admin/subscriber-user auth path. The Supabase auth path
+(used by paid subscribers in Authentication & Payment Phase 1) lives in
+``app.auth.supabase`` and is intentionally separate so admin auth can keep
+its current behavior unchanged.
 """
 from __future__ import annotations
 
