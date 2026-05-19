@@ -52,9 +52,7 @@ app = FastAPI(
 # slices) because Auth/Payment Phase 1 Slice 3 ships POST billing endpoints.
 # Subscriber auth uses Authorization: Bearer (Supabase token); no cookies →
 # allow_credentials stays at its False default.
-_cors_origins = (
-    [settings.frontend_base_url] if settings.frontend_base_url else ["*"]
-)
+_cors_origins = [settings.frontend_base_url.rstrip("/")] if settings.frontend_base_url else ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
