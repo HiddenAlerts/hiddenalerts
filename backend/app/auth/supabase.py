@@ -38,6 +38,12 @@ log = logging.getLogger(__name__)
 JWKS_CACHE_TTL_SECONDS = 600
 JWKS_FETCH_TIMEOUT_SECONDS = 5.0
 
+# Algorithm allowlist — Supabase asymmetric JWTs use RS256 or ES256. We refuse
+# anything else (in particular HS256, which would let a token claim its own
+# verification scheme and pair with a key that was never intended for that
+# algorithm).
+ALLOWED_JWT_ALGORITHMS = frozenset({"RS256", "ES256"})
+
 _jwks_cache: dict | None = None
 _jwks_cache_expires_at: float = 0.0
 _jwks_lock = asyncio.Lock()
@@ -192,6 +198,13 @@ async def validate_supabase_token(token: str) -> dict:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid_token",
+        )
+    if algorithm not in ALLOWED_JWT_ALGORITHMS:
+        # Don't pass an attacker-controlled algorithm into jwt.decode — reject
+        # before we even look at the signature.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="unsupported_token_algorithm",
         )
 
     jwks = await get_jwks()

@@ -47,13 +47,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Allow any origin for the public read-only feed (no credentials involved).
-# Tighten allow_origins to the frontend domain once it's fixed.
-# TODO: Later tighten the allow_origin to a specific domain.
+# CORS: lock to the frontend origin when ``FRONTEND_BASE_URL`` is configured,
+# else stay open for the MVP public feed. POST is enabled here (not earlier
+# slices) because Auth/Payment Phase 1 Slice 3 ships POST billing endpoints.
+# Subscriber auth uses Authorization: Bearer (Supabase token); no cookies →
+# allow_credentials stays at its False default.
+_cors_origins = (
+    [settings.frontend_base_url] if settings.frontend_base_url else ["*"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["GET", "OPTIONS"],
+    allow_origins=_cors_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -71,6 +76,7 @@ from app.api.dashboard import router as dashboard_router  # noqa: E402
 from app.api.public_alerts import router as public_alerts_router  # noqa: E402
 from app.api.search import router as search_router  # noqa: E402
 from app.api.subscriber import router as subscriber_router  # noqa: E402
+from app.api.billing import router as billing_router  # noqa: E402
 
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(sources_router, prefix="/api/v1")
@@ -79,6 +85,7 @@ app.include_router(alerts_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(client_alerts_router, prefix="/api/v1")
 app.include_router(subscriber_router, prefix="/api/v1")  # Supabase-authenticated paid feed
+app.include_router(billing_router, prefix="/api/v1")  # Stripe checkout / portal / status
 app.include_router(dashboard_router)  # No prefix — /login, /dashboard, /logout routes
 app.include_router(public_alerts_router)  # No prefix — /api/alerts public feed
 app.include_router(search_router)  # No prefix — /api/search/alerts public search

@@ -232,6 +232,54 @@ class TestValidateSupabaseToken:
         assert exc.value.status_code == 401
         assert exc.value.detail == "missing_token"
 
+    async def test_hs256_algorithm_rejected(self, rsa_keypair):
+        # A token signed with HS256 (or claiming HS256 in its header) must be
+        # rejected before signature verification — we only allow asymmetric
+        # algorithms via the JWKS flow.
+        hs256_token = jwt.encode(
+            {
+                "sub": "supabase-user-123",
+                "aud": "authenticated",
+                "iss": "https://test.supabase.co/auth/v1",
+                "exp": int(
+                    (datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()
+                ),
+            },
+            "shared-secret",
+            algorithm="HS256",
+        )
+        with _patch_jwks(rsa_keypair):
+            with pytest.raises(HTTPException) as exc:
+                await supabase_auth.validate_supabase_token(hs256_token)
+        assert exc.value.status_code == 401
+        assert exc.value.detail == "unsupported_token_algorithm"
+
+    async def test_none_algorithm_rejected(self, rsa_keypair):
+        # ``alg: "none"`` is the canonical JWT downgrade attack — must be rejected.
+        import json
+
+        header = base64.urlsafe_b64encode(
+            json.dumps({"alg": "none", "typ": "JWT"}).encode()
+        ).decode().rstrip("=")
+        payload = base64.urlsafe_b64encode(
+            json.dumps(
+                {
+                    "sub": "x",
+                    "aud": "authenticated",
+                    "iss": "https://test.supabase.co/auth/v1",
+                    "exp": int(
+                        (datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()
+                    ),
+                }
+            ).encode()
+        ).decode().rstrip("=")
+        none_token = f"{header}.{payload}."
+        with _patch_jwks(rsa_keypair):
+            with pytest.raises(HTTPException) as exc:
+                await supabase_auth.validate_supabase_token(none_token)
+        assert exc.value.status_code == 401
+        assert exc.value.detail == "unsupported_token_algorithm"
+
     async def test_jwks_fetch_failure_returns_401(self, rsa_keypair):
         """Real httpx error must be translated to a 401 inside _fetch_jwks."""
         import httpx
