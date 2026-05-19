@@ -55,5 +55,30 @@ class Settings(BaseSettings):
     ai_max_retries: int = 3
     ai_retry_delay_seconds: float = 2.0
 
+    # Supabase Auth (Auth/Payment Phase 1)
+    supabase_project_url: str = ""
+    supabase_jwks_url: str = ""
+    supabase_jwt_audience: str = "authenticated"
+    supabase_issuer: str = ""
+
+    # Stripe (Auth/Payment Phase 1)
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_monthly_price_id: str = ""
+    stripe_annual_price_id: str = ""
+    stripe_checkout_success_url: str = ""
+    stripe_checkout_cancel_url: str = ""
+    stripe_portal_return_url: str = ""
+
+    # Frontend (Auth/Payment Phase 1)
+    frontend_base_url: str = ""
+
+    # Access control tuning (Auth/Payment Phase 1)
+    subscription_access_grace_seconds: int = 0
+
+    # Rate limiting (Auth/Payment Phase 1)
+    rate_limit_enabled: bool = False
+    rate_limit_requests_per_minute: int = 60
+
 
 settings = Settings()
