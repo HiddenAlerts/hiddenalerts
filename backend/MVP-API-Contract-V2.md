@@ -453,7 +453,7 @@ curl http://localhost:8000/api/alerts/stats
 ### 0.5 GET /api/search/alerts — Search Published Alerts *(NEW)*
 
 ```
-GET /api/search/alerts?q=binance&min_score=40&limit=50&group_limit=20
+GET /api/search/alerts?q=Dimitriy&min_score=0&limit=50&group_limit=20
 ```
 
 **No authentication required.**
@@ -468,62 +468,94 @@ Free-text search across published alerts only. Returns entity-grouped results pl
 | `limit` | int | no | `50` | Cap on the top-level `alerts` list. Values `> 100` are **clamped** to 100. Values `< 1` are rejected with 422. |
 | `group_limit` | int | no | `20` | Cap on alerts inside each group. Values `> 50` are **clamped** to 50. Values `< 1` are rejected with 422. |
 
-**Response `200 OK`:**
+**Example A — entity match (real production response from `q=Dimitriy`):**
+
+The query matches `Dimitriy Nezhinskiy` in the AI's parsed entity list, so the
+result lands in an `entity` group and `matched_entity` is populated.
+
 ```json
 {
-  "query": "binance",
-  "normalized_query": "binance",
-  "total_alerts": 7,
-  "group_count": 2,
+  "query": "Dimitriy",
+  "normalized_query": "dimitriy",
+  "total_alerts": 1,
+  "group_count": 1,
   "groups": [
     {
-      "entity": "binance",
+      "entity": "dimitriy nezhinskiy",
       "group_type": "entity",
-      "alertCount": 5,
-      "sourceCount": 3,
-      "sources": [
-        "DOJ Press Releases",
-        "FTC RSS Feeds",
-        "SEC Press Releases"
-      ],
-      "earliest": "2025-11-12T10:00:00Z",
-      "latest": "2026-04-28T15:30:00Z",
+      "alertCount": 1,
+      "sourceCount": 1,
+      "sources": ["FBI National Press Releases"],
+      "earliest": "2025-02-07T12:00:00Z",
+      "latest": "2025-02-07T12:00:00Z",
       "alerts": [
         {
-          "id": 42,
-          "title": "SEC Charges Binance in Crypto Fraud Case",
-          "summary": "Short alert summary here.",
-          "category": "Cryptocurrency Fraud",
-          "risk_level": "high",
-          "signal_score": 84,
-          "source_name": "SEC Press Releases",
-          "source_url": "https://www.sec.gov/news/press-release/2026-42",
-          "source_published_at": "2026-04-28T15:30:00Z",
-          "published_at": "2026-04-28T16:00:00Z",
-          "matched_entity": "binance"
+          "id": 324,
+          "title": "FBI Announces Nationwide Crackdown on South American Theft Groups",
+          "summary": "The FBI announced a nationwide crackdown on South American Theft Groups (SATGs) involved in a series of burglaries targeting professional athletes' homes. The operation led to the arrest of Dimitriy Nezhinskiy and Juan Villar in Manhattan for running a major fencing operation for stolen goods. ...",
+          "category": "Cybercrime",
+          "risk_level": "medium",
+          "signal_score": 68,
+          "source_name": "FBI National Press Releases",
+          "source_url": "https://www.fbi.gov/news/press-releases/fbi-announces-nationwide-crackdown-on-south-american-theft-groups",
+          "source_published_at": "2025-02-07T12:00:00Z",
+          "published_at": "2026-04-22T20:02:53.432056Z",
+          "matched_entity": "dimitriy nezhinskiy"
         }
       ]
-    },
+    }
+  ],
+  "alerts": [
     {
-      "entity": "binance",
+      "id": 324,
+      "title": "FBI Announces Nationwide Crackdown on South American Theft Groups",
+      "summary": "The FBI announced a nationwide crackdown on South American Theft Groups (SATGs) involved in a series of burglaries targeting professional athletes' homes. ...",
+      "category": "Cybercrime",
+      "risk_level": "medium",
+      "signal_score": 68,
+      "source_name": "FBI National Press Releases",
+      "source_url": "https://www.fbi.gov/news/press-releases/fbi-announces-nationwide-crackdown-on-south-american-theft-groups",
+      "source_published_at": "2025-02-07T12:00:00Z",
+      "published_at": "2026-04-22T20:02:53.432056Z",
+      "matched_entity": "dimitriy nezhinskiy"
+    }
+  ]
+}
+```
+
+**Example B — keyword fallback (real production response from `q=South American Theft Groups`):**
+
+Same alert, but the query phrase is *not* one of the AI's extracted entity
+names — it appears only in the title/summary. The alert lands in a `keyword`
+fallback group and `matched_entity` is `null`.
+
+```json
+{
+  "query": "South American Theft Groups",
+  "normalized_query": "south american theft groups",
+  "total_alerts": 1,
+  "group_count": 1,
+  "groups": [
+    {
+      "entity": "south american theft groups",
       "group_type": "keyword",
-      "alertCount": 2,
+      "alertCount": 1,
       "sourceCount": 1,
-      "sources": ["KrebsOnSecurity"],
-      "earliest": "2026-02-10T09:00:00Z",
-      "latest": "2026-03-04T11:00:00Z",
+      "sources": ["FBI National Press Releases"],
+      "earliest": "2025-02-07T12:00:00Z",
+      "latest": "2025-02-07T12:00:00Z",
       "alerts": [
         {
-          "id": 51,
-          "title": "Binance scandal hits market",
+          "id": 324,
+          "title": "FBI Announces Nationwide Crackdown on South American Theft Groups",
           "summary": "...",
           "category": "Cybercrime",
           "risk_level": "medium",
-          "signal_score": 52,
-          "source_name": "KrebsOnSecurity",
-          "source_url": "https://krebsonsecurity.com/2026/03/...",
-          "source_published_at": "2026-03-04T11:00:00Z",
-          "published_at": "2026-03-04T12:00:00Z",
+          "signal_score": 68,
+          "source_name": "FBI National Press Releases",
+          "source_url": "https://www.fbi.gov/news/press-releases/fbi-announces-nationwide-crackdown-on-south-american-theft-groups",
+          "source_published_at": "2025-02-07T12:00:00Z",
+          "published_at": "2026-04-22T20:02:53.432056Z",
           "matched_entity": null
         }
       ]
@@ -531,21 +563,26 @@ Free-text search across published alerts only. Returns entity-grouped results pl
   ],
   "alerts": [
     {
-      "id": 42,
-      "title": "SEC Charges Binance in Crypto Fraud Case",
-      "summary": "Short alert summary here.",
-      "category": "Cryptocurrency Fraud",
-      "risk_level": "high",
-      "signal_score": 84,
-      "source_name": "SEC Press Releases",
-      "source_url": "https://www.sec.gov/news/press-release/2026-42",
-      "source_published_at": "2026-04-28T15:30:00Z",
-      "published_at": "2026-04-28T16:00:00Z",
-      "matched_entity": "binance"
+      "id": 324,
+      "title": "FBI Announces Nationwide Crackdown on South American Theft Groups",
+      "summary": "...",
+      "category": "Cybercrime",
+      "risk_level": "medium",
+      "signal_score": 68,
+      "source_name": "FBI National Press Releases",
+      "source_url": "https://www.fbi.gov/news/press-releases/fbi-announces-nationwide-crackdown-on-south-american-theft-groups",
+      "source_published_at": "2025-02-07T12:00:00Z",
+      "published_at": "2026-04-22T20:02:53.432056Z",
+      "matched_entity": null
     }
   ]
 }
 ```
+
+> Frontend hint: render the entity name in `groups[*].entity` as the group
+> heading. When `group_type == "keyword"`, label it something like
+> "Other matches" or echo `normalized_query` directly so the user understands
+> these matched on text rather than a known company / person.
 
 **Empty Response (no matches):**
 ```json
@@ -625,27 +662,38 @@ Free-text search across published alerts only. Returns entity-grouped results pl
 **Frontend-safe — never returned:**
 review history · score-factor breakdowns · raw `entities_json` · `ai_model` · `victim_scale_raw` · `financial_impact_estimate` · `is_published` · `is_relevant` · `matched_keywords` · `published_by_user_id` · raw HTML / text / hashes.
 
-**Quick Tests:**
+**Quick Tests (verified against production):**
 ```bash
-# Basic search
-curl "http://localhost:8000/api/search/alerts?q=binance" | python -m json.tool
+# Entity match — produces an entity group with matched_entity populated.
+curl -s "https://hiddenalerts.com/api/search/alerts?q=Dimitriy" | python3 -m json.tool
 
-# Empty query is rejected
-curl -s -o /dev/null -w "%{http_code}\n" "http://localhost:8000/api/search/alerts?q="
+# Same alert, but the query phrase is not in the AI's parsed entities.
+# Lands in a keyword fallback group; matched_entity is null.
+curl -s -G --data-urlencode "q=South American Theft Groups" \
+     "https://hiddenalerts.com/api/search/alerts" | python3 -m json.tool
+
+# Empty query is rejected.
+curl -s -o /dev/null -w "%{http_code}\n" "https://hiddenalerts.com/api/search/alerts?q="
 # expect: 422
 
-# Higher-risk filter
-curl "http://localhost:8000/api/search/alerts?q=fraud&min_score=70" | python -m json.tool
+# Higher-risk filter (only alerts with normalized score ≥ 70).
+curl -s "https://hiddenalerts.com/api/search/alerts?q=fraud&min_score=70" | python3 -m json.tool
 
-# Unknown query → empty envelope
-curl "http://localhost:8000/api/search/alerts?q=zzunknownzz" | python -m json.tool
+# Unknown query → empty envelope.
+curl -s "https://hiddenalerts.com/api/search/alerts?q=zzunknownzz" | python3 -m json.tool
 ```
+
+> **Encoding note:** spaces and special characters in `q` must be URL-encoded.
+> Either use `%20` (e.g. `q=Operation%20Level%20Up`) or pass `-G --data-urlencode "q=..."`
+> as in the SATGs example above. `encodeURIComponent` / `URLSearchParams` on the
+> frontend handles this automatically.
 
 **Notes for Hasnain:**
 - The API is unauthenticated for this MVP. Do not gate the search UI behind login.
 - `signal_score` is already on the 0–100 scale — do not divide or multiply on the frontend.
 - Prefer `groups[*].alerts` for an entity-clustered view, and the top-level `alerts` for "show all matches" / pagination-style displays.
 - Display the top entity groups first (entity-first ordering is enforced by the API). The keyword fallback group is appended last.
+- For the keyword fallback group's heading, label it something like "Other matches" rather than echoing the entity field literally — `entity` there is just the normalized query string.
 - An alert may appear in multiple entity groups when it has several matching tags — that's intentional. Use `id` for client-side dedup if you need a single "list view".
 - Multi-word search is a literal phrase. If a user types `binance ftx`, suggest a UX hint or perform two separate searches client-side.
 
