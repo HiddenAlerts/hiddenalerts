@@ -366,6 +366,85 @@ class TestSubscriberStats:
 
 
 @pytest.mark.asyncio
+class TestGraceWindowConsistency:
+    """All access-reporting endpoints must agree under a nonzero grace window.
+
+    Regression for the bug where /me, /access, /billing/status decided access
+    without the grace window while the content guard applied it — a canceled
+    subscription inside grace could return 200 content but "locked" status.
+    """
+
+    async def test_me_access_billing_and_content_agree_inside_grace(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        sub_id = f"grace-agree-{uuid.uuid4()}"
+        # Canceled, period ended 30s ago → only a nonzero grace grants access.
+        await _seed_profile_with_subscription(
+            db_session,
+            sub_id=sub_id,
+            status="canceled",
+            current_period_end=datetime.now(timezone.utc) - timedelta(seconds=30),
+            cancel_at_period_end=True,
+        )
+        original = settings.subscription_access_grace_seconds
+        settings.subscription_access_grace_seconds = 3600
+        try:
+            with _patch_validator(_claims(sub=sub_id)):
+                me = await client.get("/api/v1/subscriber/me", headers=_AUTH)
+                access = await client.get(
+                    "/api/v1/subscriber/access", headers=_AUTH
+                )
+                billing = await client.get(
+                    "/api/v1/billing/status", headers=_AUTH
+                )
+                content = await client.get(
+                    "/api/v1/subscriber/alerts", headers=_AUTH
+                )
+        finally:
+            settings.subscription_access_grace_seconds = original
+
+        # Every endpoint must agree the user HAS access during the grace window.
+        assert me.json()["has_active_subscription"] is True
+        assert me.json()["access_level"] == "subscriber"
+        assert access.json()["can_access_full_content"] is True
+        assert billing.json()["has_active_access"] is True
+        assert content.status_code == 200
+
+    async def test_all_agree_when_grace_too_small(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        sub_id = f"grace-deny-{uuid.uuid4()}"
+        await _seed_profile_with_subscription(
+            db_session,
+            sub_id=sub_id,
+            status="canceled",
+            current_period_end=datetime.now(timezone.utc) - timedelta(seconds=600),
+            cancel_at_period_end=True,
+        )
+        original = settings.subscription_access_grace_seconds
+        settings.subscription_access_grace_seconds = 60  # too small to cover 600s
+        try:
+            with _patch_validator(_claims(sub=sub_id)):
+                me = await client.get("/api/v1/subscriber/me", headers=_AUTH)
+                access = await client.get(
+                    "/api/v1/subscriber/access", headers=_AUTH
+                )
+                billing = await client.get(
+                    "/api/v1/billing/status", headers=_AUTH
+                )
+                content = await client.get(
+                    "/api/v1/subscriber/alerts", headers=_AUTH
+                )
+        finally:
+            settings.subscription_access_grace_seconds = original
+
+        assert me.json()["has_active_subscription"] is False
+        assert access.json()["can_access_full_content"] is False
+        assert billing.json()["has_active_access"] is False
+        assert content.status_code == 403
+
+
+@pytest.mark.asyncio
 class TestSubscriberSearch:
     async def test_published_match_present_and_shape_matches_public(
         self, client: AsyncClient, db_session: AsyncSession
