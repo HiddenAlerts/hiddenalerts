@@ -513,20 +513,19 @@ class TestBillingStatusEndpoint:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 class TestCorsAllowsPost:
-    async def test_options_preflight_lists_post_for_billing_checkout(
-        self, client: AsyncClient
-    ):
-        resp = await client.options(
-            "/api/v1/billing/checkout",
-            headers={
-                "Origin": "https://app.example",
-                "Access-Control-Request-Method": "POST",
-                "Access-Control-Request-Headers": "authorization,content-type",
-            },
-        )
-        # Starlette returns 200 for a CORS preflight when the request is allowed.
-        assert resp.status_code in (200, 204)
-        allow_methods = resp.headers.get("access-control-allow-methods", "")
+    def test_cors_middleware_allows_post(self):
+        # Env-independent: assert the configured CORS middleware permits POST,
+        # regardless of whether FRONTEND_BASE_URL locks allow_origins to a
+        # specific domain or leaves it as "*". (A live preflight would depend on
+        # the request Origin matching the configured origin, which varies by env.)
+        from starlette.middleware.cors import CORSMiddleware
+
+        from app.main import app
+
+        cors = [mw for mw in app.user_middleware if mw.cls is CORSMiddleware]
+        assert cors, "CORSMiddleware is not configured"
+        allow_methods = cors[0].kwargs.get("allow_methods", [])
         assert "POST" in allow_methods
+        assert "GET" in allow_methods
+        assert "OPTIONS" in allow_methods

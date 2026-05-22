@@ -75,6 +75,7 @@ from app.api.public_alerts import router as public_alerts_router  # noqa: E402
 from app.api.search import router as search_router  # noqa: E402
 from app.api.subscriber import router as subscriber_router  # noqa: E402
 from app.api.billing import router as billing_router  # noqa: E402
+from app.api.stripe_webhooks import router as stripe_webhooks_router  # noqa: E402
 
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(sources_router, prefix="/api/v1")
@@ -84,6 +85,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(client_alerts_router, prefix="/api/v1")
 app.include_router(subscriber_router, prefix="/api/v1")  # Supabase-authenticated paid feed
 app.include_router(billing_router, prefix="/api/v1")  # Stripe checkout / portal / status
+app.include_router(stripe_webhooks_router, prefix="/api/v1")  # Stripe webhook (no auth; signature-verified)
 app.include_router(dashboard_router)  # No prefix — /login, /dashboard, /logout routes
 app.include_router(public_alerts_router)  # No prefix — /api/alerts public feed
 app.include_router(search_router)  # No prefix — /api/search/alerts public search
