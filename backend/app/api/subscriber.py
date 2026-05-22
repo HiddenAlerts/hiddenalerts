@@ -24,6 +24,7 @@ from app.auth.subscriber_access import (
     require_active_subscription,
 )
 from app.auth.supabase import SubscriberContext, get_current_subscriber
+from app.config import settings
 from app.database import get_db
 from app.models.subscription import Subscription
 from app.schemas.alert import (
@@ -78,7 +79,9 @@ async def get_subscriber_me(
     sub_payload: SubscriptionMeRead | None = None
     if subscription is not None:
         has_access = has_active_subscription_access(
-            subscription.status, subscription.current_period_end
+            subscription.status,
+            subscription.current_period_end,
+            grace_seconds=settings.subscription_access_grace_seconds,
         )
         sub_payload = SubscriptionMeRead.model_validate(subscription)
 
@@ -109,7 +112,9 @@ async def get_subscriber_access(
             reason="subscription_required",
         )
     has_access = has_active_subscription_access(
-        subscription.status, subscription.current_period_end
+        subscription.status,
+        subscription.current_period_end,
+        grace_seconds=settings.subscription_access_grace_seconds,
     )
     return SubscriberAccessResponse(
         can_access_full_content=has_access,

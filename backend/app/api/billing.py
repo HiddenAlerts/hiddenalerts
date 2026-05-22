@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.supabase import SubscriberContext, get_current_subscriber
+from app.config import settings
 from app.database import get_db
 from app.models.subscription import Subscription
 from app.schemas.billing import (
@@ -97,7 +98,9 @@ async def get_billing_status(
         )
     return BillingStatusResponse(
         has_active_access=has_active_subscription_access(
-            subscription.status, subscription.current_period_end
+            subscription.status,
+            subscription.current_period_end,
+            grace_seconds=settings.subscription_access_grace_seconds,
         ),
         subscription_status=subscription.status,
         plan_type=subscription.plan_type,
