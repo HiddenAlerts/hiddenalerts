@@ -152,40 +152,17 @@ def _to_search_item(
 # ---------------------------------------------------------------------------
 
 
-@router.get(
-    "/alerts",
-    response_model=SearchResponse,
-    response_model_by_alias=True,
-)
-async def search_alerts(
-    q: str = Query(..., description="Search text (required, trimmed)."),
-    min_score: int = Query(
-        _MIN_SCORE_DEFAULT,
-        description=(
-            "Minimum normalized signal score (0–100). Default 0. Values "
-            "outside 0–100 are clamped."
-        ),
-    ),
-    limit: int = Query(
-        _LIMIT_DEFAULT,
-        ge=1,
-        description=(
-            "Cap on the full alerts list. Default 50, max 100. Values above "
-            "max are clamped; values <1 are rejected."
-        ),
-    ),
-    group_limit: int = Query(
-        _GROUP_LIMIT_DEFAULT,
-        ge=1,
-        description=(
-            "Cap on alerts inside each group. Default 20, max 50. Values "
-            "above max are clamped; values <1 are rejected."
-        ),
-    ),
-    db: AsyncSession = Depends(get_db),
+async def search_alerts_impl(
+    db: AsyncSession,
+    q: str,
+    min_score: int,
+    limit: int,
+    group_limit: int,
 ) -> SearchResponse:
-    """Search published alerts; group by extracted entities, fallback to keyword.
+    """Shared implementation for published-alert search.
 
+    Used by public ``GET /api/search/alerts`` and subscriber
+    ``GET /api/v1/subscriber/search/alerts`` so they behave identically.
     Frontend-safe response shape — never exposes review history, score factor
     breakdowns, raw entities_json, ai_model, or other admin metadata.
     """
@@ -340,3 +317,39 @@ async def search_alerts(
         groups=groups,
         alerts=sorted_items[:limit_eff],
     )
+
+
+@router.get(
+    "/alerts",
+    response_model=SearchResponse,
+    response_model_by_alias=True,
+)
+async def search_alerts(
+    q: str = Query(..., description="Search text (required, trimmed)."),
+    min_score: int = Query(
+        _MIN_SCORE_DEFAULT,
+        description=(
+            "Minimum normalized signal score (0–100). Default 0. Values "
+            "outside 0–100 are clamped."
+        ),
+    ),
+    limit: int = Query(
+        _LIMIT_DEFAULT,
+        ge=1,
+        description=(
+            "Cap on the full alerts list. Default 50, max 100. Values above "
+            "max are clamped; values <1 are rejected."
+        ),
+    ),
+    group_limit: int = Query(
+        _GROUP_LIMIT_DEFAULT,
+        ge=1,
+        description=(
+            "Cap on alerts inside each group. Default 20, max 50. Values "
+            "above max are clamped; values <1 are rejected."
+        ),
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> SearchResponse:
+    """Search published alerts; group by extracted entities, fallback to keyword."""
+    return await search_alerts_impl(db, q, min_score, limit, group_limit)
