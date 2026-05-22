@@ -739,20 +739,18 @@ async def _to_public_detail(
 # ---------------------------------------------------------------------------
 
 
-@router.get("", response_model=PublicAlertsResponse)
-async def list_public_alerts(
-    risk_level: str | None = Query(None, description="Filter: low, medium, high"),
-    category: str | None = Query(None, description="Filter by category (exact match)"),
-    source: str | None = Query(None, description="Partial source name search"),
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
+async def list_published_alerts_impl(
+    db: AsyncSession,
+    risk_level: str | None,
+    category: str | None,
+    source: str | None,
+    limit: int,
+    offset: int,
 ) -> PublicAlertsResponse:
-    """Return published alerts for the public frontend feed.
+    """Shared implementation for the published-alerts list feed.
 
-    No authentication required. Only published alerts are ever returned.
-    Sorted newest-published first; unpublished-but-published_at=null rows
-    fall safely to the end via nullslast ordering.
+    Used by the public ``GET /api/alerts`` and the subscriber
+    ``GET /api/v1/subscriber/alerts`` routes so they behave identically.
     """
     stmt = _published_base_stmt().order_by(
         ProcessedAlert.published_at.desc().nullslast(),
@@ -797,19 +795,31 @@ async def list_public_alerts(
     return PublicAlertsResponse(alerts=alerts)
 
 
-@router.get("/stats", response_model=PublicAlertStatsResponse)
-async def get_public_stats(
+@router.get("", response_model=PublicAlertsResponse)
+async def list_public_alerts(
+    risk_level: str | None = Query(None, description="Filter: low, medium, high"),
+    category: str | None = Query(None, description="Filter by category (exact match)"),
+    source: str | None = Query(None, description="Partial source name search"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-) -> PublicAlertStatsResponse:
-    """Return aggregate counts for published alerts only.
+) -> PublicAlertsResponse:
+    """Return published alerts for the public frontend feed.
 
-    No authentication required.
+    No authentication required. Only published alerts are ever returned.
+    Sorted newest-published first; unpublished-but-published_at=null rows
+    fall safely to the end via nullslast ordering.
+    """
+    return await list_published_alerts_impl(
+        db, risk_level, category, source, limit, offset
+    )
 
-    Returns:
-    - total_alerts: total published alert count
-    - high_count / medium_count / low_count: counts by risk level
-    - category_breakdown: per-primary_category counts, ordered by count DESC
-      then category ASC. Rows with null primary_category are excluded.
+
+async def published_stats_impl(db: AsyncSession) -> PublicAlertStatsResponse:
+    """Shared implementation for published-alert aggregate stats.
+
+    Used by public ``GET /api/alerts/stats`` and subscriber
+    ``GET /api/v1/subscriber/alerts/stats``.
     """
     # Counts are derived from signal_score_total (M3 thresholds), matching how
     # risk_level is displayed on list/detail. Alerts with null scores are
@@ -872,10 +882,24 @@ async def get_public_stats(
     )
 
 
-@router.get("/top", response_model=PublicAlertsResponse)
-async def list_top_alerts(
+@router.get("/stats", response_model=PublicAlertStatsResponse)
+async def get_public_stats(
     db: AsyncSession = Depends(get_db),
-) -> PublicAlertsResponse:
+) -> PublicAlertStatsResponse:
+    """Return aggregate counts for published alerts only.
+
+    No authentication required.
+
+    Returns:
+    - total_alerts: total published alert count
+    - high_count / medium_count / low_count: counts by risk level
+    - category_breakdown: per-primary_category counts, ordered by count DESC
+      then category ASC. Rows with null primary_category are excluded.
+    """
+    return await published_stats_impl(db)
+
+
+async def top_alerts_impl(db: AsyncSession) -> PublicAlertsResponse:
     """Curated top alerts for the dashboard hero panel.
 
     Public, no auth. At most 3 published alerts with signal_score_total >= 15
@@ -917,6 +941,35 @@ async def list_top_alerts(
     return PublicAlertsResponse(alerts=[_to_public_read(a) for a in selected])
 
 
+@router.get("/top", response_model=PublicAlertsResponse)
+async def list_top_alerts(
+    db: AsyncSession = Depends(get_db),
+) -> PublicAlertsResponse:
+    """Public curated top alerts. See ``top_alerts_impl`` for behavior."""
+    return await top_alerts_impl(db)
+
+
+async def published_alert_detail_impl(
+    db: AsyncSession, alert_id: int
+) -> PublicAlertDetail:
+    """Shared implementation for enriched single published-alert detail.
+
+    Used by public ``GET /api/alerts/{id}`` and subscriber
+    ``GET /api/v1/subscriber/alerts/{alert_id}``. Returns 404 if the alert does
+    not exist OR is not published (the two cases are indistinguishable).
+    """
+    result = await db.execute(
+        _detail_stmt().where(ProcessedAlert.id == alert_id)
+    )
+    alert = result.scalar_one_or_none()
+    if alert is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert not found",
+        )
+    return await _to_public_detail(db, alert)
+
+
 @router.get(
     "/{alert_id}",
     response_model=PublicAlertDetail,
@@ -938,13 +991,4 @@ async def get_public_alert(
     related_signals, why_it_matters, key_intelligence, affected_group, etc.)
     are omitted from the JSON when their underlying data is empty.
     """
-    result = await db.execute(
-        _detail_stmt().where(ProcessedAlert.id == alert_id)
-    )
-    alert = result.scalar_one_or_none()
-    if alert is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Alert not found",
-        )
-    return await _to_public_detail(db, alert)
+    return await published_alert_detail_impl(db, alert_id)
