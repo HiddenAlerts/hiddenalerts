@@ -58,4 +58,14 @@ async def stripe_webhook(
             detail="invalid_stripe_signature",
         )
 
+    # Defensive: normalize Stripe SDK objects → plain dict at the route boundary
+    # too. The service also normalizes, but doing it here keeps log lines + any
+    # future route-level inspection working uniformly. Safe for plain dicts.
+    event = stripe_webhook_service.stripe_object_to_dict(event)
+    event_id = event.get("id") if isinstance(event, dict) else None
+    event_type = event.get("type") if isinstance(event, dict) else None
+    log.info(
+        "stripe webhook received: event_id=%s event_type=%s", event_id, event_type
+    )
+
     return await stripe_webhook_service.process_stripe_event(db, event)
