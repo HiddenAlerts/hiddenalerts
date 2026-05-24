@@ -11,7 +11,7 @@ class StripeWebhookEvent(Base):
     __tablename__ = "stripe_webhook_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    stripe_event_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    stripe_event_id: Mapped[str] = mapped_column(String(255), nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     processed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
