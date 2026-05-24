@@ -239,8 +239,13 @@ async def create_checkout_session(
     *,
     idempotency_key: str | None = None,
     customer_idempotency_key: str | None = None,
-) -> str:
-    """Create a Stripe Checkout Session in subscription mode and return its URL.
+) -> dict[str, str | None]:
+    """Create a Stripe Checkout Session in subscription mode.
+
+    Returns ``{"id": <session_id_or_None>, "url": <checkout_url>}``. ``url`` is
+    always a non-empty string on success (defensive 502 if Stripe omits it);
+    ``id`` is the Stripe Checkout Session id and is set in practice, but is
+    typed as optional because Stripe could theoretically omit it.
 
     ``idempotency_key`` is the per-checkout key sent to Stripe so a retried
     request returns the same Checkout Session URL.
