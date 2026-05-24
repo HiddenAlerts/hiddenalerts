@@ -41,7 +41,7 @@ class BillingCheckoutAttempt(Base):
     plan_type: Mapped[str] = mapped_column(String(16), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     stripe_checkout_session_id: Mapped[str | None] = mapped_column(
-        String(64), nullable=True
+        String(255), nullable=True
     )
     checkout_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")

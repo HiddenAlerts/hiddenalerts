@@ -24,11 +24,11 @@ class Subscription(Base):
         ForeignKey("subscriber_profiles.id", ondelete="CASCADE"),
         nullable=False,
     )
-    stripe_customer_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    stripe_customer_id: Mapped[str] = mapped_column(String(255), nullable=False)
     stripe_subscription_id: Mapped[str | None] = mapped_column(
-        String(64), nullable=True
+        String(255), nullable=True
     )
-    stripe_price_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    stripe_price_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     plan_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
     status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     current_period_start: Mapped[datetime | None] = mapped_column(
