@@ -38,24 +38,39 @@ def stripe_object_to_dict(value: Any) -> Any:
     """Recursively normalize Stripe SDK objects to plain dicts/lists/scalars.
 
     ``stripe.Webhook.construct_event`` returns ``stripe.Event`` /
-    ``stripe.StripeObject``; some inner nodes don't behave the same as plain
-    dicts across SDK versions. Normalizing at the webhook boundary kills a
-    whole class of ``AttributeError`` / ``KeyError`` bugs deep in the handlers.
+    ``stripe.StripeObject``. In stripe-python 7+ these classes:
+      - are **not** ``dict`` / ``collections.abc.Mapping`` subclasses
+        (so ``isinstance(v, Mapping)`` is False for an Event/Subscription)
+      - **removed** ``to_dict_recursive()`` (the older method we used to rely on)
+      - implement ``__getattr__`` → ``self[k]`` which raises ``AttributeError``
+        on missing keys — so calling ``obj.get(...)`` on a raw StripeObject
+        explodes with ``AttributeError: get`` instead of returning ``None``.
 
-    Strategy:
-      - Anything with ``to_dict_recursive()`` → call it, then recurse on the
-        result (covers ``stripe.Event``, ``stripe.StripeObject`` in any version).
-      - ``Mapping`` → ``{k: normalize(v)}`` recursively.
-      - ``list`` / ``tuple`` → ``[normalize(v)]`` recursively.
-      - Otherwise return ``value`` unchanged.
-    Never raises — a broken ``to_dict_recursive`` falls through to the Mapping
-    branch.
+    Without explicit handling the helper falls through every branch and returns
+    the raw StripeObject, which then bites any caller that does ``.get(...)``.
+    That was the exact P0 bug behind two production incidents.
+
+    Order of attempts (each is recursed into so nested StripeObjects unwrap too):
+      1. ``to_dict_recursive()``  — older SDKs (already deep)
+      2. ``to_dict()``            — modern SDKs (already deep in 15.x, but
+         recursion makes it safe across versions)
+      3. ``Mapping`` branch       — plain dict-like values
+      4. ``list`` / ``tuple``     — recurse
+      5. scalar passthrough
+
+    Never raises: any conversion that throws falls through to the next branch.
     """
-    to_dict = getattr(value, "to_dict_recursive", None)
+    to_dict_recursive = getattr(value, "to_dict_recursive", None)
+    if callable(to_dict_recursive):
+        try:
+            return stripe_object_to_dict(to_dict_recursive())
+        except Exception:  # noqa: BLE001 — never let normalization break the webhook
+            pass
+    to_dict = getattr(value, "to_dict", None)
     if callable(to_dict):
         try:
             return stripe_object_to_dict(to_dict())
-        except Exception:  # noqa: BLE001 — never let normalization break the webhook
+        except Exception:  # noqa: BLE001
             pass
     if isinstance(value, Mapping):
         return {k: stripe_object_to_dict(v) for k, v in value.items()}

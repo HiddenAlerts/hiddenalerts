@@ -262,6 +262,52 @@ class TestSyncEndpoint:
         assert body["has_active_access"] is True
         assert body["subscription_status"] == "active"
 
+    async def test_real_stripe_subscription_objects_normalize(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Regression for the production 'AttributeError: get' inside
+        /billing/sync: stripe-python returns ``stripe.Subscription`` (a
+        StripeObject) for each item, and our list helper must normalize them
+        to plain dicts BEFORE the sort key calls ``.get('created')``.
+        """
+        import stripe
+
+        sub = f"real-sync-{uuid.uuid4()}"
+        await _seed_profile(db_session, sub, stripe_customer_id="cus_real_sync")
+
+        real_sub = stripe.Subscription.construct_from(
+            {
+                "id": f"sub_real_{uuid.uuid4()}",
+                "customer": "cus_real_sync",
+                "status": "active",
+                "created": 1_700_000_500,
+                "current_period_start": 1_700_000_500,
+                "current_period_end": int(
+                    (datetime.now(timezone.utc) + timedelta(days=20)).timestamp()
+                ),
+                "cancel_at_period_end": False,
+                "canceled_at": None,
+                "items": {"data": [{"price": {"id": "price_monthly_test"}}]},
+            },
+            "sk_test_dummy",
+        )
+        # Mimic stripe.ListObject by holding the Subscription on .data.
+        fake_list = type("L", (), {"data": [real_sub]})()
+
+        with _patch_validator(_claims(sub)), patch.object(
+            stripe_service, "_sync_list_subscriptions", return_value=fake_list
+        ):
+            resp = await client.post(
+                "/api/v1/billing/sync",
+                headers={"Authorization": "Bearer ignored"},
+            )
+        # The previous bug surfaced as 500 + AttributeError: get; must now be 200.
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["has_active_access"] is True
+        assert body["subscription_status"] == "active"
+        assert body["plan_type"] == "monthly"
+
     async def test_stripe_error_returns_502(
         self, client: AsyncClient, db_session: AsyncSession
     ):
