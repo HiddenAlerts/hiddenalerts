@@ -270,17 +270,11 @@ async def create_checkout(
     else:
         idempotency_key = uuid.uuid4().hex
 
-    # Step 3 (no-header only): fold double-clicks to the same URL.
-    if not header_supplied:
-        recent = await _recent_reusable_attempt(
-            db,
-            subscriber_profile_id=profile.id,
-            plan_type=body.plan,
-        )
-        if recent is not None:
-            return CheckoutResponse(checkout_url=recent.checkout_url)
-
-    # Step 4: refuse to checkout if the user is already an active subscriber.
+    # Step 3: refuse to checkout if the user is already an active subscriber.
+    # This runs BEFORE any reuse/replay path so an active user can never get a
+    # stale ``checkout_url`` handed back — they always see 409 ``already_subscribed``,
+    # whether they had a recent attempt (no-header path) or supplied an old
+    # explicit key (attempt-by-key path).
     current_sub = await _latest_subscription(db, profile.id)
     if current_sub is not None and has_active_subscription_access(
         current_sub.status,
@@ -292,6 +286,16 @@ async def create_checkout(
             detail="already_subscribed",
         )
 
+    # Step 4 (no-header only): fold double-clicks to the same URL.
+    if not header_supplied:
+        recent = await _recent_reusable_attempt(
+            db,
+            subscriber_profile_id=profile.id,
+            plan_type=body.plan,
+        )
+        if recent is not None:
+            return CheckoutResponse(checkout_url=recent.checkout_url)
+
     # Step 5: attempt lookup by idempotency_key.
     attempt = await _attempt_by_key(db, idempotency_key)
     if attempt is not None:
@@ -299,6 +303,13 @@ async def create_checkout(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="idempotency_key_conflict",
+            )
+        # Same key + same subscriber but different plan → don't replay the wrong
+        # plan's URL. Fail loudly so the frontend uses a fresh key per plan.
+        if attempt.plan_type != body.plan:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="idempotency_key_plan_conflict",
             )
         if attempt.status == "succeeded" and attempt.checkout_url:
             return CheckoutResponse(checkout_url=attempt.checkout_url)

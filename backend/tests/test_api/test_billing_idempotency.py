@@ -168,6 +168,148 @@ class TestAlreadySubscribed:
         cust_mock.assert_not_called()
         sess_mock.assert_not_called()
 
+    async def test_active_subscriber_with_recent_succeeded_attempt_still_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Patch test A: active-check must fire BEFORE the no-header recent-reuse
+        path so an active subscriber can never receive a stale checkout_url."""
+        sub = f"already-recent-{uuid.uuid4()}"
+        profile = await _seed_profile(db_session, sub)
+        # Pre-existing succeeded attempt within the 30-min reuse window.
+        stale_url = "https://checkout.stripe.com/c/stale-monthly"
+        db_session.add(
+            BillingCheckoutAttempt(
+                subscriber_profile_id=profile.id,
+                plan_type="monthly",
+                idempotency_key=f"prior-{uuid.uuid4()}",
+                stripe_checkout_session_id="cs_stale",
+                checkout_url=stale_url,
+                status="succeeded",
+            )
+        )
+        # Active subscription.
+        db_session.add(
+            Subscription(
+                subscriber_profile_id=profile.id,
+                stripe_customer_id="cus_active_recent",
+                stripe_subscription_id=f"sub_act_{uuid.uuid4()}",
+                status="active",
+                current_period_end=datetime.now(timezone.utc) + timedelta(days=20),
+                plan_type="monthly",
+            )
+        )
+        await db_session.commit()
+
+        with _patch_validator(_claims(sub)), patch.object(
+            stripe_service, "_sync_create_customer"
+        ) as cust_mock, patch.object(
+            stripe_service, "_sync_create_checkout_session"
+        ) as sess_mock:
+            resp = await client.post(
+                "/api/v1/billing/checkout",
+                json={"plan": "monthly"},
+                headers={"Authorization": "Bearer ignored"},  # no X-Idempotency-Key
+            )
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "already_subscribed"
+        # The stale URL must NOT have been returned.
+        assert stale_url not in resp.text
+        cust_mock.assert_not_called()
+        sess_mock.assert_not_called()
+
+    async def test_active_subscriber_with_existing_explicit_key_attempt_still_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Patch test C2: active-check must also fire BEFORE the explicit-key
+        replay path. Same guarantee, different reuse path."""
+        sub = f"already-key-{uuid.uuid4()}"
+        profile = await _seed_profile(db_session, sub)
+        key = f"explicit-key-{uuid.uuid4()}"
+        stale_url = "https://checkout.stripe.com/c/stale-key-monthly"
+        # Pre-existing succeeded attempt keyed on the explicit idempotency key.
+        db_session.add(
+            BillingCheckoutAttempt(
+                subscriber_profile_id=profile.id,
+                plan_type="monthly",
+                idempotency_key=key,
+                stripe_checkout_session_id="cs_stale_key",
+                checkout_url=stale_url,
+                status="succeeded",
+            )
+        )
+        # And an active subscription on the same profile.
+        db_session.add(
+            Subscription(
+                subscriber_profile_id=profile.id,
+                stripe_customer_id="cus_active_key",
+                stripe_subscription_id=f"sub_act_{uuid.uuid4()}",
+                status="active",
+                current_period_end=datetime.now(timezone.utc) + timedelta(days=20),
+                plan_type="monthly",
+            )
+        )
+        await db_session.commit()
+
+        with _patch_validator(_claims(sub)), patch.object(
+            stripe_service, "_sync_create_customer"
+        ) as cust_mock, patch.object(
+            stripe_service, "_sync_create_checkout_session"
+        ) as sess_mock:
+            resp = await client.post(
+                "/api/v1/billing/checkout",
+                json={"plan": "monthly"},
+                headers={"Authorization": "Bearer ignored", "X-Idempotency-Key": key},
+            )
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "already_subscribed"
+        assert stale_url not in resp.text
+        cust_mock.assert_not_called()
+        sess_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+class TestIdempotencyKeyPlanConflict:
+    async def test_same_key_different_plan_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Patch test B: a single idempotency key reused across different plans
+        must NOT replay the wrong plan's URL — surface as 409 so the frontend
+        uses a fresh key per plan attempt."""
+        sub = f"plan-mismatch-{uuid.uuid4()}"
+        profile = await _seed_profile(db_session, sub)
+        key = f"mismatch-key-{uuid.uuid4()}"
+        monthly_url = "https://checkout.stripe.com/c/saved-monthly"
+        # Pre-existing succeeded attempt for "monthly" under this key.
+        db_session.add(
+            BillingCheckoutAttempt(
+                subscriber_profile_id=profile.id,
+                plan_type="monthly",
+                idempotency_key=key,
+                stripe_checkout_session_id="cs_monthly",
+                checkout_url=monthly_url,
+                status="succeeded",
+            )
+        )
+        await db_session.commit()
+
+        # Now call with the SAME key but a DIFFERENT plan.
+        with _patch_validator(_claims(sub)), patch.object(
+            stripe_service, "_sync_create_customer"
+        ) as cust_mock, patch.object(
+            stripe_service, "_sync_create_checkout_session"
+        ) as sess_mock:
+            resp = await client.post(
+                "/api/v1/billing/checkout",
+                json={"plan": "annual"},
+                headers={"Authorization": "Bearer ignored", "X-Idempotency-Key": key},
+            )
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "idempotency_key_plan_conflict"
+        # The monthly URL must NOT have been returned.
+        assert monthly_url not in resp.text
+        cust_mock.assert_not_called()
+        sess_mock.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Idempotency-key reuse (explicit header)
