@@ -1,4 +1,5 @@
 from app.models.base import Base
+from app.models.billing_checkout_attempt import BillingCheckoutAttempt
 from app.models.event import Event, EventSource
 from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
@@ -25,4 +26,5 @@ __all__ = [
     "SubscriberProfile",
     "Subscription",
     "StripeWebhookEvent",
+    "BillingCheckoutAttempt",
 ]

@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from fastapi import HTTPException, status as http_status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +32,36 @@ from app.models.subscriber_profile import SubscriberProfile
 from app.models.subscription import Subscription
 
 log = logging.getLogger(__name__)
+
+
+def stripe_object_to_dict(value: Any) -> Any:
+    """Recursively normalize Stripe SDK objects to plain dicts/lists/scalars.
+
+    ``stripe.Webhook.construct_event`` returns ``stripe.Event`` /
+    ``stripe.StripeObject``; some inner nodes don't behave the same as plain
+    dicts across SDK versions. Normalizing at the webhook boundary kills a
+    whole class of ``AttributeError`` / ``KeyError`` bugs deep in the handlers.
+
+    Strategy:
+      - Anything with ``to_dict_recursive()`` → call it, then recurse on the
+        result (covers ``stripe.Event``, ``stripe.StripeObject`` in any version).
+      - ``Mapping`` → ``{k: normalize(v)}`` recursively.
+      - ``list`` / ``tuple`` → ``[normalize(v)]`` recursively.
+      - Otherwise return ``value`` unchanged.
+    Never raises — a broken ``to_dict_recursive`` falls through to the Mapping
+    branch.
+    """
+    to_dict = getattr(value, "to_dict_recursive", None)
+    if callable(to_dict):
+        try:
+            return stripe_object_to_dict(to_dict())
+        except Exception:  # noqa: BLE001 — never let normalization break the webhook
+            pass
+    if isinstance(value, Mapping):
+        return {k: stripe_object_to_dict(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [stripe_object_to_dict(v) for v in value]
+    return value
 
 # Event types we actively handle. Anything else is stored and ignored.
 _SUBSCRIPTION_UPSERT_EVENTS = frozenset(
@@ -191,6 +222,11 @@ async def _upsert_subscription(
     return row
 
 
+# Public alias: ``/api/v1/billing/sync`` reuses the same Stripe→local mapping
+# so webhook and reconciliation never drift. New callers should use this name.
+upsert_subscription_from_stripe = _upsert_subscription
+
+
 # ---------------------------------------------------------------------------
 # Event handlers — each returns "processed"
 # ---------------------------------------------------------------------------
@@ -326,50 +362,109 @@ _HANDLERS = {
 # ---------------------------------------------------------------------------
 
 
-async def process_stripe_event(db: AsyncSession, event: Mapping[str, Any]) -> dict:
+async def process_stripe_event(db: AsyncSession, event: Any) -> dict:
     """Idempotently record and dispatch a verified Stripe event.
 
     Returns one of:
       {"status": "processed", "event_type": ...}
       {"status": "ignored",   "event_type": ...}   (unknown event type)
       {"status": "duplicate", "event_type": ...}   (already seen / race)
+
+    Accepts both plain dicts (tests, direct callers) and real Stripe SDK
+    ``stripe.Event`` / ``stripe.StripeObject`` instances (production webhook).
+    Normalizes to a plain dict at entry so handlers can rely on dict semantics.
+
+    Malformed events (non-mapping, missing ``id`` or ``type``) raise
+    ``HTTPException(400, "invalid_stripe_event")`` — a controlled error, not a
+    deep ``AttributeError`` / ``KeyError`` leak. Stripe treats 4xx as "stop
+    retrying", which is correct for genuinely malformed events that retrying
+    can't fix.
+
+    If processing crashes, the unit of work is rolled back and the exception
+    re-raised so the route returns 500 and Stripe retries — failed events are
+    never marked as successfully processed.
     """
-    event_id = event["id"]
-    event_type = event["type"]
-
-    # Fast path: already recorded → duplicate, no reprocessing, no timestamp touch.
-    existing = await db.execute(
-        select(StripeWebhookEvent).where(
-            StripeWebhookEvent.stripe_event_id == event_id
+    event = stripe_object_to_dict(event)
+    if not isinstance(event, Mapping):
+        log.warning(
+            "stripe webhook: event normalized to non-mapping type=%s",
+            type(event).__name__,
         )
-    )
-    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="invalid_stripe_event",
+        )
+    event_id = event.get("id")
+    event_type = event.get("type")
+    if not event_id or not event_type:
+        log.warning(
+            "stripe webhook: event missing id/type after normalization "
+            "(id_present=%s type_present=%s)",
+            bool(event_id),
+            bool(event_type),
+        )
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="invalid_stripe_event",
+        )
+
+    # Pre-SELECT: distinguish "already successfully processed" (duplicate, skip)
+    # from "previously crashed mid-flight" (row exists with processed_at=None,
+    # must reprocess). A row with processed_at=None on the production DB likely
+    # comes from a prior version that left it there after a handler crash; we
+    # recover by reusing that row instead of incorrectly short-circuiting.
+    existing = (
+        await db.execute(
+            select(StripeWebhookEvent).where(
+                StripeWebhookEvent.stripe_event_id == event_id
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing is not None and existing.processed_at is not None:
         return {"status": "duplicate", "event_type": event_type}
 
-    # Claim the event id by inserting before any business mutation. If a
-    # concurrent request already claimed it, the unique constraint fires here.
-    record = StripeWebhookEvent(
-        stripe_event_id=event_id,
-        event_type=event_type,
-        payload_json=_event_to_jsonable(event),
-        processed_at=None,
-    )
-    db.add(record)
-    try:
-        await db.flush()
-    except IntegrityError:
-        await db.rollback()
-        # The winner of the race owns processing; we return without dispatching.
-        return {"status": "duplicate", "event_type": event_type}
+    if existing is not None:
+        # Crashed/interrupted previously — reuse the row, refresh payload.
+        existing.payload_json = _event_to_jsonable(event)
+        record = existing
+    else:
+        # Claim the event id by inserting before any business mutation. If a
+        # concurrent request already claimed it, the unique constraint fires here.
+        record = StripeWebhookEvent(
+            stripe_event_id=event_id,
+            event_type=event_type,
+            payload_json=_event_to_jsonable(event),
+            processed_at=None,
+        )
+        db.add(record)
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            # The winner of the race owns processing; we return without dispatching.
+            return {"status": "duplicate", "event_type": event_type}
 
     handler = _HANDLERS.get(event_type)
-    if handler is None:
-        outcome = "ignored"
-    else:
-        obj = (event.get("data") or {}).get("object") or {}
-        await handler(db, obj)
-        outcome = "processed"
+    try:
+        if handler is None:
+            outcome = "ignored"
+        else:
+            obj = (event.get("data") or {}).get("object") or {}
+            await handler(db, obj)
+            outcome = "processed"
+        record.processed_at = datetime.now(timezone.utc)
+        await db.commit()
+    except Exception:
+        # Roll back the claim row + any partial handler writes so the next
+        # Stripe retry sees a clean slate (or a row with processed_at=None,
+        # which the pre-SELECT above treats as retryable).
+        await db.rollback()
+        log.exception(
+            "stripe webhook processing failed: event_id=%s event_type=%s",
+            event_id,
+            event_type,
+        )
+        raise
 
-    record.processed_at = datetime.now(timezone.utc)
-    await db.commit()
     return {"status": outcome, "event_type": event_type}

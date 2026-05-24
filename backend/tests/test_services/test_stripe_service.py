@@ -236,10 +236,13 @@ class TestCreateCheckoutSession:
             "_sync_create_checkout_session",
             return_value=fake_session,
         ) as mock:
-            url = await stripe_service.create_checkout_session(
+            result = await stripe_service.create_checkout_session(
                 db_session, fresh_profile, "monthly"
             )
-        assert url == "https://checkout.stripe.com/c/sess_abc"
+        assert result == {
+            "id": "cs_test_abc",
+            "url": "https://checkout.stripe.com/c/sess_abc",
+        }
         kwargs = mock.call_args.kwargs
         assert kwargs["customer_id"] == "cus_already"
         assert kwargs["price_id"] == "price_monthly_test"
