@@ -105,6 +105,70 @@ class TestStripeObjectToDict:
 
 
 # ---------------------------------------------------------------------------
+# Regression: real stripe-python SDK objects (the actual production P0)
+# ---------------------------------------------------------------------------
+
+
+class TestRealStripeSdkNormalization:
+    """Modern ``stripe.StripeObject`` (stripe-python 7+) is NOT a Mapping,
+    does NOT have ``to_dict_recursive``, and ``__getattr__`` raises
+    ``AttributeError`` on missing keys — so a raw StripeObject explodes on
+    ``.get(...)``. The helper must unwrap it via ``to_dict()``.
+    """
+
+    def test_real_stripe_event_becomes_plain_dict(self):
+        import stripe
+
+        raw = {
+            "id": "evt_real_1",
+            "type": "customer.subscription.created",
+            "created": 1_700_000_000,
+            "data": {
+                "object": {
+                    "id": "sub_real_1",
+                    "customer": "cus_real_1",
+                    "status": "active",
+                    "items": {"data": [{"price": {"id": "price_x"}}]},
+                },
+            },
+        }
+        ev = stripe.Event.construct_from(raw, "sk_test_dummy")
+        result = svc.stripe_object_to_dict(ev)
+        assert isinstance(result, dict)
+        assert result.get("id") == "evt_real_1"
+        assert result.get("type") == "customer.subscription.created"
+        # Nested object must also be a plain dict (the previous bug landed here).
+        inner = (result.get("data") or {}).get("object") or {}
+        assert isinstance(inner, dict)
+        assert inner.get("id") == "sub_real_1"
+        assert inner.get("status") == "active"
+        # Deeply nested too.
+        assert inner["items"]["data"][0]["price"]["id"] == "price_x"
+
+    def test_real_stripe_subscription_supports_get(self):
+        # The /billing/sync incident: list_customer_subscriptions does
+        # ``sub.get("created")`` on each item.
+        import stripe
+
+        sub = stripe.Subscription.construct_from(
+            {
+                "id": "sub_sync_1",
+                "customer": "cus_sync_1",
+                "status": "active",
+                "created": 1_700_000_500,
+                "items": {"data": [{"price": {"id": "price_y"}}]},
+            },
+            "sk_test_dummy",
+        )
+        result = svc.stripe_object_to_dict(sub)
+        assert isinstance(result, dict)
+        # .get must work without AttributeError now.
+        assert result.get("created") == 1_700_000_500
+        assert result.get("status") == "active"
+
+
+
+# ---------------------------------------------------------------------------
 # Malformed event guard (Part A.2)
 # ---------------------------------------------------------------------------
 
@@ -154,6 +218,51 @@ class TestMalformedEventGuard:
 # ---------------------------------------------------------------------------
 # End-to-end: Stripe-like object dispatches without crashing (the P0 bug)
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestRealStripeSdkEndToEnd:
+    """End-to-end with REAL stripe-python objects — the exact production path
+    that failed twice. If this regresses, both incidents come back."""
+
+    async def test_real_stripe_event_dispatches(self, db_session):
+        import stripe
+
+        profile = SubscriberProfile(
+            supabase_user_id=f"real-e2e-{uuid.uuid4()}",
+            email="e2e@example.com",
+            role="subscriber",
+        )
+        db_session.add(profile)
+        await db_session.commit()
+
+        sub_id = f"sub_real_{uuid.uuid4()}"
+        event_id = f"evt_real_{uuid.uuid4()}"
+        ev = stripe.Event.construct_from(
+            {
+                "id": event_id,
+                "type": "customer.subscription.created",
+                "created": 1_700_000_000,
+                "data": {
+                    "object": {
+                        "id": sub_id,
+                        "customer": "cus_real_e2e",
+                        "status": "active",
+                        "metadata": {"subscriber_profile_id": str(profile.id)},
+                        "current_period_start": 1_700_000_000,
+                        "current_period_end": 1_710_000_000,
+                        "cancel_at_period_end": False,
+                        "canceled_at": None,
+                        "items": {"data": [{"price": {"id": "price_monthly_test"}}]},
+                    },
+                },
+            },
+            "sk_test_dummy",
+        )
+        result = await svc.process_stripe_event(db_session, ev)
+        assert result["status"] == "processed"
+        row = await svc._subscription_by_stripe_id(db_session, sub_id)
+        assert row is not None and row.status == "active"
 
 
 @pytest.mark.asyncio
