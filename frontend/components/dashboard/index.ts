@@ -12,5 +12,5 @@ export { DashboardFooter } from './DashboardFooter';
 export { DashboardShell } from './DashboardShell';
 export { DashboardStatCard } from './DashboardStatCard';
 export { DashboardUnlockCta } from './DashboardUnlockCta';
-export { Sidebar } from './Sidebar';
+export { Sidebar, type SidebarNavItem, type SidebarProps } from './Sidebar';
 export { TopBar } from './TopBar';
