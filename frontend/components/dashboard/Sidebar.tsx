@@ -3,6 +3,7 @@
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
+  type LucideIcon,
   MonitorDot,
   PanelLeft,
   PanelLeftClose,
@@ -10,19 +11,37 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import type { FC } from 'react';
+import type { FC, ReactNode } from 'react';
 
-const nav = [
+export type SidebarNavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+};
+
+const DEFAULT_NAV: SidebarNavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/alerts', label: 'Alerts', icon: MonitorDot },
   { href: '/settings', label: 'Settings (Coming Soon)', icon: Settings },
-] as const;
+];
 
 export type SidebarProps = {
   collapsed: boolean;
   onToggleCollapse: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  /** Navigation items to render. Defaults to the user dashboard nav. */
+  navItems?: ReadonlyArray<SidebarNavItem>;
+  /** Brand text shown next to the logo. */
+  brandLabel?: string;
+  /** Optional second line under the brand (e.g. for the CMS variant). */
+  brandSubtitle?: string;
+  /** Where the brand/logo link points. */
+  homeHref?: string;
+  /** Optional content rendered at the bottom of the sidebar (profile, etc). */
+  footer?: ReactNode;
+  /** Aria label for the nav region. */
+  ariaLabel?: string;
 };
 
 export const Sidebar: FC<SidebarProps> = ({
@@ -30,6 +49,12 @@ export const Sidebar: FC<SidebarProps> = ({
   onToggleCollapse,
   mobileOpen,
   onCloseMobile,
+  navItems = DEFAULT_NAV,
+  brandLabel = 'HiddenAlerts',
+  brandSubtitle,
+  homeHref = '/dashboard',
+  footer,
+  ariaLabel = 'Main navigation',
 }) => {
   const pathname = usePathname();
 
@@ -41,7 +66,7 @@ export const Sidebar: FC<SidebarProps> = ({
         mobileOpen ? 'translate-x-0' : '-translate-x-full',
         collapsed && 'lg:w-[var(--spacing-collapse-sidebar)]',
       )}
-      aria-label="Main navigation"
+      aria-label={ariaLabel}
     >
       <div
         className={cn(
@@ -53,7 +78,7 @@ export const Sidebar: FC<SidebarProps> = ({
         )}
       >
         <Link
-          href="/dashboard"
+          href={homeHref}
           onClick={onCloseMobile}
           className={cn(
             'text-foreground inline-flex min-w-0 cursor-pointer items-center gap-2 font-semibold',
@@ -72,12 +97,19 @@ export const Sidebar: FC<SidebarProps> = ({
           </span>
           <span
             className={cn(
-              'font-heading truncate text-base tracking-tight',
+              'flex min-w-0 flex-col',
               'lg:transition-opacity',
               collapsed && 'lg:sr-only',
             )}
           >
-            HiddenAlerts
+            <span className="font-heading truncate text-base tracking-tight">
+              {brandLabel}
+            </span>
+            {brandSubtitle ? (
+              <span className="text-muted truncate text-xs font-normal">
+                {brandSubtitle}
+              </span>
+            ) : null}
           </span>
         </Link>
 
@@ -98,7 +130,7 @@ export const Sidebar: FC<SidebarProps> = ({
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 p-2">
-        {nav.map(({ href, label, icon: Icon }) => {
+        {navItems.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(`${href}/`);
           return (
             <Link
@@ -121,6 +153,17 @@ export const Sidebar: FC<SidebarProps> = ({
           );
         })}
       </nav>
+
+      {footer ? (
+        <div
+          className={cn(
+            'border-border shrink-0 border-t p-3',
+            collapsed && 'lg:px-2',
+          )}
+        >
+          {footer}
+        </div>
+      ) : null}
     </aside>
   );
 };
