@@ -24,6 +24,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const DEFAULT_ADMIN_REDIRECT = '/admin/briefs';
 const DEFAULT_SUBSCRIBER_REDIRECT = '/dashboard';
+const PAYWALL_REDIRECT = '/subscribe';
 
 function resolveAdminRedirect(next: string | null): string {
   if (!next?.startsWith('/') || next.startsWith('//')) {
@@ -78,6 +79,7 @@ function LoginPageContent() {
     signIn: signInSubscriber,
     signOut: signOutSubscriber,
     status: subscriberStatus,
+    subscriber,
   } = useAuth();
 
   const [email, setEmail] = useState('');
@@ -97,12 +99,17 @@ function LoginPageContent() {
       return;
     }
     if (subscriberStatus === 'authenticated') {
-      window.location.replace(resolveSubscriberRedirect(nextParam));
+      const target =
+        subscriber?.has_active_subscription === false
+          ? PAYWALL_REDIRECT
+          : resolveSubscriberRedirect(nextParam);
+      window.location.replace(target);
     }
   }, [
     checkingSession,
     adminStatus,
     subscriberStatus,
+    subscriber,
     nextParam,
   ]);
 
@@ -150,12 +157,16 @@ function LoginPageContent() {
 
       // 2) Fall back to subscriber (Supabase).
       try {
-        await signInSubscriber(trimmedEmail, password);
+        const me = await signInSubscriber(trimmedEmail, password);
         signOutAdmin();
         toast.success('Signed in.', {
           description: 'Welcome back to HiddenAlerts.',
         });
-        window.location.replace(resolveSubscriberRedirect(nextParam));
+        const target =
+          me?.has_active_subscription === false
+            ? PAYWALL_REDIRECT
+            : resolveSubscriberRedirect(nextParam);
+        window.location.replace(target);
       } catch (subscriberErr) {
         const message =
           subscriberErr instanceof Error

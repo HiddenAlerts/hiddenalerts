@@ -24,7 +24,15 @@ export type AuthContextValue = {
   subscriber: SubscriberMeResponse | null;
   /** Supabase access token for backend API calls. */
   getAccessToken: () => string | null;
-  signIn: (email: string, password: string) => Promise<void>;
+  /**
+   * Signs the user in via Supabase and refreshes `/subscriber/me`. Returns the
+   * fresh subscriber profile (or `null` if the backend didn't respond), so the
+   * caller can branch by `has_active_subscription` before navigating.
+   */
+  signIn: (
+    email: string,
+    password: string,
+  ) => Promise<SubscriberMeResponse | null>;
   signOut: () => Promise<void>;
 };
 
@@ -38,36 +46,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     null,
   );
 
-  const applySession = useCallback(async (nextSession: Session | null) => {
-    setSession(nextSession);
-    setUser(nextSession?.user ?? null);
+  const applySession = useCallback(
+    async (nextSession: Session | null): Promise<SubscriberMeResponse | null> => {
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
 
-    if (!nextSession?.access_token) {
-      setSubscriber(null);
-      setStatus('unauthenticated');
-      return;
-    }
-
-    try {
-      const me = await fetchSubscriberMe(nextSession.access_token);
-      setSubscriber(me);
-      setStatus('authenticated');
-    } catch (err) {
-      const status = (err as HttpRequestError).status;
-      if (status === 401) {
-        const supabase = getSupabaseClient();
-        await supabase.auth.signOut();
-        setSession(null);
-        setUser(null);
+      if (!nextSession?.access_token) {
         setSubscriber(null);
         setStatus('unauthenticated');
-        return;
+        return null;
       }
-      // Network or temporary backend error — keep Supabase session.
-      setSubscriber(null);
-      setStatus('authenticated');
-    }
-  }, []);
+
+      try {
+        const me = await fetchSubscriberMe(nextSession.access_token);
+        setSubscriber(me);
+        setStatus('authenticated');
+        return me;
+      } catch (err) {
+        const status = (err as HttpRequestError).status;
+        if (status === 401) {
+          const supabase = getSupabaseClient();
+          await supabase.auth.signOut();
+          setSession(null);
+          setUser(null);
+          setSubscriber(null);
+          setStatus('unauthenticated');
+          return null;
+        }
+        // Network or temporary backend error — keep Supabase session.
+        setSubscriber(null);
+        setStatus('authenticated');
+        return null;
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -97,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
       });
       if (error) throw error;
-      await applySession(data.session);
+      return applySession(data.session);
     },
     [applySession],
   );
