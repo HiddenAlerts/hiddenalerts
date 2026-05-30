@@ -15,6 +15,13 @@ import { apiGet } from './client';
 
 export const ALERTS_PAGE_SIZE = 20;
 
+/**
+ * All endpoints below now go through the authenticated subscriber API.
+ * The Supabase access token must be passed by the caller. Hooks read it
+ * from `useAuth()` and only run when the token is available.
+ */
+const SUBSCRIBER_BASE = '/v1/subscriber';
+
 export type FetchAlertsParams = {
   limit: number;
   offset: number;
@@ -66,29 +73,35 @@ export function buildAlertsListPath(params: FetchAlertsParams) {
   if (params.category) search.set('category', params.category);
   if (params.risk_level) search.set('risk_level', params.risk_level);
   if (params.source) search.set('source', params.source);
-  return `/alerts?${search.toString()}`;
+  return `${SUBSCRIBER_BASE}/alerts?${search.toString()}`;
 }
 
 export function buildAlertDetailPath(alertId: string) {
-  return `/alerts/${encodeURIComponent(alertId)}`;
+  return `${SUBSCRIBER_BASE}/alerts/${encodeURIComponent(alertId)}`;
 }
 
 export async function fetchAlertsPage(
   params: FetchAlertsParams,
+  token: string,
 ): Promise<AlertsListResponse> {
-  return apiGet<AlertsListResponse>(buildAlertsListPath(params));
+  return apiGet<AlertsListResponse>(buildAlertsListPath(params), { token });
 }
 
-export async function fetchAlertDetail(alertId: string): Promise<AlertApiRecord> {
-  return apiGet<AlertApiRecord>(buildAlertDetailPath(alertId));
+export async function fetchAlertDetail(
+  alertId: string,
+  token: string,
+): Promise<AlertApiRecord> {
+  return apiGet<AlertApiRecord>(buildAlertDetailPath(alertId), { token });
 }
 
 export function buildTopAlertsPath() {
-  return '/alerts/top';
+  return `${SUBSCRIBER_BASE}/alerts/top`;
 }
 
-export async function fetchTopAlerts(): Promise<AlertsListResponse> {
-  return apiGet<AlertsListResponse>(buildTopAlertsPath());
+export async function fetchTopAlerts(
+  token: string,
+): Promise<AlertsListResponse> {
+  return apiGet<AlertsListResponse>(buildTopAlertsPath(), { token });
 }
 
 export type FetchAlertsStatsParams = {
@@ -103,13 +116,16 @@ export function buildAlertsStatsPath(params?: FetchAlertsStatsParams): string {
     search.set('category', cat);
   }
   const qs = search.toString();
-  return qs ? `/alerts/stats?${qs}` : '/alerts/stats';
+  return qs
+    ? `${SUBSCRIBER_BASE}/alerts/stats?${qs}`
+    : `${SUBSCRIBER_BASE}/alerts/stats`;
 }
 
 export async function fetchAlertsStats(
+  token: string,
   params?: FetchAlertsStatsParams,
 ): Promise<AlertsStatsResponse> {
-  return apiGet<AlertsStatsResponse>(buildAlertsStatsPath(params));
+  return apiGet<AlertsStatsResponse>(buildAlertsStatsPath(params), { token });
 }
 
 export type FetchAlertsSearchParams = {
@@ -119,7 +135,7 @@ export type FetchAlertsSearchParams = {
   group_limit?: number;
 };
 
-/** Builds path for `GET /search/alerts` (base URL already includes `/api`). */
+/** Builds path for `GET /v1/subscriber/search/alerts`. */
 export function buildAlertsSearchPath(params: FetchAlertsSearchParams): string {
   const q = params.q.trim();
   const searchParams = new URLSearchParams({
@@ -128,11 +144,12 @@ export function buildAlertsSearchPath(params: FetchAlertsSearchParams): string {
     limit: String(params.limit ?? 50),
     group_limit: String(params.group_limit ?? 20),
   });
-  return `/search/alerts?${searchParams.toString()}`;
+  return `${SUBSCRIBER_BASE}/search/alerts?${searchParams.toString()}`;
 }
 
 export async function fetchAlertsSearch(
   params: FetchAlertsSearchParams,
+  token: string,
 ): Promise<AlertsSearchResponse> {
   const q = params.q.trim();
   if (!q) {
@@ -145,7 +162,7 @@ export async function fetchAlertsSearch(
       alerts: [],
     };
   }
-  return apiGet<AlertsSearchResponse>(buildAlertsSearchPath(params));
+  return apiGet<AlertsSearchResponse>(buildAlertsSearchPath(params), { token });
 }
 
 /** Maps `/alerts/stats` payload to risk tab counts. */
