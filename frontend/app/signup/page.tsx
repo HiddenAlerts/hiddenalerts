@@ -5,8 +5,10 @@ import { LandingFooter } from '@/components/landing/LandingFooter';
 import { LandingHeader } from '@/components/landing/LandingHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { getSupabaseClient } from '@/lib/supabase/client';
 import { Lock, Mail, User } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
@@ -20,6 +22,7 @@ type FieldErrors = {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function SignupPage() {
+  const router = useRouter();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -66,10 +69,35 @@ export default function SignupPage() {
 
     setSubmitting(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 700));
-      toast.success('Account created.', {
-        description: 'Check your inbox to verify your email.',
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: { full_name: name.trim() },
+        },
       });
+
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+
+      if (data.session) {
+        toast.success('Account created.', {
+          description: 'Welcome to HiddenAlerts.',
+        });
+        router.replace('/dashboard');
+        return;
+      }
+
+      toast.success('Account created.', {
+        description:
+          'If email confirmation is enabled, check your inbox before signing in.',
+      });
+      router.replace('/login');
+    } catch {
+      toast.error('Could not create account. Please try again.');
     } finally {
       setSubmitting(false);
     }
