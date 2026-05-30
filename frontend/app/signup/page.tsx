@@ -85,9 +85,10 @@ export default function SignupPage() {
 
       if (data.session) {
         toast.success('Account created.', {
-          description: 'Welcome to HiddenAlerts.',
+          description: 'Pick a plan to get started.',
         });
-        router.replace('/dashboard');
+        // New signups never have an active subscription — go to pricing.
+        router.replace('/subscribe');
         return;
       }
 
