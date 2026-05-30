@@ -7,8 +7,8 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <SubscriberGate>
-      <DashboardShell>{children}</DashboardShell>
-    </SubscriberGate>
+    <DashboardShell>
+      <SubscriberGate>{children}</SubscriberGate>
+    </DashboardShell>
   );
 }

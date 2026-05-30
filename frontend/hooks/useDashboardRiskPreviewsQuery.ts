@@ -1,5 +1,6 @@
 'use client';
 
+import { useAuth } from '@/contexts/AuthProvider';
 import { sortAlertsByDisplayedAtDesc } from '@/lib/alertDisplay';
 import { fetchAlertsPage, mapApiAlertToAlertItem } from '@/lib/api/alerts';
 import { useQueries } from '@tanstack/react-query';
@@ -18,17 +19,22 @@ export function dashboardRiskPreviewQueryKey(risk: DashboardPreviewRisk) {
 export function useDashboardRiskPreviewsQuery(options?: {
   enabled?: boolean;
 }) {
-  const enabled = options?.enabled ?? true;
+  const { getAccessToken } = useAuth();
+  const token = getAccessToken();
+  const enabled = (options?.enabled ?? true) && Boolean(token);
 
   const results = useQueries({
     queries: PREVIEW_RISKS.map(risk => ({
       queryKey: dashboardRiskPreviewQueryKey(risk),
       queryFn: () =>
-        fetchAlertsPage({
-          limit: DASHBOARD_RISK_PREVIEW_LIMIT,
-          offset: 0,
-          risk_level: risk,
-        }),
+        fetchAlertsPage(
+          {
+            limit: DASHBOARD_RISK_PREVIEW_LIMIT,
+            offset: 0,
+            risk_level: risk,
+          },
+          token!,
+        ),
       staleTime: 60_000,
       enabled,
     })),

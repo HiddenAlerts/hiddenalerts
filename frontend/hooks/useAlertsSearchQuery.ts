@@ -1,5 +1,6 @@
 'use client';
 
+import { useAuth } from '@/contexts/AuthProvider';
 import { fetchAlertsSearch } from '@/lib/api/alerts';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
@@ -12,17 +13,23 @@ const SEARCH_GROUP_LIMIT = 50;
 
 export function useAlertsSearchQuery(q: string, options?: { enabled?: boolean }) {
   const trimmed = q.trim();
-  const enabled = (options?.enabled ?? true) && trimmed.length > 0;
+  const { getAccessToken } = useAuth();
+  const token = getAccessToken();
+  const enabled =
+    (options?.enabled ?? true) && trimmed.length > 0 && Boolean(token);
 
   return useQuery({
     queryKey: alertsSearchQueryKey(trimmed),
     queryFn: () =>
-      fetchAlertsSearch({
-        q: trimmed,
-        min_score: 0,
-        limit: SEARCH_ALERTS_LIMIT,
-        group_limit: SEARCH_GROUP_LIMIT,
-      }),
+      fetchAlertsSearch(
+        {
+          q: trimmed,
+          min_score: 0,
+          limit: SEARCH_ALERTS_LIMIT,
+          group_limit: SEARCH_GROUP_LIMIT,
+        },
+        token!,
+      ),
     placeholderData: keepPreviousData,
     enabled,
   });
