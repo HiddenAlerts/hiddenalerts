@@ -1,9 +1,11 @@
 'use client';
 
 import { Sidebar, type SidebarNavItem } from '@/components/dashboard';
+import { useAdminAuth } from '@/contexts/AdminAuthProvider';
 import { useSidebar } from '@/hooks/useSidebar';
 import { cn } from '@/lib/utils';
-import { Bell, FileText, Menu, Users } from 'lucide-react';
+import { Bell, FileText, LogOut, Menu, Users } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import type { FC, ReactNode } from 'react';
 
 const ADMIN_NAV: SidebarNavItem[] = [
@@ -18,6 +20,13 @@ export type AdminShellProps = {
 
 export const AdminShell: FC<AdminShellProps> = ({ children }) => {
   const sidebar = useSidebar();
+  const { user, signOut } = useAdminAuth();
+  const router = useRouter();
+
+  function handleSignOut() {
+    signOut();
+    router.replace('/login');
+  }
 
   return (
     <div className="bg-background text-foreground min-h-screen">
@@ -46,15 +55,32 @@ export const AdminShell: FC<AdminShellProps> = ({ children }) => {
           sidebar.collapsed && 'lg:pl-[var(--spacing-collapse-sidebar)]',
         )}
       >
-        <header className="border-border bg-background-alt sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b px-3 lg:hidden">
+        <header className="border-border bg-background-alt sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b px-3 lg:px-5">
           <button
             type="button"
             onClick={sidebar.openMobile}
-            className="text-muted hover:text-foreground hover:bg-surface inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-md"
+            className="text-muted hover:text-foreground hover:bg-surface inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-md lg:hidden"
             aria-label="Open menu"
           >
             <Menu className="size-5" />
           </button>
+
+          <div className="ml-auto flex items-center gap-3">
+            {user ? (
+              <span className="text-muted hidden text-sm sm:inline">
+                {user.full_name ?? user.email}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="text-muted hover:text-foreground hover:bg-surface inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm font-medium transition-colors"
+              aria-label="Sign out"
+            >
+              <LogOut className="size-4" aria-hidden />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
+          </div>
         </header>
 
         <main className="flex-1 px-3 py-4 sm:px-4 lg:px-6 lg:py-6">
