@@ -5,11 +5,13 @@ import { LandingFooter } from '@/components/landing/LandingFooter';
 import { LandingHeader } from '@/components/landing/LandingHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { LoadingState } from '@/components/ui/LoadingState';
 import { useAdminAuth } from '@/contexts/AdminAuthProvider';
+import { useAuth } from '@/contexts/AuthProvider';
 import type { HttpRequestError } from '@/lib/api/client';
 import { Lock, Mail } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
@@ -21,11 +23,32 @@ type FieldErrors = {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const DEFAULT_ADMIN_REDIRECT = '/admin/briefs';
+const DEFAULT_SUBSCRIBER_REDIRECT = '/dashboard';
 
-function safeNextPath(next: string | null): string | null {
-  if (!next) return null;
-  // Only allow same-origin app paths, no protocol-relative or absolute URLs.
-  if (!next.startsWith('/') || next.startsWith('//')) return null;
+function resolveAdminRedirect(next: string | null): string {
+  if (!next?.startsWith('/') || next.startsWith('//')) {
+    return DEFAULT_ADMIN_REDIRECT;
+  }
+  const pathOnly = next.split('?')[0] ?? next;
+  if (pathOnly === '/login' || pathOnly === '/signup') {
+    return DEFAULT_ADMIN_REDIRECT;
+  }
+  if (pathOnly.startsWith('/admin')) return next;
+  return DEFAULT_ADMIN_REDIRECT;
+}
+
+function resolveSubscriberRedirect(next: string | null): string {
+  if (!next?.startsWith('/') || next.startsWith('//')) {
+    return DEFAULT_SUBSCRIBER_REDIRECT;
+  }
+  const pathOnly = next.split('?')[0] ?? next;
+  if (
+    pathOnly === '/login' ||
+    pathOnly === '/signup' ||
+    pathOnly.startsWith('/admin')
+  ) {
+    return DEFAULT_SUBSCRIBER_REDIRECT;
+  }
   return next;
 }
 
@@ -37,23 +60,51 @@ function readErrorDetail(err: unknown): string | undefined {
   return typeof detail === 'string' ? detail : undefined;
 }
 
-function LoginForm() {
-  const router = useRouter();
+function isAdminAuthFailure(err: unknown): boolean {
+  const status = (err as HttpRequestError).status;
+  return status === 401 || status === 400;
+}
+
+function LoginPageContent() {
   const searchParams = useSearchParams();
-  const { signIn, status } = useAdminAuth();
+  const nextParam = searchParams.get('next');
+
+  const {
+    signIn: signInAdmin,
+    signOut: signOutAdmin,
+    status: adminStatus,
+  } = useAdminAuth();
+  const {
+    signIn: signInSubscriber,
+    signOut: signOutSubscriber,
+    status: subscriberStatus,
+  } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
 
-  // If the user is already signed in (e.g. they typed `/login` while authed),
-  // send them straight to the admin app.
+  const checkingSession =
+    adminStatus === 'loading' || subscriberStatus === 'loading';
+  const alreadySignedIn =
+    adminStatus === 'authenticated' || subscriberStatus === 'authenticated';
+
   useEffect(() => {
-    if (status !== 'authenticated') return;
-    const next = safeNextPath(searchParams.get('next'));
-    router.replace(next ?? DEFAULT_ADMIN_REDIRECT);
-  }, [status, router, searchParams]);
+    if (checkingSession) return;
+    if (adminStatus === 'authenticated') {
+      window.location.replace(resolveAdminRedirect(nextParam));
+      return;
+    }
+    if (subscriberStatus === 'authenticated') {
+      window.location.replace(resolveSubscriberRedirect(nextParam));
+    }
+  }, [
+    checkingSession,
+    adminStatus,
+    subscriberStatus,
+    nextParam,
+  ]);
 
   function validate(): FieldErrors {
     const next: FieldErrors = {};
@@ -77,88 +128,67 @@ function LoginForm() {
     if (Object.keys(nextErrors).length > 0) return;
 
     setSubmitting(true);
+    const trimmedEmail = email.trim();
+
     try {
-      const user = await signIn(email.trim(), password);
-      toast.success('Signed in.', {
-        description: `Welcome back, ${user.full_name ?? user.email}.`,
-      });
-      const next = safeNextPath(searchParams.get('next'));
-      router.replace(next ?? DEFAULT_ADMIN_REDIRECT);
-    } catch (err) {
-      const httpStatus = (err as HttpRequestError).status;
-      const detail = readErrorDetail(err);
-      if (httpStatus === 401 || httpStatus === 400) {
-        toast.error('Invalid email or password.');
-      } else if (detail) {
-        toast.error(detail);
-      } else {
-        toast.error('Could not sign in. Please try again.');
+      // 1) Try admin (backend JWT) — same credentials Ken provides for CMS.
+      try {
+        const adminUser = await signInAdmin(trimmedEmail, password);
+        await signOutSubscriber();
+        toast.success('Signed in.', {
+          description: `Welcome back, ${adminUser.full_name ?? adminUser.email}.`,
+        });
+        window.location.replace(resolveAdminRedirect(nextParam));
+        return;
+      } catch (adminErr) {
+        if (!isAdminAuthFailure(adminErr)) {
+          const detail = readErrorDetail(adminErr);
+          toast.error(detail ?? 'Could not sign in. Please try again.');
+          return;
+        }
+      }
+
+      // 2) Fall back to subscriber (Supabase).
+      try {
+        await signInSubscriber(trimmedEmail, password);
+        signOutAdmin();
+        toast.success('Signed in.', {
+          description: 'Welcome back to HiddenAlerts.',
+        });
+        window.location.replace(resolveSubscriberRedirect(nextParam));
+      } catch (subscriberErr) {
+        const message =
+          subscriberErr instanceof Error
+            ? subscriberErr.message
+            : 'Invalid email or password.';
+        if (
+          message.toLowerCase().includes('email not confirmed') ||
+          message.toLowerCase().includes('confirm')
+        ) {
+          toast.error('Please confirm your email before signing in.');
+        } else {
+          toast.error('Invalid email or password.');
+        }
       }
     } finally {
       setSubmitting(false);
     }
   }
 
-  return (
-    <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
-      <Input
-        name="email"
-        type="email"
-        label="Email"
-        autoComplete="email"
-        placeholder="you@example.com"
-        value={email}
-        onChange={e => {
-          setEmail(e.target.value);
-          if (errors.email) setErrors(prev => ({ ...prev, email: undefined }));
-        }}
-        leftIcon={<Mail aria-hidden />}
-        isError={Boolean(errors.email)}
-        errorMessage={errors.email}
-        required
-      />
+  if (checkingSession || alreadySignedIn) {
+    return (
+      <>
+        <LandingHeader />
+        <main className="flex flex-1 flex-col items-center justify-center px-4 py-16">
+          <LoadingState
+            label={alreadySignedIn ? 'Redirecting…' : 'Checking session…'}
+          />
+        </main>
+        <LandingFooter />
+      </>
+    );
+  }
 
-      <Input
-        name="password"
-        type="password"
-        label="Password"
-        autoComplete="current-password"
-        placeholder="Enter your password"
-        value={password}
-        onChange={e => {
-          setPassword(e.target.value);
-          if (errors.password)
-            setErrors(prev => ({ ...prev, password: undefined }));
-        }}
-        leftIcon={<Lock aria-hidden />}
-        passwordWithIcon
-        isError={Boolean(errors.password)}
-        errorMessage={errors.password}
-        required
-      />
-
-      <div className="-mt-1 flex justify-end">
-        <Link
-          href="#"
-          className="text-muted hover:text-foreground focus-visible:ring-primary-500 rounded-sm text-xs underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
-        >
-          Forgot password?
-        </Link>
-      </div>
-
-      <Button
-        type="submit"
-        size="md"
-        loading={submitting}
-        className="w-full"
-      >
-        {submitting ? 'Signing in…' : 'Sign in'}
-      </Button>
-    </form>
-  );
-}
-
-export default function LoginPage() {
   return (
     <>
       <LandingHeader />
@@ -171,11 +201,82 @@ export default function LoginPage() {
           href: '/signup',
         }}
       >
-        <Suspense fallback={<div className="h-72" aria-hidden />}>
-          <LoginForm />
-        </Suspense>
+        <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+          <Input
+            name="email"
+            type="email"
+            label="Email"
+            autoComplete="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={e => {
+              setEmail(e.target.value);
+              if (errors.email)
+                setErrors(prev => ({ ...prev, email: undefined }));
+            }}
+            leftIcon={<Mail aria-hidden />}
+            isError={Boolean(errors.email)}
+            errorMessage={errors.email}
+            required
+          />
+
+          <Input
+            name="password"
+            type="password"
+            label="Password"
+            autoComplete="current-password"
+            placeholder="Enter your password"
+            value={password}
+            onChange={e => {
+              setPassword(e.target.value);
+              if (errors.password)
+                setErrors(prev => ({ ...prev, password: undefined }));
+            }}
+            leftIcon={<Lock aria-hidden />}
+            passwordWithIcon
+            isError={Boolean(errors.password)}
+            errorMessage={errors.password}
+            required
+          />
+
+          <div className="-mt-1 flex justify-end">
+            <Link
+              href="#"
+              className="text-muted hover:text-foreground focus-visible:ring-primary-500 rounded-sm text-xs underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+            >
+              Forgot password?
+            </Link>
+          </div>
+
+          <Button
+            type="submit"
+            size="md"
+            loading={submitting}
+            className="w-full"
+          >
+            {submitting ? 'Signing in…' : 'Sign in'}
+          </Button>
+        </form>
       </AuthFormShell>
       <LandingFooter />
     </>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <>
+          <LandingHeader />
+          <main className="flex flex-1 flex-col items-center justify-center px-4 py-16">
+            <LoadingState label="Loading…" />
+          </main>
+          <LandingFooter />
+        </>
+      }
+    >
+      <LoginPageContent />
+    </Suspense>
   );
 }

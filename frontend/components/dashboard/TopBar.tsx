@@ -4,9 +4,10 @@ import {
   AlertsSearchForm,
   AlertsSearchFormFallback,
 } from '@/components/alerts/AlertsSearchForm';
-import { Avatar } from '@/components';
+import { useAuth } from '@/contexts/AuthProvider';
 import { cn } from '@/lib/utils';
-import { Bell, ChevronDown, Menu } from 'lucide-react';
+import { Bell, LogOut, Menu } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import type { FC } from 'react';
 import { Suspense } from 'react';
 
@@ -23,7 +24,18 @@ export const TopBar: FC<TopBarProps> = ({
   onOpenSidebar,
   className,
   showAlertsSearch = true,
-}) => (
+}) => {
+  const { subscriber, user, signOut } = useAuth();
+  const router = useRouter();
+
+  async function handleSignOut() {
+    await signOut();
+    router.replace('/login');
+  }
+
+  const displayEmail = subscriber?.email ?? user?.email;
+
+  return (
   <header
     className={cn(
       'border-border bg-background-alt sticky top-0 z-30 flex min-h-14 shrink-0 items-center gap-2 border-b px-3 py-1.5 sm:gap-3 lg:h-14 lg:px-5 lg:py-0',
@@ -58,14 +70,22 @@ export const TopBar: FC<TopBarProps> = ({
         <Bell className="size-5" />
       </button>
 
+      {displayEmail ? (
+        <span className="text-muted hidden max-w-[10rem] truncate text-sm sm:inline">
+          {displayEmail}
+        </span>
+      ) : null}
+
       <button
         type="button"
-        className="hover:bg-surface inline-flex cursor-pointer items-center gap-1 rounded-md py-1 pr-1 pl-1 sm:pr-2"
-        aria-label="Account menu"
+        onClick={handleSignOut}
+        className="text-muted hover:text-foreground hover:bg-surface inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm font-medium transition-colors"
+        aria-label="Sign out"
       >
-        <Avatar size="sm" alt="Account" />
-        <ChevronDown className="text-muted hidden size-4 sm:block" aria-hidden />
+        <LogOut className="size-4" aria-hidden />
+        <span className="hidden sm:inline">Logout</span>
       </button>
     </div>
   </header>
-);
+  );
+};
