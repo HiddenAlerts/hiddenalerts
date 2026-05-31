@@ -22,7 +22,7 @@ export type SidebarNavItem = {
 const DEFAULT_NAV: SidebarNavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/alerts', label: 'Alerts', icon: MonitorDot },
-  { href: '/settings', label: 'Settings (Coming Soon)', icon: Settings },
+  { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
 export type SidebarProps = {
