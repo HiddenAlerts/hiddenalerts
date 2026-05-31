@@ -5,11 +5,14 @@ import { LandingFooter } from '@/components/landing/LandingFooter';
 import { LandingHeader } from '@/components/landing/LandingHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { LoadingState } from '@/components/ui/LoadingState';
+import { useAdminAuth } from '@/contexts/AdminAuthProvider';
+import { useAuth } from '@/contexts/AuthProvider';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { Lock, Mail, User } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 
 type FieldErrors = {
@@ -21,8 +24,35 @@ type FieldErrors = {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const ADMIN_REDIRECT = '/admin/briefs';
+const SUBSCRIBER_REDIRECT = '/dashboard';
+const PAYWALL_REDIRECT = '/subscribe';
+
 export default function SignupPage() {
   const router = useRouter();
+  const { status: adminStatus } = useAdminAuth();
+  const { status: subscriberStatus, subscriber } = useAuth();
+
+  const checkingSession =
+    adminStatus === 'loading' || subscriberStatus === 'loading';
+  const alreadySignedIn =
+    adminStatus === 'authenticated' || subscriberStatus === 'authenticated';
+
+  useEffect(() => {
+    if (checkingSession) return;
+    if (adminStatus === 'authenticated') {
+      window.location.replace(ADMIN_REDIRECT);
+      return;
+    }
+    if (subscriberStatus === 'authenticated') {
+      const target =
+        subscriber?.has_active_subscription === false
+          ? PAYWALL_REDIRECT
+          : SUBSCRIBER_REDIRECT;
+      window.location.replace(target);
+    }
+  }, [checkingSession, adminStatus, subscriberStatus, subscriber]);
+
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -102,6 +132,20 @@ export default function SignupPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (checkingSession || alreadySignedIn) {
+    return (
+      <>
+        <LandingHeader />
+        <main className="flex flex-1 flex-col items-center justify-center px-4 py-16">
+          <LoadingState
+            label={alreadySignedIn ? 'Redirecting…' : 'Checking session…'}
+          />
+        </main>
+        <LandingFooter />
+      </>
+    );
   }
 
   return (
