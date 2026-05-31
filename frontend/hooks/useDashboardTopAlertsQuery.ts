@@ -1,5 +1,6 @@
 'use client';
 
+import { useAuth } from '@/contexts/AuthProvider';
 import type { DashboardTopAlertItem } from '@/data/dashboardTopAlerts';
 import { fetchTopAlerts } from '@/lib/api/alerts';
 import { mapApiAlertToDashboardTopAlertItem } from '@/lib/mapApiAlertToDashboardTopAlert';
@@ -10,11 +11,13 @@ export function dashboardTopAlertsQueryKey() {
 }
 
 export function useDashboardTopAlertsQuery(options?: { enabled?: boolean }) {
-  const enabled = options?.enabled ?? true;
+  const { getAccessToken } = useAuth();
+  const token = getAccessToken();
+  const enabled = (options?.enabled ?? true) && Boolean(token);
 
   return useQuery({
     queryKey: dashboardTopAlertsQueryKey(),
-    queryFn: fetchTopAlerts,
+    queryFn: () => fetchTopAlerts(token!),
     select: data =>
       (data.alerts ?? [])
         .slice(0, 3)

@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import { Figtree, Manrope } from 'next/font/google';
 
 import './globals.css';
+import { AdminAuthProvider } from '@/contexts/AdminAuthProvider';
+import { AuthProvider } from '@/contexts/AuthProvider';
 import { QueryProvider } from '@/lib/query';
 import { NuqsAdapter } from 'nuqs/adapters/next/app';
 import { Toaster } from 'sonner';
@@ -36,7 +38,11 @@ export default function RootLayout({
     >
       <body className={`${manrope.className} flex min-h-full flex-col`}>
         <NuqsAdapter>
-          <QueryProvider>{children}</QueryProvider>
+          <QueryProvider>
+            <AdminAuthProvider>
+              <AuthProvider>{children}</AuthProvider>
+            </AdminAuthProvider>
+          </QueryProvider>
         </NuqsAdapter>
         <Toaster />
       </body>

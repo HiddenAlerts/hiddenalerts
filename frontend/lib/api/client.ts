@@ -23,13 +23,19 @@ function resolveUrl(path: string) {
 
 export type ApiRequestInit = RequestInit & {
   json?: Record<string, unknown> | unknown[];
+  /**
+   * When set, an `Authorization: Bearer <token>` header is added. Used by
+   * admin (backend JWT) and subscriber (Supabase access token) callers.
+   * Passing `null` is treated as "no token".
+   */
+  token?: string | null;
 };
 
 export async function apiRequest<TResponse>(
   path: string,
   init?: ApiRequestInit,
 ): Promise<TResponse> {
-  const { json, headers: userHeaders, ...rest } = init ?? {};
+  const { json, headers: userHeaders, token, ...rest } = init ?? {};
   const url = resolveUrl(path);
 
   const body =
@@ -40,6 +46,9 @@ export async function apiRequest<TResponse>(
   const headers = new Headers(userHeaders);
   if (json !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
+  }
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
   }
 
   const res = await fetch(url, { ...rest, body, headers });
@@ -71,14 +80,14 @@ export async function apiRequest<TResponse>(
   return (await res.text()) as TResponse;
 }
 
-export function apiGet<TResponse>(path: string, init?: RequestInit) {
+export function apiGet<TResponse>(path: string, init?: ApiRequestInit) {
   return apiRequest<TResponse>(path, { ...init, method: 'GET' });
 }
 
 export function apiPost<TResponse>(
   path: string,
   body: NonNullable<ApiRequestInit['json']>,
-  init?: RequestInit,
+  init?: ApiRequestInit,
 ) {
   return apiRequest<TResponse>(path, { ...init, method: 'POST', json: body });
 }

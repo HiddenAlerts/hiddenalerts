@@ -4,11 +4,12 @@ import {
   AlertsSearchForm,
   AlertsSearchFormFallback,
 } from '@/components/alerts/AlertsSearchForm';
-import { Avatar } from '@/components';
 import { cn } from '@/lib/utils';
-import { Bell, ChevronDown, Menu } from 'lucide-react';
+import { Bell, Menu } from 'lucide-react';
 import type { FC } from 'react';
 import { Suspense } from 'react';
+
+import { UserMenu } from './UserMenu';
 
 export type TopBarProps = {
   onOpenSidebar: () => void;
@@ -58,14 +59,7 @@ export const TopBar: FC<TopBarProps> = ({
         <Bell className="size-5" />
       </button>
 
-      <button
-        type="button"
-        className="hover:bg-surface inline-flex cursor-pointer items-center gap-1 rounded-md py-1 pr-1 pl-1 sm:pr-2"
-        aria-label="Account menu"
-      >
-        <Avatar size="sm" alt="Account" />
-        <ChevronDown className="text-muted hidden size-4 sm:block" aria-hidden />
-      </button>
+      <UserMenu />
     </div>
   </header>
 );

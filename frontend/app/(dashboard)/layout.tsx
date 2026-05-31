@@ -1,3 +1,4 @@
+import { SubscriberGate } from '@/components/auth/SubscriberGate';
 import { DashboardShell } from '@/components/dashboard';
 
 export default function DashboardLayout({
@@ -5,5 +6,9 @@ export default function DashboardLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return <DashboardShell>{children}</DashboardShell>;
+  return (
+    <DashboardShell>
+      <SubscriberGate>{children}</SubscriberGate>
+    </DashboardShell>
+  );
 }
