@@ -2,8 +2,8 @@
 
 import { LandingFooter } from '@/components/landing/LandingFooter';
 import { LandingHeader } from '@/components/landing/LandingHeader';
-import { Button } from '@/components/ui/button';
 import { LoadingState } from '@/components/ui/LoadingState';
+import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthProvider';
 import { createCheckout } from '@/lib/api/billing';
 import type { HttpRequestError } from '@/lib/api/client';
@@ -29,7 +29,7 @@ const PLANS: Plan[] = [
   {
     id: 'monthly',
     name: 'Monthly',
-    priceLabel: '$49',
+    priceLabel: '$9',
     cadence: '/ month',
     description: 'Flexible access — cancel any time.',
     features: [
@@ -42,10 +42,10 @@ const PLANS: Plan[] = [
   {
     id: 'annual',
     name: 'Annual',
-    priceLabel: '$490',
+    priceLabel: '$79',
     cadence: '/ year',
-    description: 'Two months free vs. monthly billing.',
-    badge: 'Save ~17%',
+    description: 'Save vs. monthly billing.',
+    badge: 'Save ~27%',
     highlighted: true,
     features: [
       'Everything in Monthly',
@@ -67,7 +67,9 @@ function readErrorDetail(err: unknown): string | undefined {
 export default function SubscribePage() {
   const router = useRouter();
   const { status, subscriber, getAccessToken, signOut } = useAuth();
-  const [submittingPlan, setSubmittingPlan] = useState<BillingPlan | null>(null);
+  const [submittingPlan, setSubmittingPlan] = useState<BillingPlan | null>(
+    null,
+  );
 
   // Logged-out users land on signup first (auth before paywall).
   useEffect(() => {
@@ -128,9 +130,7 @@ export default function SubscribePage() {
         <LandingHeader />
         <main className="flex flex-1 flex-col items-center justify-center px-4 py-16">
           <LoadingState
-            label={
-              status === 'loading' ? 'Checking session…' : 'Redirecting…'
-            }
+            label={status === 'loading' ? 'Checking session…' : 'Redirecting…'}
           />
         </main>
         <LandingFooter />
