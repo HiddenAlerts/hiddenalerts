@@ -6,8 +6,8 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import type { SubscriberMeResponse } from '@/types/subscriber';
 import type { Session, User } from '@supabase/supabase-js';
 import {
-  createContext,
   type ReactNode,
+  createContext,
   useCallback,
   useContext,
   useEffect,
@@ -15,6 +15,51 @@ import {
 } from 'react';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
+
+const SUPABASE_HASH_KEYS = [
+  'access_token',
+  'refresh_token',
+  'provider_token',
+  'provider_refresh_token',
+  'expires_in',
+  'expires_at',
+  'token_type',
+  'type',
+  'error',
+  'error_code',
+  'error_description',
+];
+
+function replaceUrlWithoutHash() {
+  const { pathname, search } = window.location;
+  window.history.replaceState(null, '', `${pathname}${search}`);
+}
+
+/** Removes a lone trailing "#" (safe to call anytime). */
+function stripEmptyLocationHash() {
+  if (typeof window === 'undefined') return;
+  const { hash } = window.location;
+  if (!hash) return;
+  const hashBody = hash.replace(/^#/, '').trim();
+  if (!hashBody) replaceUrlWithoutHash();
+}
+
+/** Removes Supabase auth tokens from the hash (call after session is read). */
+function stripSupabaseAuthHash() {
+  if (typeof window === 'undefined') return;
+  const { hash } = window.location;
+  if (!hash) return;
+
+  const hashBody = hash.replace(/^#/, '').trim();
+  if (!hashBody) {
+    replaceUrlWithoutHash();
+    return;
+  }
+
+  const params = new URLSearchParams(hashBody);
+  const hasAuthKey = SUPABASE_HASH_KEYS.some(key => params.has(key));
+  if (hasAuthKey) replaceUrlWithoutHash();
+}
 
 export type AuthContextValue = {
   status: AuthStatus;
@@ -47,7 +92,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const applySession = useCallback(
-    async (nextSession: Session | null): Promise<SubscriberMeResponse | null> => {
+    async (
+      nextSession: Session | null,
+    ): Promise<SubscriberMeResponse | null> => {
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
 
@@ -82,25 +129,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  function cleanupAuthUrl() {
+    stripSupabaseAuthHash();
+    // Supabase may clear token params but leave a bare "#" on the next tick.
+    queueMicrotask(stripEmptyLocationHash);
+  }
+
   useEffect(() => {
     const supabase = getSupabaseClient();
 
     void supabase.auth.getSession().then(({ data }) => {
       void applySession(data.session);
+      cleanupAuthUrl();
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       void applySession(nextSession);
+      cleanupAuthUrl();
     });
 
     return () => subscription.unsubscribe();
   }, [applySession]);
 
-  const getAccessToken = useCallback(() => session?.access_token ?? null, [
-    session,
-  ]);
+  const getAccessToken = useCallback(
+    () => session?.access_token ?? null,
+    [session],
+  );
 
   const signIn = useCallback(
     async (email: string, password: string) => {

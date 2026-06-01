@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { useAdminAuth } from '@/contexts/AdminAuthProvider';
 import { useAuth } from '@/contexts/AuthProvider';
+import { getEmailConfirmRedirectUrl } from '@/lib/auth/redirectUrl';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { Lock, Mail, User } from 'lucide-react';
 import Link from 'next/link';
@@ -105,6 +106,7 @@ export default function SignupPage() {
         password,
         options: {
           data: { full_name: name.trim() },
+          emailRedirectTo: getEmailConfirmRedirectUrl('/email-confirmed'),
         },
       });
 
@@ -122,9 +124,21 @@ export default function SignupPage() {
         return;
       }
 
+      // Supabase silently "succeeds" when an email is already registered:
+      // `data.user` is returned but `identities` is empty and no email is sent.
+      // Detect that case so the user isn't left waiting for a mail.
+      const identitiesEmpty = data.user?.identities?.length === 0;
+      if (identitiesEmpty) {
+        toast.error('An account with this email already exists.', {
+          description: 'Try signing in instead.',
+        });
+        router.replace('/login');
+        return;
+      }
+
       toast.success('Account created.', {
         description:
-          'If email confirmation is enabled, check your inbox before signing in.',
+          'Check your inbox to confirm your email before signing in.',
       });
       router.replace('/login');
     } catch {
