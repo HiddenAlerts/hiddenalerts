@@ -3,16 +3,16 @@
 import { AuthFormShell } from '@/components/auth/AuthFormShell';
 import { LandingFooter } from '@/components/landing/LandingFooter';
 import { LandingHeader } from '@/components/landing/LandingHeader';
+import { LoadingState } from '@/components/ui/LoadingState';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { LoadingState } from '@/components/ui/LoadingState';
 import { useAdminAuth } from '@/contexts/AdminAuthProvider';
 import { useAuth } from '@/contexts/AuthProvider';
 import type { HttpRequestError } from '@/lib/api/client';
 import { Lock, Mail } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState, type FormEvent } from 'react';
+import { type FormEvent, Suspense, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 type FieldErrors = {
@@ -89,8 +89,12 @@ function LoginPageContent() {
 
   const checkingSession =
     adminStatus === 'loading' || subscriberStatus === 'loading';
+
+  const subscriberFullyAuthenticated =
+    subscriberStatus === 'authenticated' &&
+    subscriber?.has_active_subscription === true;
   const alreadySignedIn =
-    adminStatus === 'authenticated' || subscriberStatus === 'authenticated';
+    adminStatus === 'authenticated' || subscriberFullyAuthenticated;
 
   useEffect(() => {
     if (checkingSession) return;
@@ -98,20 +102,10 @@ function LoginPageContent() {
       window.location.replace(resolveAdminRedirect(nextParam));
       return;
     }
-    if (subscriberStatus === 'authenticated') {
-      const target =
-        subscriber?.has_active_subscription === false
-          ? PAYWALL_REDIRECT
-          : resolveSubscriberRedirect(nextParam);
-      window.location.replace(target);
+    if (subscriberFullyAuthenticated) {
+      window.location.replace(resolveSubscriberRedirect(nextParam));
     }
-  }, [
-    checkingSession,
-    adminStatus,
-    subscriberStatus,
-    subscriber,
-    nextParam,
-  ]);
+  }, [checkingSession, adminStatus, subscriberFullyAuthenticated, nextParam]);
 
   function validate(): FieldErrors {
     const next: FieldErrors = {};
@@ -212,7 +206,11 @@ function LoginPageContent() {
           href: '/signup',
         }}
       >
-        <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+        <form
+          onSubmit={handleSubmit}
+          noValidate
+          className="flex flex-col gap-4"
+        >
           <Input
             name="email"
             type="email"
