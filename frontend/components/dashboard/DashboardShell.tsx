@@ -31,8 +31,10 @@ export const DashboardShell: FC<DashboardShellProps> = ({ children }) => {
   }, []);
 
   const isAlertsRoute = pathname === '/alerts';
+  const isDashboardRoute = pathname === '/dashboard';
+  // The dashboard renders its own search field inline, so hide it in the top bar.
   const topBarShowsSearch =
-    !isAlertsRoute || !mounted || mqMdUp;
+    !isDashboardRoute && (!isAlertsRoute || !mounted || mqMdUp);
 
   const showMobileAlertsSearch =
     isAlertsRoute && mounted && !mqMdUp;

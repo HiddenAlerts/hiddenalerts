@@ -65,6 +65,31 @@ export function formatTopAlertFooterTimestampUtc(iso: string) {
   return `${datePart} • ${timePart} UTC`;
 }
 
+/**
+ * Relative time label for the dashboard “Updated …” status line, e.g.
+ * `just now`, `5 minutes ago`, `2 hours ago`, `3 days ago`. Falls back to the
+ * absolute UTC timestamp once the gap exceeds a month.
+ */
+export function formatDashboardUpdatedRelative(iso: string, now: Date = new Date()) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+
+  const deltaMs = Math.max(0, now.getTime() - d.getTime());
+  const seconds = Math.floor(deltaMs / 1000);
+  if (seconds < 45) return 'just now';
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+
+  return formatDashboardLastUpdatedUtc(iso);
+}
+
 /** Dashboard header “last updated” line. */
 export function formatDashboardLastUpdatedUtc(iso: string) {
   const d = new Date(iso);

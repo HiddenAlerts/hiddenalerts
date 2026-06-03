@@ -53,10 +53,16 @@ export const TopBar: FC<TopBarProps> = ({
     <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
       <button
         type="button"
-        className="text-muted hover:text-foreground hover:bg-surface inline-flex size-10 cursor-pointer items-center justify-center rounded-md"
-        aria-label="Notifications"
+        className="text-muted hover:text-foreground hover:bg-surface relative inline-flex size-10 cursor-pointer items-center justify-center rounded-md"
+        aria-label="Notifications, 3 unread"
       >
         <Bell className="size-5" />
+        <span
+          className="bg-danger absolute top-1 right-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full px-1 text-[0.65rem] font-semibold leading-[1.1rem] text-white"
+          aria-hidden
+        >
+          3
+        </span>
       </button>
 
       <UserMenu />

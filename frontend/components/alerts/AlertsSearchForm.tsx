@@ -1,6 +1,7 @@
 'use client';
 
 import { Input } from '@/components';
+import { cn } from '@/lib/utils';
 import { Search } from 'lucide-react';
 import {
   usePathname,
@@ -25,6 +26,8 @@ type AlertsSearchFormInnerProps = {
   pathname: string;
   searchParams: ReadonlyURLSearchParams;
   className?: string;
+  placeholder?: string;
+  inputClassName?: string;
 };
 
 const AlertsSearchFormInner: FC<AlertsSearchFormInnerProps> = ({
@@ -32,6 +35,8 @@ const AlertsSearchFormInner: FC<AlertsSearchFormInnerProps> = ({
   pathname,
   searchParams,
   className,
+  placeholder = 'Search alerts',
+  inputClassName,
 }) => {
   const syncSearchQuery = pathnameSyncsSearchQuery(pathname);
   const isAlertsPage = pathname === '/alerts';
@@ -126,11 +131,11 @@ const AlertsSearchFormInner: FC<AlertsSearchFormInnerProps> = ({
       <Input
         type="search"
         name="alert-search"
-        placeholder="Search alerts"
+        placeholder={placeholder}
         leftIcon={<Search />}
         inputSize="sm"
-        className="h-10"
-        aria-label="Search alerts"
+        className={cn('h-10', inputClassName)}
+        aria-label={placeholder}
         title="Results update shortly after you stop typing"
         value={draft}
         onChange={e => setDraft(e.target.value)}
@@ -139,7 +144,17 @@ const AlertsSearchFormInner: FC<AlertsSearchFormInnerProps> = ({
   );
 };
 
-export const AlertsSearchForm: FC<{ className?: string }> = ({ className }) => {
+export type AlertsSearchFormProps = {
+  className?: string;
+  placeholder?: string;
+  inputClassName?: string;
+};
+
+export const AlertsSearchForm: FC<AlertsSearchFormProps> = ({
+  className,
+  placeholder,
+  inputClassName,
+}) => {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -151,22 +166,32 @@ export const AlertsSearchForm: FC<{ className?: string }> = ({ className }) => {
       pathname={pathname}
       searchParams={searchParams}
       className={className}
+      placeholder={placeholder}
+      inputClassName={inputClassName}
     />
   );
 };
 
-export const AlertsSearchFormFallback: FC<{ className?: string }> = ({
+export type AlertsSearchFormFallbackProps = {
+  className?: string;
+  placeholder?: string;
+  inputClassName?: string;
+};
+
+export const AlertsSearchFormFallback: FC<AlertsSearchFormFallbackProps> = ({
   className,
+  placeholder = 'Search alerts',
+  inputClassName,
 }) => (
   <div className={className ?? 'min-w-0 flex-1'}>
     <Input
       type="search"
       name="alert-search-fallback"
-      placeholder="Search alerts"
+      placeholder={placeholder}
       leftIcon={<Search />}
       inputSize="sm"
-      className="h-10"
-      aria-label="Search alerts"
+      className={cn('h-10', inputClassName)}
+      aria-label={placeholder}
       disabled
     />
   </div>
