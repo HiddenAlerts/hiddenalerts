@@ -115,8 +115,12 @@ export const DashboardTopAlertRow: FC<DashboardTopAlertRowProps> = ({
             {alert.riskRange}
           </span>
         </div>
+        <div
+          className="bg-border hidden w-px self-stretch sm:block"
+          aria-hidden
+        />
 
-        <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-4">
+        <div className="flex min-w-0 flex-1 items-start gap-3 sm:max-w-[82%] sm:gap-4 lg:max-w-[74%]">
           <span
             className={cn(
               'mt-0.5 hidden size-10 shrink-0 items-center justify-center rounded-full sm:inline-flex',
@@ -128,7 +132,7 @@ export const DashboardTopAlertRow: FC<DashboardTopAlertRowProps> = ({
           </span>
 
           <div className="min-w-0 flex-1 space-y-1.5">
-            <h3 className="text-foreground line-clamp-2 text-base font-semibold leading-snug">
+            <h3 className="text-foreground line-clamp-2 text-base leading-snug font-semibold">
               {alert.title}
             </h3>
             {alert.tags.length > 0 ? (
@@ -152,7 +156,7 @@ export const DashboardTopAlertRow: FC<DashboardTopAlertRowProps> = ({
               </p>
             ) : null}
             {alert.headline ? (
-              <p className="text-foreground text-sm font-semibold leading-snug">
+              <p className="text-foreground text-sm leading-snug font-semibold">
                 {alert.headline}
               </p>
             ) : null}
@@ -162,6 +166,10 @@ export const DashboardTopAlertRow: FC<DashboardTopAlertRowProps> = ({
           </div>
         </div>
 
+        <div
+          className="bg-border hidden w-px self-stretch sm:block"
+          aria-hidden
+        />
         <div className="flex shrink-0 flex-row items-center justify-between gap-3 sm:flex-col sm:items-end sm:gap-2">
           {alert.isNew ? (
             <span className="bg-danger inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold text-white">
@@ -170,14 +178,16 @@ export const DashboardTopAlertRow: FC<DashboardTopAlertRowProps> = ({
           ) : (
             <span aria-hidden className="hidden sm:block sm:h-5" />
           )}
-          <div className="text-muted inline-flex items-center gap-1.5 text-xs leading-snug sm:flex-col sm:items-end sm:gap-0">
+          <div className="text-muted inline-flex items-center gap-2 text-sm leading-snug">
             <Calendar
-              className="text-muted-foreground size-3.5 shrink-0 sm:hidden"
+              className="text-muted-foreground size-4 shrink-0"
               strokeWidth={1.5}
               aria-hidden
             />
-            <span className="text-foreground sm:text-right">{date}</span>
-            <span className="sm:text-right">{time}</span>
+            <div className="flex flex-col">
+              <span className="text-foreground">{date}</span>
+              <span>{time}</span>
+            </div>
           </div>
           <ChevronRight
             className="text-danger group-hover:text-danger-300 size-5 shrink-0 transition-colors"

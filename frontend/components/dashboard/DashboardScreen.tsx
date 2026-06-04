@@ -4,14 +4,17 @@ import {
   AlertsSearchForm,
   AlertsSearchFormFallback,
 } from '@/components/alerts/AlertsSearchForm';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { LoadingState } from '@/components/ui/LoadingState';
 import { useAuth } from '@/contexts/AuthProvider';
 import { DASHBOARD_DUMMY_LAST_UPDATED_ISO } from '@/data/dashboardConstants';
 import { DASHBOARD_MOCK_BRIEFS } from '@/data/dashboardBriefs';
 import { DASHBOARD_RECENT_BRIEFS } from '@/data/dashboardRecentBriefs';
-import { DASHBOARD_TOP_ALERTS_THIS_WEEK } from '@/data/dashboardTopAlertsThisWeek';
 import { MOCK_ALERTS } from '@/data/mockAlerts';
 import { useAlertsSearchQuery } from '@/hooks/useAlertsSearchQuery';
 import { useAlertsStatsQuery } from '@/hooks/useAlertsStatsQuery';
+import { useDashboardTopAlertsWeekQuery } from '@/hooks/useDashboardTopAlertsWeekQuery';
 import { partitionAlertsByRisk } from '@/lib/alertRisk';
 import {
   mapAlertsStatsToRiskCounts,
@@ -19,6 +22,7 @@ import {
 } from '@/lib/api/alerts';
 import { buildAlertsListQueryString } from '@/lib/alertsUrlState';
 import { formatDashboardUpdatedRelative } from '@/lib/formatDashboardDate';
+import { mapApiAlertToDashboardTopAlertWeeklyItem } from '@/lib/mapApiAlertToDashboardTopAlertWeekly';
 import { AlertTriangle, ShieldAlert } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { FC } from 'react';
@@ -83,6 +87,13 @@ export const DashboardScreen: FC = () => {
 
   const searchRecords = searchQuery.data?.alerts;
 
+  const {
+    data: topAlertsWeekData,
+    refetch: refetchTopAlertsWeek,
+    isError: topAlertsWeekError,
+    isPending: topAlertsWeekPending,
+  } = useDashboardTopAlertsWeekQuery({ enabled: !isSearchActive });
+
   const { high: mockHigh, medium: mockMedium } = useMemo(
     () => partitionAlertsByRisk(MOCK_ALERTS),
     [],
@@ -94,6 +105,18 @@ export const DashboardScreen: FC = () => {
     }
     return partitionAlertsByRisk(searchRecords.map(mapApiAlertToAlertItem));
   }, [isSearchActive, searchRecords]);
+
+  const topAlertsFromSearch = useMemo(() => {
+    if (!isSearchActive || !searchRecords?.length) return [];
+    return [...searchRecords]
+      .sort((a, b) => b.signal_score - a.signal_score)
+      .slice(0, 3)
+      .map(item => mapApiAlertToDashboardTopAlertWeeklyItem(item));
+  }, [isSearchActive, searchRecords]);
+
+  const topAlerts = isSearchActive
+    ? topAlertsFromSearch
+    : (topAlertsWeekData ?? []);
 
   const criticalCount = isSearchActive
     ? searchPartition.high.length
@@ -153,12 +176,25 @@ export const DashboardScreen: FC = () => {
   const newHighSinceLogin = isSearchActive ? 0 : NEW_HIGH_SINCE_LAST_LOGIN;
   const totalNewSinceLogin = newCriticalSinceLogin + newHighSinceLogin;
 
+  const searchResultsLoading =
+    isSearchActive && searchQuery.isPending && searchQuery.data === undefined;
+  const topAlertsPendingEffective = isSearchActive
+    ? searchResultsLoading
+    : topAlertsWeekPending;
+  const topAlertsErrorEffective = isSearchActive
+    ? searchQuery.isError
+    : topAlertsWeekError;
+  const topAlertsStillLoading =
+    topAlertsPendingEffective &&
+    !(isSearchActive ? searchQuery.data : topAlertsWeekData);
+
   function handleRefresh() {
     setLastUpdatedIso(new Date().toISOString());
     if (isSearchActive) {
       void searchQuery.refetch();
     } else {
       void refetchStats();
+      void refetchTopAlertsWeek();
     }
     router.refresh();
   }
@@ -222,9 +258,36 @@ export const DashboardScreen: FC = () => {
       />
 
       <DashboardTopAlertsThisWeek
-        alerts={DASHBOARD_TOP_ALERTS_THIS_WEEK}
+        alerts={topAlerts}
         viewAllHref={alertsContinueHref.all}
         viewAllLabel="View all alerts"
+        bodyContent={
+          topAlertsStillLoading ? (
+            <LoadingState label="Loading top alerts…" className="py-12" />
+          ) : topAlertsErrorEffective ? (
+            <ErrorState
+              title="Unable to load top alerts"
+              message="We could not fetch the top alerts right now. Please try again."
+              onRetry={() => {
+                if (isSearchActive) void searchQuery.refetch();
+                else void refetchTopAlertsWeek();
+              }}
+              className="py-10"
+            />
+          ) : topAlerts.length === 0 ? (
+            <EmptyState
+              title={
+                isSearchActive ? 'No matching alerts' : 'No top alerts yet'
+              }
+              description={
+                isSearchActive
+                  ? 'No alerts match your search right now.'
+                  : 'Top alerts will appear here once high-priority signals are available.'
+              }
+              className="py-10"
+            />
+          ) : undefined
+        }
       />
     </div>
   );

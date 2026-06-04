@@ -14,3 +14,8 @@ export {
   dashboardTopAlertsQueryKey,
   useDashboardTopAlertsQuery,
 } from './useDashboardTopAlertsQuery';
+export {
+  DASHBOARD_TOP_ALERTS_WEEK_LIMIT,
+  dashboardTopAlertsWeekQueryKey,
+  useDashboardTopAlertsWeekQuery,
+} from './useDashboardTopAlertsWeekQuery';
