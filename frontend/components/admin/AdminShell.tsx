@@ -25,7 +25,7 @@ export const AdminShell: FC<AdminShellProps> = ({ children }) => {
 
   function handleSignOut() {
     signOut();
-    router.replace('/login');
+    router.replace('/admin/login');
   }
 
   return (

@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
 type AuthFormShellProps = {
   title: string;
   subtitle?: string;
-  footer: {
+  footer?: {
     prompt: string;
     linkLabel: string;
     href: string;
@@ -51,15 +51,17 @@ export function AuthFormShell({
 
         <div className="mt-7">{children}</div>
 
-        <p className="text-muted mt-7 text-center text-sm">
-          {footer.prompt}{' '}
-          <Link
-            href={footer.href}
-            className="text-primary-500 hover:text-primary-400 focus-visible:ring-primary-500 rounded-sm font-medium underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
-          >
-            {footer.linkLabel}
-          </Link>
-        </p>
+        {footer ? (
+          <p className="text-muted mt-7 text-center text-sm">
+            {footer.prompt}{' '}
+            <Link
+              href={footer.href}
+              className="text-primary-500 hover:text-primary-400 focus-visible:ring-primary-500 rounded-sm font-medium underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+            >
+              {footer.linkLabel}
+            </Link>
+          </p>
+        ) : null}
       </div>
     </main>
   );

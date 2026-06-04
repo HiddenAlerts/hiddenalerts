@@ -6,9 +6,9 @@ import { LandingHeader } from '@/components/landing/LandingHeader';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useAuth } from '@/contexts/AuthProvider';
+import { useAdminAuth } from '@/contexts/AdminAuthProvider';
+import type { HttpRequestError } from '@/lib/api/client';
 import { Lock, Mail } from 'lucide-react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { type FormEvent, Suspense, useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -20,51 +20,50 @@ type FieldErrors = {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const DEFAULT_SUBSCRIBER_REDIRECT = '/dashboard';
-const PAYWALL_REDIRECT = '/subscribe';
+const DEFAULT_ADMIN_REDIRECT = '/admin/briefs';
 
-function resolveSubscriberRedirect(next: string | null): string {
+function resolveAdminRedirect(next: string | null): string {
   if (!next?.startsWith('/') || next.startsWith('//')) {
-    return DEFAULT_SUBSCRIBER_REDIRECT;
+    return DEFAULT_ADMIN_REDIRECT;
   }
   const pathOnly = next.split('?')[0] ?? next;
-  if (
-    pathOnly === '/login' ||
-    pathOnly === '/signup' ||
-    pathOnly.startsWith('/admin')
-  ) {
-    return DEFAULT_SUBSCRIBER_REDIRECT;
-  }
-  return next;
+  if (pathOnly === '/admin/login') return DEFAULT_ADMIN_REDIRECT;
+  if (pathOnly.startsWith('/admin')) return next;
+  return DEFAULT_ADMIN_REDIRECT;
 }
 
-function LoginPageContent() {
+function readErrorDetail(err: unknown): string | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  const body = (err as HttpRequestError).body;
+  if (!body || typeof body !== 'object') return undefined;
+  const detail = (body as { detail?: unknown }).detail;
+  return typeof detail === 'string' ? detail : undefined;
+}
+
+function isAdminAuthFailure(err: unknown): boolean {
+  const status = (err as HttpRequestError).status;
+  return status === 401 || status === 400;
+}
+
+function AdminLoginContent() {
   const searchParams = useSearchParams();
   const nextParam = searchParams.get('next');
 
-  const {
-    signIn: signInSubscriber,
-    status: subscriberStatus,
-    subscriber,
-  } = useAuth();
+  const { signIn, status } = useAdminAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
 
-  const checkingSession = subscriberStatus === 'loading';
-
-  const subscriberFullyAuthenticated =
-    subscriberStatus === 'authenticated' &&
-    subscriber?.has_active_subscription === true;
+  const checkingSession = status === 'loading';
+  const alreadySignedIn = status === 'authenticated';
 
   useEffect(() => {
-    if (checkingSession) return;
-    if (subscriberFullyAuthenticated) {
-      window.location.replace(resolveSubscriberRedirect(nextParam));
+    if (status === 'authenticated') {
+      window.location.replace(resolveAdminRedirect(nextParam));
     }
-  }, [checkingSession, subscriberFullyAuthenticated, nextParam]);
+  }, [status, nextParam]);
 
   function validate(): FieldErrors {
     const next: FieldErrors = {};
@@ -91,42 +90,30 @@ function LoginPageContent() {
     const trimmedEmail = email.trim();
 
     try {
-      const me = await signInSubscriber(trimmedEmail, password);
+      const adminUser = await signIn(trimmedEmail, password);
       toast.success('Signed in.', {
-        description: 'Welcome back to HiddenAlerts.',
+        description: `Welcome back, ${adminUser.full_name ?? adminUser.email}.`,
       });
-      const target =
-        me?.has_active_subscription === false
-          ? PAYWALL_REDIRECT
-          : resolveSubscriberRedirect(nextParam);
-      window.location.replace(target);
-    } catch (subscriberErr) {
-      const message =
-        subscriberErr instanceof Error
-          ? subscriberErr.message
-          : 'Invalid email or password.';
-      if (
-        message.toLowerCase().includes('email not confirmed') ||
-        message.toLowerCase().includes('confirm')
-      ) {
-        toast.error('Please confirm your email before signing in.');
-      } else {
+      window.location.replace(resolveAdminRedirect(nextParam));
+    } catch (err) {
+      if (isAdminAuthFailure(err)) {
         toast.error('Invalid email or password.');
+      } else {
+        const detail = readErrorDetail(err);
+        toast.error(detail ?? 'Could not sign in. Please try again.');
       }
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (checkingSession || subscriberFullyAuthenticated) {
+  if (checkingSession || alreadySignedIn) {
     return (
       <>
-        <LandingHeader />
+        <LandingHeader showAuthActions={false} />
         <main className="flex flex-1 flex-col items-center justify-center px-4 py-16">
           <LoadingState
-            label={
-              subscriberFullyAuthenticated ? 'Redirecting…' : 'Checking session…'
-            }
+            label={alreadySignedIn ? 'Redirecting…' : 'Checking session…'}
           />
         </main>
         <LandingFooter />
@@ -136,15 +123,10 @@ function LoginPageContent() {
 
   return (
     <>
-      <LandingHeader />
+      <LandingHeader showAuthActions={false} />
       <AuthFormShell
-        title="Welcome back"
-        subtitle="Sign in to continue to your HiddenAlerts dashboard."
-        footer={{
-          prompt: "Don't have an account?",
-          linkLabel: 'Create one',
-          href: '/signup',
-        }}
+        title="Admin sign in"
+        subtitle="Sign in with your HiddenAlerts admin credentials."
       >
         <form
           onSubmit={handleSubmit}
@@ -188,15 +170,6 @@ function LoginPageContent() {
             required
           />
 
-          <div className="-mt-1 flex justify-end">
-            <Link
-              href="#"
-              className="text-muted hover:text-foreground focus-visible:ring-primary-500 rounded-sm text-xs underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
-            >
-              Forgot password?
-            </Link>
-          </div>
-
           <Button
             type="submit"
             size="md"
@@ -212,12 +185,12 @@ function LoginPageContent() {
   );
 }
 
-export default function LoginPage() {
+export default function AdminLoginPage() {
   return (
     <Suspense
       fallback={
         <>
-          <LandingHeader />
+          <LandingHeader showAuthActions={false} />
           <main className="flex flex-1 flex-col items-center justify-center px-4 py-16">
             <LoadingState label="Loading…" />
           </main>
@@ -225,7 +198,7 @@ export default function LoginPage() {
         </>
       }
     >
-      <LoginPageContent />
+      <AdminLoginContent />
     </Suspense>
   );
 }
