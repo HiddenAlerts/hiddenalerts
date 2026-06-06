@@ -29,7 +29,7 @@ export const DASHBOARD_MOCK_BRIEFS: DashboardBriefItem[] = [
     riskScore: 94,
     riskLabel: 'Critical',
     coverTheme: 'cyber-network',
-    href: '/dashboard',
+    href: '/briefs',
   },
   {
     id: 'brief-government-benefits-fraud',
@@ -39,7 +39,7 @@ export const DASHBOARD_MOCK_BRIEFS: DashboardBriefItem[] = [
     riskScore: 89,
     riskLabel: 'Critical',
     coverTheme: 'capitol',
-    href: '/dashboard',
+    href: '/briefs',
   },
   {
     id: 'brief-synthetic-identity-rings',
@@ -49,7 +49,7 @@ export const DASHBOARD_MOCK_BRIEFS: DashboardBriefItem[] = [
     riskScore: 86,
     riskLabel: 'Critical',
     coverTheme: 'credit-lock',
-    href: '/dashboard',
+    href: '/briefs',
   },
   {
     id: 'brief-trade-based-money-laundering',
@@ -59,6 +59,6 @@ export const DASHBOARD_MOCK_BRIEFS: DashboardBriefItem[] = [
     riskScore: 82,
     riskLabel: 'High',
     coverTheme: 'shipping-port',
-    href: '/dashboard',
+    href: '/briefs',
   },
 ];

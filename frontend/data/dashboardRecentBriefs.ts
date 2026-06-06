@@ -35,7 +35,7 @@ export const DASHBOARD_RECENT_BRIEFS: DashboardRecentBrief[] = [
     riskScore: 84,
     riskLabel: 'Critical',
     lastUpdatedIso: '2026-05-18T16:50:00.000Z',
-    href: '/dashboard',
+    href: '/briefs',
   },
   {
     id: 'recent-brief-caller-as-a-service',
@@ -46,7 +46,7 @@ export const DASHBOARD_RECENT_BRIEFS: DashboardRecentBrief[] = [
     riskScore: 84,
     riskLabel: 'Critical',
     lastUpdatedIso: '2026-05-18T14:11:00.000Z',
-    href: '/dashboard',
+    href: '/briefs',
   },
   {
     id: 'recent-brief-synthetic-identity-ring',
@@ -57,7 +57,7 @@ export const DASHBOARD_RECENT_BRIEFS: DashboardRecentBrief[] = [
     riskScore: 78,
     riskLabel: 'High',
     lastUpdatedIso: '2026-05-16T11:40:00.000Z',
-    href: '/dashboard',
+    href: '/briefs',
   },
   {
     id: 'recent-brief-health-sector-ransomware',
@@ -68,6 +68,6 @@ export const DASHBOARD_RECENT_BRIEFS: DashboardRecentBrief[] = [
     riskScore: 62,
     riskLabel: 'High',
     lastUpdatedIso: '2026-05-15T09:15:00.000Z',
-    href: '/dashboard',
+    href: '/briefs',
   },
 ];

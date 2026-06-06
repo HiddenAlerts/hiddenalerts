@@ -249,12 +249,12 @@ export const DashboardScreen: FC = () => {
 
       <DashboardIntelligenceBriefs
         briefs={DASHBOARD_MOCK_BRIEFS}
-        viewAllHref="/alerts"
+        viewAllHref="/briefs"
       />
 
       <DashboardRecentBriefsTable
         briefs={DASHBOARD_RECENT_BRIEFS}
-        viewAllHref="/alerts"
+        viewAllHref="/briefs"
       />
 
       <DashboardTopAlertsThisWeek

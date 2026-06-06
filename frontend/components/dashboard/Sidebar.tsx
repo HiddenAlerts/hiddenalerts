@@ -2,6 +2,7 @@
 
 import { cn } from '@/lib/utils';
 import {
+  FileText,
   LayoutDashboard,
   type LucideIcon,
   MonitorDot,
@@ -21,6 +22,7 @@ export type SidebarNavItem = {
 
 const DEFAULT_NAV: SidebarNavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/briefs', label: 'Intelligence Briefs', icon: FileText },
   { href: '/alerts', label: 'Alerts', icon: MonitorDot },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
