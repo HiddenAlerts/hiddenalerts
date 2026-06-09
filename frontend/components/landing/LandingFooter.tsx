@@ -1,17 +1,36 @@
 import { dashboardFooterContent as c } from '@/content/legal/dashboard-footer';
+import { cn } from '@/lib/utils';
 import Link from 'next/link';
-import { Fragment } from 'react';
 
 import { LandingLogo } from './LandingLogo';
-
-const legalLinks = [
-  { href: c.linkDisclaimerHref, label: c.linkDisclaimerLabel },
-  { href: c.linkTermsHref, label: c.linkTermsLabel },
-  { href: c.linkPrivacyHref, label: c.linkPrivacyLabel },
-] as const;
+import { LinkedInIcon, XIcon } from './SocialIcons';
 
 const legalLinkClass =
-  'text-muted-foreground hover:text-body text-sm underline decoration-transparent underline-offset-2 transition-[color,text-decoration-color] hover:decoration-body/40 focus-visible:ring-primary-500 rounded-sm focus-visible:ring-2 focus-visible:outline-none';
+  'text-muted-foreground hover:text-body text-sm transition-colors focus-visible:ring-primary-500 rounded-sm focus-visible:ring-2 focus-visible:outline-none';
+
+const primaryLinks = [
+  { href: c.linkDisclaimerHref, label: c.linkDisclaimerLabel },
+  { href: c.linkPrivacyHref, label: c.linkPrivacyLabel },
+  { href: c.linkContactHref, label: c.linkContactLabel },
+] as const;
+
+const secondaryLinks = [
+  { href: c.linkTermsHref, label: c.linkTermsLabel },
+  { href: c.linkSupportHref, label: c.linkSupportLabel },
+] as const;
+
+const socialLinks = [
+  {
+    href: 'https://www.linkedin.com/company/covertlytics',
+    label: 'LinkedIn',
+    icon: LinkedInIcon,
+  },
+  {
+    href: 'https://x.com/covertlytics',
+    label: 'X (Twitter)',
+    icon: XIcon,
+  },
+] as const;
 
 export function LandingFooter() {
   return (
@@ -19,82 +38,68 @@ export function LandingFooter() {
       className="border-border-subtle bg-background-alt/95 mt-auto border-t"
       aria-label="Site footer"
     >
-      <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-12 md:py-14">
-        <div className="flex flex-col gap-10 md:flex-row md:justify-between md:gap-14 lg:gap-20">
-          <div className="flex max-w-md flex-col gap-3 text-center md:text-left">
+      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12 md:py-14">
+        <div className="grid gap-10 md:grid-cols-[1.4fr_1fr_1fr] md:gap-12">
+          {/* Brand + disclaimer */}
+          <div className="flex flex-col gap-3">
             <Link
               href="/"
-              className="focus-visible:ring-primary-500 mx-auto inline-flex w-fit rounded-md focus-visible:ring-2 focus-visible:outline-none md:mx-0"
+              className="focus-visible:ring-primary-500 inline-flex w-fit rounded-md focus-visible:ring-2 focus-visible:outline-none"
             >
               <LandingLogo trademark />
             </Link>
-            <p className="text-body text-sm leading-relaxed">
-              Early warning intelligence and hidden risk monitoring.
+            <p className="text-muted-foreground text-xs leading-relaxed sm:text-sm">
+              {c.descriptionLine1}
             </p>
-            <p className="text-body text-sm leading-relaxed">
-              HiddenAlerts is a product of Covertlytics, LLC.
+            <p className="text-muted-foreground text-xs leading-relaxed sm:text-sm">
+              {c.descriptionLine2}
             </p>
-            <p className="text-muted-foreground text-sm leading-relaxed">
-              Signal-based intelligence derived from public data.
-            </p>
-            <p className="text-muted-foreground text-sm leading-relaxed">
-              For informational purposes only. Not financial or legal advice.
-            </p>
-            <p className="text-muted-foreground mt-1 text-sm">
-              © 2026 Covertlytics LLC
+            <p className="text-muted-foreground text-xs leading-relaxed sm:text-sm">
+              {c.productAttributionBefore}
+              <span className="text-body">{c.productAttributionCompany}</span>
             </p>
           </div>
 
-          <div className="flex flex-col items-center md:items-end">
-            <nav
-              className="flex flex-wrap items-center justify-center gap-y-1 md:justify-end"
-              aria-label="Legal links and contact"
-            >
-              {legalLinks.map((item, index) => (
-                <Fragment key={item.href}>
-                  {index > 0 ? (
-                    <span
-                      aria-hidden
-                      className="text-muted-foreground/40 px-2 text-[0.65rem] leading-none select-none"
-                    >
-                      ·
-                    </span>
-                  ) : null}
-                  <Link href={item.href} className={legalLinkClass}>
-                    {item.label}
-                  </Link>
-                </Fragment>
-              ))}
-              <span
-                aria-hidden
-                className="text-muted-foreground/40 px-2 text-[0.65rem] leading-none select-none"
-              >
-                ·
-              </span>
+          {/* Legal links */}
+          <nav aria-label="Legal links" className="flex flex-col gap-2">
+            {primaryLinks.map(link => (
+              <Link key={link.href} href={link.href} className={legalLinkClass}>
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+
+          <nav aria-label="Support links" className="flex flex-col gap-2">
+            {secondaryLinks.map(link => (
+              <Link key={link.href} href={link.href} className={legalLinkClass}>
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+        </div>
+
+        {/* Social + copyright */}
+        <div className="border-border-subtle mt-10 flex flex-col items-center justify-between gap-4 border-t pt-6 sm:flex-row">
+          <div className="flex items-center gap-3">
+            {socialLinks.map(({ href, label, icon: Icon }) => (
               <a
-                href={c.linkSupportHref}
-                className={legalLinkClass}
-                title={c.linkSupportEmail}
-                aria-label={`${c.linkSupportLabel}, ${c.linkSupportEmail}`}
+                key={href}
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={label}
+                className={cn(
+                  'text-muted hover:text-foreground border-border bg-surface/50 flex size-9 items-center justify-center rounded-full border transition-colors',
+                )}
               >
-                {c.linkSupportLabel}
+                <Icon />
               </a>
-              <span
-                aria-hidden
-                className="text-muted-foreground/40 px-2 text-[0.65rem] leading-none select-none"
-              >
-                ·
-              </span>
-              <a
-                href={c.linkContactHref}
-                className={legalLinkClass}
-                title={c.linkContactEmail}
-                aria-label={`${c.linkContactLabel}, ${c.linkContactEmail}`}
-              >
-                {c.linkContactLabel}
-              </a>
-            </nav>
+            ))}
           </div>
+          <p className="text-muted-foreground text-xs sm:text-sm">
+            {c.copyrightPrefix}
+            {c.copyrightCompany}. All rights reserved.
+          </p>
         </div>
       </div>
     </footer>

@@ -1,7 +1,17 @@
 export { LandingContentSections } from './LandingContentSections';
 export { LandingFAQ } from './LandingFAQ';
+export { LandingFeatureHighlights } from './LandingFeatureHighlights';
 export { LandingFooter } from './LandingFooter';
 export { LandingHeader } from './LandingHeader';
 export { LandingHero } from './LandingHero';
+export { LandingHowItWorks } from './LandingHowItWorks';
+export { LandingIntelligencePreview } from './LandingIntelligencePreview';
+export { LandingLiveAlertRow } from './LandingLiveAlertRow';
 export { LandingLogo } from './LandingLogo';
+export { LandingNewsletterCta } from './LandingNewsletterCta';
+export { LandingPricing } from './LandingPricing';
+export { LandingPricingCard } from './LandingPricingCard';
+export { LandingProblem } from './LandingProblem';
+export { LandingSection, SectionHeading } from './LandingSection';
+export { LandingTrustBar } from './LandingTrustBar';
 export { WaitlistForm } from './WaitlistForm';
