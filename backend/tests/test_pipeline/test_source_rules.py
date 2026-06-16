@@ -164,15 +164,37 @@ def test_source_rule_krebs_promoted_not_forced_review():
 
 
 def test_source_rule_bleeping_with_signal_conditionally_eligible():
+    # Slice 3.1: a fraud-signal BleepingComputer alert gets per-alert effective
+    # credibility 4 (conditional eligibility) — stored value is NOT mutated.
     d = evaluate_source_rule(
         source_name="BleepingComputer",
         stored_credibility=3,
         title="Phishing campaign steals banking credentials",
     )
-    assert d.effective_credibility == 3  # unchanged
+    assert d.effective_credibility == 4
     assert d.is_conditionally_eligible is True
     assert d.forces_review is False
-    assert d.reason == "bleepingcomputer_financial_fraud_signal"
+    assert d.reason == "bleepingcomputer_conditional_fraud_signal"
+
+
+def test_source_rule_bleeping_signal_preserves_higher_stored_credibility():
+    d = evaluate_source_rule(
+        source_name="BleepingComputer",
+        stored_credibility=5,
+        title="Ransomware extortion drains bank accounts",
+    )
+    assert d.effective_credibility == 5  # max(stored, 4) keeps the higher value
+
+
+def test_get_effective_credibility_does_not_globally_promote_bleeping():
+    # The plain lookup never promotes BleepingComputer — promotion is conditional
+    # and lives only inside evaluate_source_rule for qualifying alerts.
+    assert (
+        get_effective_source_credibility(
+            source_name="BleepingComputer", stored_credibility=3
+        )
+        == 3
+    )
 
 
 def test_source_rule_bleeping_no_signal_forces_review():
@@ -214,10 +236,43 @@ def test_krebs_critical_stored3_auto_publishes_via_effective_4():
     assert d.risk_band is RiskBandValue.CRITICAL
 
 
-def test_bleeping_critical_stored3_phishing_review_credibility():
+def test_bleeping_critical_stored3_phishing_auto_publishes_conditionally():
+    # Slice 3.1 change: conditional eligibility lets a fraud-signal Critical
+    # BleepingComputer alert auto-publish even with stored credibility 3.
     d = _v1(_CRITICAL, _APPROVED, "BleepingComputer", 3, title="Phishing scam steals credentials")
+    assert d.action is PublishDecisionValue.AUTO_PUBLISH
+    assert d.risk_band is RiskBandValue.CRITICAL
+
+
+def test_bleeping_critical_stored3_patch_only_review_source_rule():
+    d = _v1(_CRITICAL, _APPROVED, "BleepingComputer", 3, title="Microsoft releases security patch")
     assert d.action is PublishDecisionValue.REVIEW
-    assert d.pending_review_reason is PendingReviewReason.BLOCKED_BY_CREDIBILITY
+    assert d.pending_review_reason is PendingReviewReason.BLOCKED_BY_SOURCE_RULE
+    assert d.reason == "bleepingcomputer_review_first"
+
+
+def test_bleeping_medium_stored3_fraud_review_score():
+    d = _v1(_MEDIUM, _APPROVED, "BleepingComputer", 3, title="Phishing fraud campaign")
+    assert d.action is PublishDecisionValue.REVIEW
+    assert d.pending_review_reason is PendingReviewReason.BLOCKED_BY_SCORE
+
+
+def test_bleeping_below60_stored3_fraud_excluded():
+    d = _v1(_BELOW, _APPROVED, "BleepingComputer", 3, title="Phishing fraud campaign")
+    assert d.action is PublishDecisionValue.EXCLUDE
+    assert d.pending_review_reason is PendingReviewReason.EXCLUDED_LOW_SCORE
+
+
+def test_bleeping_critical_stored3_other_category_fraud_manual_review():
+    d = _v1(_CRITICAL, "Other", "BleepingComputer", 3, title="Phishing fraud campaign")
+    assert d.action is PublishDecisionValue.REVIEW
+    assert d.pending_review_reason is PendingReviewReason.MANUAL_REVIEW_ONLY
+
+
+def test_bleeping_critical_stored3_unknown_category_fraud_blocked_by_category():
+    d = _v1(_CRITICAL, "Weather", "BleepingComputer", 3, title="Phishing fraud campaign")
+    assert d.action is PublishDecisionValue.REVIEW
+    assert d.pending_review_reason is PendingReviewReason.BLOCKED_BY_CATEGORY
 
 
 def test_bleeping_critical_stored4_phishing_auto_publishes():
