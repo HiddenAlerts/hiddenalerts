@@ -36,6 +36,13 @@ from app.pipeline.publishing.publishing_policy import (
 # Krebs is treated as at least this credibility for V1 decisions (runtime only).
 _KREBS_MIN_CREDIBILITY = 4
 
+# A BleepingComputer alert that carries a clear fraud/financial signal is treated
+# as at least this credibility FOR THAT ALERT ONLY (conditional source
+# eligibility). This is NOT a global promotion: the plain
+# ``get_effective_source_credibility`` lookup still returns BleepingComputer's
+# stored value, and the ``sources`` table is never mutated.
+_BLEEPING_CONDITIONAL_CREDIBILITY = 4
+
 # Collapsed-alphanumeric fingerprints that identify each special source. Matching
 # against the collapsed form catches name variants and domains alike, e.g.
 # "KrebsOnSecurity", "Krebs on Security", "https://krebsonsecurity.com" all
@@ -281,12 +288,18 @@ def evaluate_source_rule(
             primary_category=primary_category,
         )
         if has_signal:
+            # Conditional eligibility: lift effective credibility to >= 4 for
+            # THIS alert only (the stored value and the DB are untouched). A
+            # higher stored value is preserved.
+            conditional_credibility = max(
+                stored_credibility or 0, _BLEEPING_CONDITIONAL_CREDIBILITY
+            )
             return SourceRuleDecision(
                 source_name=source_name,
-                effective_credibility=effective,  # stored, unchanged
+                effective_credibility=conditional_credibility,
                 is_conditionally_eligible=True,
                 forces_review=False,
-                reason="bleepingcomputer_financial_fraud_signal",
+                reason="bleepingcomputer_conditional_fraud_signal",
             )
         return SourceRuleDecision(
             source_name=source_name,
@@ -328,15 +341,20 @@ def evaluate_v1_publish_decision(
     Order:
       1. Evaluate the source rule → effective credibility + forces_review.
       2. Run the generic policy with the *effective* credibility.
-      3. If the generic policy says auto_publish but the source rule forces
-         review, downgrade to review (``blocked_by_source_rule``). A
-         review/exclude result is never upgraded to publish.
+      3. If the source rule forces review AND the alert otherwise clears every
+         non-credibility gate (Critical/High band + approved category), label
+         the result review/``blocked_by_source_rule`` — the source rule, not
+         credibility, is the operative reason. Band/category/Medium/below-60
+         gates always dominate (they are evaluated first), so a below-60,
+         Medium, ``Other`` or unapproved alert keeps its generic reason.
+      4. Otherwise return the generic decision unchanged. A review/exclude
+         result is never upgraded to publish.
 
-    Consequence for production: BleepingComputer's stored credibility is 3, so
-    the generic policy already routes it to review (``blocked_by_credibility``);
-    it can only auto-publish if/when its stored credibility reaches the policy
-    threshold AND a fraud signal is present. This helper never silently promotes
-    BleepingComputer.
+    Conditional BleepingComputer: a fraud-signal alert gets effective
+    credibility 4 (via the source rule) and can auto-publish when band/category
+    pass; a no-signal alert forces review. BleepingComputer's stored credibility
+    in the ``sources`` table is never read up here as a publish credential and is
+    never mutated — only the per-alert effective value is used.
     """
     rule = evaluate_source_rule(
         source_name=source_name,
@@ -355,13 +373,23 @@ def evaluate_v1_publish_decision(
         policy=policy,
     )
 
-    if base.action is PublishDecisionValue.AUTO_PUBLISH and rule.forces_review:
-        return PublishDecision(
-            action=PublishDecisionValue.REVIEW,
-            reason=rule.reason,
-            risk_band=base.risk_band,
-            policy_version=base.policy_version,
-            pending_review_reason=PendingReviewReason.BLOCKED_BY_SOURCE_RULE,
+    if rule.forces_review:
+        # Would this alert auto-publish if credibility weren't the issue? Force
+        # credibility to a passing value and re-run the generic gates. If it then
+        # auto-publishes, the only thing blocking it is the source rule.
+        without_credibility_block = evaluate_basic_publish_decision(
+            signal_score_total=signal_score_total,
+            primary_category=primary_category,
+            source_credibility=policy.min_source_credibility,
+            policy=policy,
         )
+        if without_credibility_block.action is PublishDecisionValue.AUTO_PUBLISH:
+            return PublishDecision(
+                action=PublishDecisionValue.REVIEW,
+                reason=rule.reason,
+                risk_band=base.risk_band,
+                policy_version=base.policy_version,
+                pending_review_reason=PendingReviewReason.BLOCKED_BY_SOURCE_RULE,
+            )
 
     return base
