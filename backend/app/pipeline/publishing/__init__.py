@@ -23,6 +23,16 @@ from app.pipeline.publishing.publishing_policy import (
     is_approved_category,
 )
 from app.pipeline.publishing.risk_bands import compute_risk_band, compute_score_100
+from app.pipeline.publishing.source_rules import (
+    SourceRuleDecision,
+    evaluate_source_rule,
+    evaluate_v1_publish_decision,
+    get_effective_source_credibility,
+    has_bleepingcomputer_financial_fraud_signal,
+    is_bleepingcomputer_source,
+    is_krebs_source,
+    normalize_source_name,
+)
 
 __all__ = [
     # constants / vocabulary (Slice 1)
@@ -43,4 +53,13 @@ __all__ = [
     "DEFAULT_V1_POLICY",
     "evaluate_basic_publish_decision",
     "is_approved_category",
+    # source rules (Slice 3)
+    "SourceRuleDecision",
+    "normalize_source_name",
+    "is_krebs_source",
+    "is_bleepingcomputer_source",
+    "get_effective_source_credibility",
+    "has_bleepingcomputer_financial_fraud_signal",
+    "evaluate_source_rule",
+    "evaluate_v1_publish_decision",
 ]
