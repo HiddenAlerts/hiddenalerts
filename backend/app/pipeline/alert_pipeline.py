@@ -379,10 +379,31 @@ async def _process_single_item(
     try:
         await find_or_create_event(alert, session)
     except Exception as exc:
+        # Event grouping failed → the FINAL post-grouping cross-source state is
+        # unknown, so under V1 we must NOT auto-publish on a possibly-stale score.
+        # Hold for manual review; the initial score_*/signal_score_total/risk_level
+        # are preserved so an admin can inspect the alert.
         log.warning(
             f"Event grouping failed for alert {alert.id} (raw_item {raw_item.id}): {exc}. "
-            "Alert saved without event link."
+            "Alert put on manual hold (event_grouping_failed)."
         )
+        _apply_terminal_state(
+            alert,
+            now=_now,
+            action=PublishDecisionValue.HOLD,
+            reason="event_grouping_failed",
+            pending_reason=PendingReviewReason.MANUAL_HOLD,
+            is_excluded=False,
+            excluded_reason=None,
+            is_manual_hold=True,
+        )
+        await session.commit()
+        stats.items_processed += 1  # saved successfully, held for review
+        log.info(
+            f"raw_item {raw_item.id} → alert {alert.id} "
+            f"[score={alert.signal_score_total} decision=hold reason=event_grouping_failed]"
+        )
+        return
 
     # Ensure the post-grouping score is flushed/visible before deciding.
     await session.flush()

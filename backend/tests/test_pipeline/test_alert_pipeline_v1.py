@@ -329,3 +329,30 @@ async def test_decision_uses_post_grouping_score(db_session):
     assert a.risk_band == "high"
     assert a.is_published is True
     assert a.publish_decision == "auto_publish"
+
+
+# --- 13. Event grouping failure → HOLD (never auto-publish on unknown state) --
+
+
+@pytest.mark.asyncio
+async def test_event_grouping_failure_holds(db_session):
+    """If event grouping raises, the alert must NOT auto-publish even though it is
+    otherwise a High/Critical auto-publishable alert — it is held for review."""
+    src = await _make_source(db_session, "FBI Press EG", 5)
+    raw = await _make_raw(db_session, src, "Grouping Fail One")
+    with patch(f"{_PATH}.find_or_create_event", side_effect=Exception("boom")):
+        await _process(
+            db_session, src, raw,
+            _ai("Cybercrime", ["GroupFailCo"]),
+            _score(20, level="high"),
+        )
+    a = await _get_alert(db_session, raw.id)
+    assert a.is_published is False
+    assert a.publish_decision == "hold"
+    assert a.publish_decision_reason == "event_grouping_failed"
+    assert a.pending_review_reason == "manual_hold"
+    assert a.is_manual_hold is True
+    assert a.published_by_rule is False
+    assert a.is_excluded is False
+    # Score fields preserved for admin inspection.
+    assert a.signal_score_total == 20
