@@ -38,7 +38,7 @@ from app.models.event import EventSource
 from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.source import Source
-from app.pipeline.entities import is_agency_name
+from app.pipeline.entities import is_agency_name, normalize_entity_name
 from app.schemas.alert import (
     PublicAlertDetail,
     PublicAlertRead,
@@ -531,12 +531,20 @@ def _primary_entity_key(alert: ProcessedAlert) -> str:
 
 
 def _signal_strength(alert: ProcessedAlert) -> int:
-    """Number of event_sources bridges attached to this alert.
+    """Number of distinct independent OUTLETS in this alert's event cluster.
 
-    Higher means the alert participates in a multi-source event cluster, which
-    Ken counts as stronger corroboration. Requires event_sources eager-loaded.
+    Higher means the alert participates in a multi-outlet event cluster, which
+    Ken counts as stronger corroboration. Slice 5: counts distinct normalized
+    source names, NOT raw event_sources rows, so repeated coverage from one
+    outlet (e.g. 5 BleepingComputer links) counts as one. Requires event_sources
+    eager-loaded.
     """
-    return len(alert.event_sources or [])
+    outlets = {
+        normalize_entity_name(es.source_name)
+        for es in (alert.event_sources or [])
+        if es.source_name and es.source_name.strip()
+    }
+    return len(outlets)
 
 
 def _credibility_for_ranking(alert: ProcessedAlert) -> int:

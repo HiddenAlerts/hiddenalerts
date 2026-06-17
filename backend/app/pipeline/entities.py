@@ -71,14 +71,30 @@ _AGENCY_PATTERNS: tuple[str, ...] = (
     "fraud control unit",
     "task force",
     "project safe childhood",
-    "operation",  # "Operation Winter SHIELD" etc.
     "law enforcement",
     "federal authorities",
-    "government",
 )
 
 _AGENCY_REGEX = re.compile(
     r"\b(?:" + "|".join(re.escape(p) for p in _AGENCY_PATTERNS) + r")\b",
+    flags=re.IGNORECASE,
+)
+
+# Broad single-word generic terms. These are useful generic-entity filters
+# (e.g. "government", "Operation Winter SHIELD") but the bare words also appear
+# inside real organization names ("Government Employees Insurance Company",
+# "Operation Finance LLC"). To avoid false positives they are treated as agency
+# markers ONLY when the entity is not clearly a real organization — i.e. it does
+# not end with a corporate / legal suffix.
+_BROAD_GENERIC_REGEX = re.compile(r"\b(?:government|operation)\b", flags=re.IGNORECASE)
+
+# Corporate / legal suffixes that mark a name as a real organization. Anchored to
+# the END of the (trimmed) entity so only a true suffix counts, not a mid-name
+# word (so "Operation Bank Heist" is unaffected, "Operation Finance LLC" is).
+_CORP_SUFFIX_REGEX = re.compile(
+    r"\b(?:llc|l\.l\.c\.|inc|inc\.|incorporated|corp|corp\.|corporation|co|co\.|"
+    r"company|companies|ltd|ltd\.|limited|lp|llp|plc|holdings|group|gmbh|ag|"
+    r"s\.a\.|n\.v\.|pty)\.?$",
     flags=re.IGNORECASE,
 )
 
@@ -95,10 +111,23 @@ def is_agency_name(name: str | None) -> bool:
     governmental reference rather than a real subject entity.
 
     Empty / whitespace-only / ``None`` → False (absent, not an agency).
+
+    Specific agency/regulator references (FBI, DOJ, SEC, "fraud control unit",
+    …) match anywhere in the name. Broad generic words ("government",
+    "operation") only count when the entity is not clearly a real organization
+    (no corporate/legal suffix), so "Government Employees Insurance Company" and
+    "Operation Finance LLC" are NOT treated as agencies while "government" and
+    "Operation Winter SHIELD" still are.
     """
     if not name or not name.strip():
         return False
-    return _AGENCY_REGEX.search(name) is not None
+    if _AGENCY_REGEX.search(name) is not None:
+        return True
+    if _BROAD_GENERIC_REGEX.search(name) is not None and _CORP_SUFFIX_REGEX.search(
+        name.strip()
+    ) is None:
+        return True
+    return False
 
 
 def filter_non_agency_entities(entities: Iterable[str] | None) -> list[str]:

@@ -32,6 +32,14 @@ from app.models.source import Source
 from app.pipeline.ai_processor import AIProcessingError, analyze_article
 from app.pipeline.event_grouper import find_or_create_event
 from app.pipeline.keyword_filter import filter_by_keywords
+from app.pipeline.publishing.constants import (
+    DecisionSource,
+    PendingReviewReason,
+    PublishDecisionValue,
+    RiskBandValue,
+)
+from app.pipeline.publishing.publishing_policy import DEFAULT_V1_POLICY, PublishDecision
+from app.pipeline.publishing.source_rules import evaluate_v1_publish_decision
 from app.pipeline.signal_scorer import compute_signal_score
 
 log = logging.getLogger(__name__)
@@ -39,22 +47,103 @@ log = logging.getLogger(__name__)
 # Maximum items to process per pipeline run (prevents unbounded DB load)
 BATCH_SIZE = 50
 
-# Categories allowed to auto-publish if score requirements are met
-ALLOWED_PUBLISH_CATEGORIES = {
-    "Investment Fraud",
-    "Cybercrime",
-    "Consumer Scam",
-    "Money Laundering",
-    "Cryptocurrency Fraud",
-}
-
-# Tier 1 auto-publish minimum (M3 final, Ken-approved May 06): >=10 internal
-# == >=40 on the 0-100 risk_score == Medium-and-above. Ken explicitly approved
-# Medium auto-publish; Low alerts remain in admin/manual review.
-_TIER1_MIN_SCORE = 10
+# Publish policy is the single source of truth (Slice 5). The old M3 tier1
+# constants (ALLOWED_PUBLISH_CATEGORIES, _TIER1_MIN_SCORE) have been removed —
+# all publish/review/exclude/hold decisions now come from
+# evaluate_v1_publish_decision(...) + DEFAULT_V1_POLICY.
 
 # Module-level lock to prevent concurrent pipeline runs from manual triggers
 _processing_lock = asyncio.Lock()
+
+
+# ---------------------------------------------------------------------------
+# V1 publish-decision application helpers
+# ---------------------------------------------------------------------------
+
+
+def _apply_publish_decision(
+    alert: ProcessedAlert,
+    decision: PublishDecision,
+    *,
+    now: datetime,
+) -> None:
+    """Persist a V1 :class:`PublishDecision` onto the alert's publication state.
+
+    Sets the common decision metadata, then the action-specific flags. This is
+    the only place the auto-policy path writes ``is_published`` — always from the
+    *final* (post-grouping) decision.
+    """
+    alert.risk_band = decision.risk_band.value
+    alert.publish_decision = decision.action.value
+    alert.publish_decision_reason = decision.reason
+    alert.pending_review_reason = (
+        decision.pending_review_reason.value
+        if decision.pending_review_reason is not None
+        else None
+    )
+    alert.publishing_policy_version = decision.policy_version
+    alert.publication_state_source = DecisionSource.AUTO_POLICY.value
+    alert.publication_state_updated_at = now
+
+    action = decision.action
+    if action is PublishDecisionValue.AUTO_PUBLISH:
+        alert.is_published = True
+        alert.published_at = now
+        alert.published_by_rule = True
+        alert.is_excluded = False
+        alert.excluded_reason = None
+        alert.is_manual_hold = False
+    elif action is PublishDecisionValue.EXCLUDE:
+        alert.is_published = False
+        alert.published_at = None
+        alert.published_by_rule = False
+        alert.is_excluded = True
+        alert.excluded_reason = decision.reason
+        alert.is_manual_hold = False
+    elif action is PublishDecisionValue.HOLD:
+        alert.is_published = False
+        alert.published_at = None
+        alert.published_by_rule = False
+        alert.is_excluded = False
+        alert.excluded_reason = None
+        alert.is_manual_hold = True
+    else:  # REVIEW
+        alert.is_published = False
+        alert.published_at = None
+        alert.published_by_rule = False
+        alert.is_excluded = False
+        alert.excluded_reason = None
+        alert.is_manual_hold = False
+
+
+def _apply_terminal_state(
+    alert: ProcessedAlert,
+    *,
+    now: datetime,
+    action: PublishDecisionValue,
+    reason: str,
+    pending_reason: PendingReviewReason | None,
+    is_excluded: bool,
+    excluded_reason: str | None,
+    is_manual_hold: bool,
+    risk_band: RiskBandValue = RiskBandValue.BELOW_60,
+) -> None:
+    """Populate V1 publication state for rows that skip the scoring/grouping path
+    (no-keyword, AI-irrelevant, AI-failure). Never publishes.
+    """
+    alert.risk_band = risk_band.value
+    alert.publish_decision = action.value
+    alert.publish_decision_reason = reason
+    alert.pending_review_reason = pending_reason.value if pending_reason is not None else None
+    alert.publishing_policy_version = DEFAULT_V1_POLICY.version
+    alert.publication_state_source = DecisionSource.AUTO_POLICY.value
+    alert.publication_state_updated_at = now
+    alert.is_published = False
+    alert.published_at = None
+    alert.published_by_rule = False
+    alert.is_excluded = is_excluded
+    alert.excluded_reason = excluded_reason
+    alert.is_manual_hold = is_manual_hold
 
 
 @dataclass
@@ -150,23 +239,33 @@ async def _process_single_item(
     keywords: list[str] = source.keywords or []
     text = raw_item.raw_text or ""
     title = raw_item.title or ""
+    _now = datetime.now(timezone.utc)
 
     # --- Step 1: Keyword filtering ---
     matched_keywords = filter_by_keywords(text, keywords)
 
     if not matched_keywords:
-        # No keyword match — mark as not relevant, no AI call
+        # No keyword match — not relevant, no AI call. Terminal exclude state.
         alert = ProcessedAlert(
             raw_item_id=raw_item.id,
             is_relevant=False,
             matched_keywords=[],
-            is_published=False,
-            processed_at=datetime.now(timezone.utc),
+            processed_at=_now,
+        )
+        _apply_terminal_state(
+            alert,
+            now=_now,
+            action=PublishDecisionValue.EXCLUDE,
+            reason="no_keyword_match",
+            pending_reason=PendingReviewReason.AI_REJECTED,
+            is_excluded=True,
+            excluded_reason="no_keyword_match",
+            is_manual_hold=False,
         )
         session.add(alert)
         await session.commit()
         stats.items_skipped_no_keywords += 1
-        log.debug(f"raw_item {raw_item.id}: no keyword match, marked not relevant")
+        log.debug(f"raw_item {raw_item.id}: no keyword match, excluded")
         return
 
     # --- Step 2: AI analysis ---
@@ -177,14 +276,24 @@ async def _process_single_item(
             matched_keywords=matched_keywords,
         )
     except AIProcessingError as exc:
-        # AI failed after retries — store partial alert so we don't retry endlessly
+        # AI failed after retries — this is a SYSTEM failure, not a content
+        # rejection. Hold for manual attention so it isn't silently excluded.
         log.error(f"AI processing failed for raw_item {raw_item.id}: {exc}")
         alert = ProcessedAlert(
             raw_item_id=raw_item.id,
             is_relevant=False,
             matched_keywords=matched_keywords,
-            is_published=False,
-            processed_at=datetime.now(timezone.utc),
+            processed_at=_now,
+        )
+        _apply_terminal_state(
+            alert,
+            now=_now,
+            action=PublishDecisionValue.HOLD,
+            reason="ai_processing_failed",
+            pending_reason=PendingReviewReason.MANUAL_HOLD,
+            is_excluded=False,
+            excluded_reason=None,
+            is_manual_hold=True,
         )
         session.add(alert)
         await session.commit()
@@ -193,7 +302,7 @@ async def _process_single_item(
         return
 
     if not ai_result.is_relevant:
-        # AI confirmed not relevant — store with summary but skip scoring/grouping
+        # AI confirmed not relevant — store with summary, skip scoring/grouping.
         alert = ProcessedAlert(
             raw_item_id=raw_item.id,
             summary=ai_result.summary,
@@ -205,16 +314,25 @@ async def _process_single_item(
             victim_scale_raw=ai_result.victim_scale,
             ai_model=ai_result.ai_model,
             is_relevant=False,
-            is_published=False,
-            processed_at=datetime.now(timezone.utc),
+            processed_at=_now,
+        )
+        _apply_terminal_state(
+            alert,
+            now=_now,
+            action=PublishDecisionValue.EXCLUDE,
+            reason="ai_marked_irrelevant",
+            pending_reason=PendingReviewReason.AI_REJECTED,
+            is_excluded=True,
+            excluded_reason="ai_marked_irrelevant",
+            is_manual_hold=False,
         )
         session.add(alert)
         await session.commit()
         stats.items_skipped_ai_irrelevant += 1
-        log.debug(f"raw_item {raw_item.id}: AI marked not relevant")
+        log.debug(f"raw_item {raw_item.id}: AI marked not relevant, excluded")
         return
 
-    # --- Step 3: Signal scoring (initial cross_source=1 for new alert) ---
+    # --- Step 3: Initial signal scoring (cross_source=1 for a brand-new alert) ---
     score_result = await compute_signal_score(
         source_credibility=source.credibility_score,
         financial_impact_estimate=ai_result.financial_impact_estimate,
@@ -224,21 +342,9 @@ async def _process_single_item(
         session=session,
     )
 
-    # --- Step 4: Create ProcessedAlert ---
-    # Tier 1 auto-publish (M3 final): relevant + score >= 10 (Medium-and-above)
-    # + source credibility >= 4 + allowed category. Ken approved Medium
-    # auto-publish on May 06; Low alerts remain admin-manual-only.
-    # Uses source.credibility_score directly (authoritative) rather than the
-    # derived score_source_credibility field which maps the same value 1-5.
-
-    _now = datetime.now(timezone.utc)
-    tier1 = (
-        ai_result.is_relevant
-        and score_result.signal_score_total >= _TIER1_MIN_SCORE
-        and (source.credibility_score or 0) >= 4
-        and ai_result.primary_category in ALLOWED_PUBLISH_CATEGORIES
-    )
-
+    # --- Step 4: Create ProcessedAlert WITHOUT a publish decision yet. ---
+    # The V1 publish decision is made AFTER event grouping so it reflects the
+    # final, post-grouping cross-source score (Slice 5 ordering fix).
     alert = ProcessedAlert(
         raw_item_id=raw_item.id,
         summary=ai_result.summary,
@@ -258,8 +364,8 @@ async def _process_single_item(
         score_cross_source=score_result.score_cross_source,
         score_trend_acceleration=score_result.score_trend_acceleration,
         signal_score_total=score_result.signal_score_total,
-        is_published=tier1,
-        published_at=_now if tier1 else None,
+        is_published=False,
+        published_at=None,
     )
     session.add(alert)
     await session.flush()  # Get alert.id for event grouping
@@ -269,7 +375,7 @@ async def _process_single_item(
     # Re-attach source relationship for event_grouper
     alert.raw_item = raw_item
 
-    # --- Step 5: Event grouping ---
+    # --- Step 5: Event grouping (may raise score_cross_source / signal_score_total) ---
     try:
         await find_or_create_event(alert, session)
     except Exception as exc:
@@ -278,11 +384,33 @@ async def _process_single_item(
             "Alert saved without event link."
         )
 
+    # Ensure the post-grouping score is flushed/visible before deciding.
+    await session.flush()
+
+    # --- Step 6: V1 publish decision on the FINAL (post-grouping) score ---
+    # NOTE (Slice 5): only the current alert is (re-)evaluated here. Sibling
+    # alerts already linked to the same event are intentionally NOT re-evaluated
+    # in this slice — see the implementation summary for the rationale and the
+    # deferred-rescore plan. Cross-source only ever increases as an event gains
+    # outlets, so deferring sibling re-eval cannot publish anything incorrectly.
+    decision = evaluate_v1_publish_decision(
+        signal_score_total=alert.signal_score_total,
+        primary_category=alert.primary_category,
+        source_name=source.name,
+        source_credibility=source.credibility_score,
+        title=title,
+        summary=alert.summary,
+        matched_keywords=alert.matched_keywords,
+        entities_json=alert.entities_json,
+    )
+    _apply_publish_decision(alert, decision, now=_now)
+
     await session.commit()
     stats.items_processed += 1
     log.info(
         f"raw_item {raw_item.id} → alert {alert.id} "
-        f"[{score_result.risk_level.upper()} score={score_result.signal_score_total}]"
+        f"[band={decision.risk_band.value} score={alert.signal_score_total} "
+        f"decision={decision.action.value} reason={decision.reason}]"
     )
 
 
