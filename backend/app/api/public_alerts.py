@@ -24,7 +24,6 @@ Route ordering note:
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime
 from typing import Any
 
@@ -39,6 +38,7 @@ from app.models.event import EventSource
 from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.source import Source
+from app.pipeline.entities import is_agency_name
 from app.schemas.alert import (
     PublicAlertDetail,
     PublicAlertRead,
@@ -125,75 +125,11 @@ def _title_case_level(level: str | None) -> str | None:
     return level.capitalize() if level else None
 
 
-# Lowercase phrases that identify a prosecutor / regulator / law-enforcement
-# agency or program rather than a *subject* of the alert. Agencies appear in
-# almost every fraud article (FBI, DOJ, etc.) so allowing them to drive
-# dedup or related-signals overlap collapses thematically distinct alerts
-# together — e.g. a CSAM case and a securities-fraud case both naming "FBI".
-# Match is whole-word/phrase via regex \b boundaries so substrings inside
-# real names ("sec" in "securities") don't false-positive.
-_AGENCY_PATTERNS: tuple[str, ...] = (
-    "fbi",
-    "federal bureau of investigation",
-    "doj",
-    "department of justice",
-    "justice department",
-    "criminal division",
-    "antitrust division",
-    "u.s. attorney",
-    "us attorney",
-    "attorney general",
-    "sec",
-    "securities and exchange commission",
-    "ftc",
-    "federal trade commission",
-    "fincen",
-    "financial crimes enforcement network",
-    "ofac",
-    "office of foreign assets control",
-    "ic3",
-    "internet crime complaint center",
-    "irs",
-    "irs-ci",
-    "internal revenue service",
-    "hhs",
-    "hhs-oig",
-    "office of inspector general",
-    "atf",
-    "drug enforcement administration",
-    "dea",
-    "secret service",
-    "u.s. secret service",
-    "cisa",
-    "homeland security",
-    "department of homeland security",
-    "dhs",
-    "u.s. postal",
-    "postal inspection service",
-    "u.s. postal inspection service",
-    "fraud control unit",
-    "task force",
-    "project safe childhood",
-    "operation",  # "Operation Winter SHIELD" etc.
-)
-
-_AGENCY_REGEX = re.compile(
-    r"\b(?:" + "|".join(re.escape(p) for p in _AGENCY_PATTERNS) + r")\b",
-    flags=re.IGNORECASE,
-)
-
-
-def _is_agency_name(name: str) -> bool:
-    """Return True if the entity name refers to a prosecutor / regulator / agency.
-
-    Used to exclude agency mentions from primary-entity dedup
-    (`_primary_entity_key`) and from entity-overlap matching (`_entity_set`),
-    so two unrelated alerts that happen to both name "FBI" don't collapse
-    together in /top dedup or surface as related_signals peers.
-    """
-    if not name or not name.strip():
-        return False
-    return _AGENCY_REGEX.search(name) is not None
+# Agency-name detection moved to the shared app.pipeline.entities module (Slice 4)
+# so event grouping and the public API use one stoplist. Imported under the
+# original private name to keep call sites (`_primary_entity_key`, `_entity_set`)
+# unchanged.
+_is_agency_name = is_agency_name
 
 
 def _entity_set(entities_json: Any) -> set[str]:

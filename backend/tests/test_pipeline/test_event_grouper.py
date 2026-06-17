@@ -177,28 +177,116 @@ async def test_event_source_created(db_session):
 
 @pytest.mark.asyncio
 async def test_cross_source_score_recalculated(db_session):
-    """Linking second alert to same event should update cross_source score to 3."""
+    """Two alerts from TWO DISTINCT outlets in one event → cross_source score 3.
+
+    Slice 4: distinct outlets drive the cross-source factor. This test now uses
+    two different sources (previously it reused one source and relied on the
+    now-fixed row-count inflation to reach 3).
+    """
     from sqlalchemy import select
 
-    source = await _make_source(db_session, name="Source6")
-    raw1 = await _make_raw_item(db_session, source, title="Cross Test 1")
-    raw2 = await _make_raw_item(db_session, source, title="Cross Test 2")
+    source1 = await _make_source(db_session, name="Source6A")
+    source2 = await _make_source(db_session, name="Source6B")
+    raw1 = await _make_raw_item(db_session, source1, title="Cross Test 1")
+    raw2 = await _make_raw_item(db_session, source2, title="Cross Test 2")
 
+    # Unique entity so this test's event isn't matched by other tests sharing the
+    # session-scoped in-memory DB (cross-test isolation).
     alert1 = await _make_alert(
-        db_session, raw1, entities=["Scammer LLC"], category="Investment Fraud"
+        db_session, raw1, entities=["RecalcDistinctCo"], category="Investment Fraud"
     )
     await find_or_create_event(alert1, db_session)
     await db_session.commit()
 
     alert2 = await _make_alert(
-        db_session, raw2, entities=["Scammer LLC"], category="Investment Fraud"
+        db_session, raw2, entities=["RecalcDistinctCo"], category="Investment Fraud"
     )
     await find_or_create_event(alert2, db_session)
     await db_session.commit()
 
-    # Reload alert1 and check cross_source score was updated to 3 (2 sources)
+    # Reload alert1 and check cross_source score was updated to 3 (2 distinct outlets)
     result = await db_session.execute(
         select(ProcessedAlert).where(ProcessedAlert.id == alert1.id)
     )
     updated_alert1 = result.scalar_one()
     assert updated_alert1.score_cross_source == 3
+
+
+@pytest.mark.asyncio
+async def test_agency_only_overlap_does_not_group(db_session):
+    """Two alerts that overlap only on an agency name must NOT group (Slice 4)."""
+    source = await _make_source(db_session, name="AgencySrc")
+    raw1 = await _make_raw_item(db_session, source, title="Agency One")
+    raw2 = await _make_raw_item(db_session, source, title="Agency Two")
+
+    alert1 = await _make_alert(db_session, raw1, entities=["FBI"], category="Cybercrime")
+    event1 = await find_or_create_event(alert1, db_session)
+    await db_session.commit()
+
+    alert2 = await _make_alert(db_session, raw2, entities=["FBI"], category="Cybercrime")
+    event2 = await find_or_create_event(alert2, db_session)
+    await db_session.commit()
+
+    assert event1.id != event2.id
+
+
+@pytest.mark.asyncio
+async def test_entityless_alerts_do_not_group_by_category(db_session):
+    """Two alerts with no subject entities must NOT group by category alone."""
+    source = await _make_source(db_session, name="NoEntitySrc")
+    raw1 = await _make_raw_item(db_session, source, title="NoEnt One")
+    raw2 = await _make_raw_item(db_session, source, title="NoEnt Two")
+
+    alert1 = await _make_alert(db_session, raw1, entities=[], category="Consumer Scam")
+    event1 = await find_or_create_event(alert1, db_session)
+    await db_session.commit()
+
+    alert2 = await _make_alert(db_session, raw2, entities=[], category="Consumer Scam")
+    event2 = await find_or_create_event(alert2, db_session)
+    await db_session.commit()
+
+    assert event1.id != event2.id
+
+
+@pytest.mark.asyncio
+async def test_non_agency_overlap_groups_despite_agency_names(db_session):
+    """Coinbase+FBI and Coinbase+DOJ group on the Coinbase (non-agency) overlap."""
+    source = await _make_source(db_session, name="MixedSrc")
+    raw1 = await _make_raw_item(db_session, source, title="Mixed One")
+    raw2 = await _make_raw_item(db_session, source, title="Mixed Two")
+
+    alert1 = await _make_alert(
+        db_session, raw1, entities=["Coinbase", "FBI"], category="Cryptocurrency Fraud"
+    )
+    event1 = await find_or_create_event(alert1, db_session)
+    await db_session.commit()
+
+    alert2 = await _make_alert(
+        db_session, raw2, entities=["Coinbase", "DOJ"], category="Cryptocurrency Fraud"
+    )
+    event2 = await find_or_create_event(alert2, db_session)
+    await db_session.commit()
+
+    assert event1.id == event2.id
+
+
+@pytest.mark.asyncio
+async def test_same_entity_different_category_does_not_group(db_session):
+    """Same non-agency entity but different category must not group (Slice 4)."""
+    source = await _make_source(db_session, name="DiffCatSrc")
+    raw1 = await _make_raw_item(db_session, source, title="DiffCat One")
+    raw2 = await _make_raw_item(db_session, source, title="DiffCat Two")
+
+    alert1 = await _make_alert(
+        db_session, raw1, entities=["DiffCatCo"], category="Cybercrime"
+    )
+    event1 = await find_or_create_event(alert1, db_session)
+    await db_session.commit()
+
+    alert2 = await _make_alert(
+        db_session, raw2, entities=["DiffCatCo"], category="Investment Fraud"
+    )
+    event2 = await find_or_create_event(alert2, db_session)
+    await db_session.commit()
+
+    assert event1.id != event2.id
