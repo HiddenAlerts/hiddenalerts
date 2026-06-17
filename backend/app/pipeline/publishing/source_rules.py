@@ -1,21 +1,29 @@
-"""V1 source-specific publishing rules (Slice 3 — pure, deterministic, no DB).
+"""V1 source-specific publishing rules (Slice 3 / 3.1 — pure, deterministic, no DB).
 
 Adds the source-aware layer on top of the Slice 2 generic policy:
 
-  * KrebsOnSecurity is treated as **effective credibility 4** for V1 decisions
-    (a runtime decision only — the ``sources`` table is NOT mutated).
-  * BleepingComputer is **not** promoted. It is review-first by default and only
-    *conditionally eligible* when the alert text clearly carries a financial /
-    fraud signal (phishing, account takeover, ransomware+extortion, crypto theft,
-    payment fraud, significant data-breach exposure, …). Generic vuln / patch /
-    product-update / PoC / research items stay review-first.
+  * KrebsOnSecurity is effectively trusted for V1 decisions — treated as
+    **effective credibility 4** (a runtime decision only — the ``sources`` table
+    is NOT mutated).
+  * BleepingComputer is **not globally promoted**. It remains review-first by
+    default, but a BleepingComputer alert with a clear fraud / financial signal
+    (phishing, account takeover, ransomware+extortion, crypto theft, payment
+    fraud, significant data-breach exposure, …) is *conditionally
+    source-eligible* and receives **effective credibility 4 for that alert
+    only** — never a stored credibility change. ``get_effective_source_credibility``
+    still returns BleepingComputer's stored value; the per-alert lift lives only
+    inside :func:`evaluate_source_rule`. Generic vulnerability / patch /
+    product-update / PoC / broad technical-research items stay review-first.
   * All other sources have no special rule (effective credibility = stored).
 
 Everything here is pure and side-effect free, and nothing is wired into the
 live pipeline yet (Slice 5 does that). Composition with the generic policy is
 provided by :func:`evaluate_v1_publish_decision`, which never upgrades a
-review/exclude into a publish and never auto-publishes BleepingComputer unless
-its *stored* credibility is already >= the policy threshold.
+review/exclude into a publish. A qualifying (fraud-signal) BleepingComputer
+alert can auto-publish via its per-alert conditional credibility when the band
+and category gates also pass; a non-qualifying one is routed to review. The
+``sources`` table is never read as a publish credential here and is never
+mutated — only the per-alert effective credibility is used.
 """
 from __future__ import annotations
 
