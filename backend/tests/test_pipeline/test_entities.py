@@ -76,3 +76,34 @@ def test_normalize_entity_name():
     assert normalize_entity_name(None) == ""
     assert normalize_entity_name("  Coinbase ") == "coinbase"
     assert normalize_entity_name("ACME Corp") == "acme corp"
+
+
+# --- Slice 5: broad generic-term precision -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "government",
+        "Government",
+        "law enforcement",
+        "federal authorities",
+        "Operation Winter SHIELD",  # named LE operation, no corporate suffix
+        "Operation Crypto Shield",
+    ],
+)
+def test_broad_generic_terms_still_detected(name):
+    assert is_agency_name(name) is True
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Government Employees Insurance Company",  # GEICO — real org
+        "Operation Finance LLC",                   # real org with corp suffix
+        "Government Technology Solutions Inc",
+        "Operation Smart Holdings",
+    ],
+)
+def test_broad_generic_terms_not_filtered_in_real_org_names(name):
+    assert is_agency_name(name) is False

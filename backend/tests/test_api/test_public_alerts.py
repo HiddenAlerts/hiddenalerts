@@ -1814,6 +1814,49 @@ def test_is_agency_name_handles_blank_and_none():
     assert _is_agency_name("   ") is False
 
 
+def test_is_agency_name_broad_terms_precise_on_real_orgs():
+    """Slice 5 precision: broad words don't false-positive inside real org names."""
+    from app.api.public_alerts import _is_agency_name
+
+    assert _is_agency_name("government") is True
+    assert _is_agency_name("Operation Winter SHIELD") is True
+    assert _is_agency_name("Government Employees Insurance Company") is False
+    assert _is_agency_name("Operation Finance LLC") is False
+
+
+# ===========================================================================
+# Top Alerts signal strength — distinct outlets, not raw event_source rows
+# ===========================================================================
+
+
+def _alert_with_outlets(*source_names):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        event_sources=[SimpleNamespace(source_name=n) for n in source_names]
+    )
+
+
+def test_signal_strength_counts_distinct_outlets():
+    from app.api.public_alerts import _signal_strength
+
+    # 5 links from one outlet → strength 1 (no inflation).
+    assert _signal_strength(_alert_with_outlets(*(["BleepingComputer"] * 5))) == 1
+    # Two distinct outlets → 2.
+    assert _signal_strength(_alert_with_outlets("BleepingComputer", "KrebsOnSecurity")) == 2
+    # Three distinct outlets → 3.
+    assert (
+        _signal_strength(
+            _alert_with_outlets("BleepingComputer", "KrebsOnSecurity", "SEC Press Releases")
+        )
+        == 3
+    )
+    # Case/whitespace variants collapse; blanks ignored.
+    assert _signal_strength(_alert_with_outlets("Krebs", " krebs ", "KREBS")) == 1
+    assert _signal_strength(_alert_with_outlets(None, "", "   ")) == 0
+    assert _signal_strength(_alert_with_outlets()) == 0
+
+
 def test_primary_entity_key_skips_agencies():
     """When an alert lists FBI first and Acme second, dedup must pick Acme."""
     from app.api.public_alerts import _primary_entity_key

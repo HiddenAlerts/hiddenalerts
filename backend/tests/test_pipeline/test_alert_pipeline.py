@@ -113,15 +113,17 @@ async def test_manual_admin_approval_can_publish_other(mock_session):
 
 
 # ---------------------------------------------------------------------------
-# M3 final tier1 gate (Ken-approved May 06): score >= 10 (Medium-and-above)
+# V1 publish policy (Slice 5): bands raised — only High/Critical (>=60/100 →
+# >=15 internal for Medium review; >=18 internal == >=70/100 High auto-publish).
+# Internal score 12 == 48/100 == below_60 → EXCLUDE (was auto-publish under M3).
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_medium_score_trusted_allowed_category_auto_publishes(mock_session, mock_raw_item):
-    """Score 12 (Medium) on a credibility-5 source with allowed category should
-    auto-publish under M3 final bands. This was NOT auto-published under the
-    prior tier1 gate (>=16)."""
+async def test_below_60_score_excluded_under_v1(mock_session, mock_raw_item):
+    """Internal score 12 (== 48/100) is below the V1 publish floor of 60, so it
+    is EXCLUDED — not auto-published. (Under the old M3 tier1 gate this score
+    auto-published; V1 raises the bar.)"""
     stats = ProcessingStats()
     with patch("app.pipeline.alert_pipeline.filter_by_keywords", return_value=["fraud"]):
         mock_ai_result = AIAnalysisResult(
@@ -139,8 +141,11 @@ async def test_medium_score_trusted_allowed_category_auto_publishes(mock_session
                 with patch("app.pipeline.alert_pipeline.find_or_create_event", new_callable=AsyncMock):
                     await _process_single_item(mock_raw_item, mock_session, stats)
                     saved = mock_session.add.call_args[0][0]
-                    assert saved.is_published is True
-                    assert saved.signal_score_total == 12
+                    assert saved.is_published is False
+                    assert saved.publish_decision == "exclude"
+                    assert saved.is_excluded is True
+                    assert saved.pending_review_reason == "excluded_low_score"
+                    assert saved.risk_band == "below_60"
 
 
 @pytest.mark.asyncio
