@@ -356,6 +356,8 @@ async def test_event_grouping_failure_holds(db_session):
     assert a.is_excluded is False
     # Score fields preserved for admin inspection.
     assert a.signal_score_total == 20
+    # Held relevant alert keeps its true band from the preserved score (20 → critical).
+    assert a.risk_band == "critical"
 
 
 # --- 14. Grouping mutates the session then raises → savepoint rolls back ------
@@ -408,6 +410,8 @@ async def test_event_grouping_partial_mutation_rolled_back(db_session):
     # Partial score recalc (999 / 5) was rolled back to the initial values.
     assert a.signal_score_total == 20
     assert a.score_cross_source == 1
+    # Band derives from the preserved score (20 → critical), not the below_60 default.
+    assert a.risk_band == "critical"
     # The partial Event side effect was NOT persisted.
     res = await db_session.execute(
         select(Event).where(Event.title == _PARTIAL_EVENT_TITLE)

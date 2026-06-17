@@ -39,6 +39,7 @@ from app.pipeline.publishing.constants import (
     RiskBandValue,
 )
 from app.pipeline.publishing.publishing_policy import DEFAULT_V1_POLICY, PublishDecision
+from app.pipeline.publishing.risk_bands import compute_risk_band
 from app.pipeline.publishing.source_rules import evaluate_v1_publish_decision
 from app.pipeline.signal_scorer import compute_signal_score
 
@@ -407,6 +408,9 @@ async def _process_single_item(
             is_excluded=False,
             excluded_reason=None,
             is_manual_hold=True,
+            # Relevant + scored alert: keep the band from its preserved score
+            # rather than the below_60 default used by content-rejection rows.
+            risk_band=compute_risk_band(alert.signal_score_total),
         )
         await session.commit()
         stats.items_processed += 1  # saved successfully, held for review
