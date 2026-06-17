@@ -20,6 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.event import Event, EventSource
 from app.models.processed_alert import ProcessedAlert
+from app.pipeline.entities import filter_non_agency_entities, normalize_entity_name
 from app.pipeline.signal_scorer import compute_cross_source_score, derive_risk_level
 
 log = logging.getLogger(__name__)
@@ -45,7 +46,10 @@ async def find_or_create_event(
         The matched or newly-created Event.
     """
     category = alert.primary_category
-    entities = _extract_entity_names(alert)
+    # V1 (Slice 4): only real subject entities drive clustering. Agency / generic
+    # governmental names (FBI, DOJ, "law enforcement", …) are stripped so two
+    # unrelated alerts that merely both name "FBI" do not group together.
+    entities = filter_non_agency_entities(_extract_entity_names(alert))
 
     # Try to find a matching event
     matched_event = await _find_matching_event(category, entities, session)
@@ -108,15 +112,20 @@ async def _find_matching_event(
     if not candidate_events:
         return None
 
-    # If current alert has no entities, match on category + time window only
-    # (pick the most recent event in the same category)
+    # V1 (Slice 4): no category-only fallback. An alert with no non-agency
+    # (subject) entity cannot be matched into an existing cluster — it would
+    # otherwise group thematically unrelated alerts that merely share a category.
+    # Such an alert gets its own new event (caller handles the None return).
     if not entities:
-        log.debug(f"Alert has no entities; matching by category '{category}' only")
-        return candidate_events[0]
+        log.debug(
+            "Alert has no non-agency entities; not matching by category alone "
+            f"('{category}') — a new event will be created"
+        )
+        return None
 
-    entities_lower = {e.lower() for e in entities}
+    entities_lower = {normalize_entity_name(e) for e in entities}
 
-    # Find first event with overlapping entities (already ordered by most recent)
+    # Find first event with overlapping non-agency entities (most recent first).
     for event in candidate_events:
         event_entities = _collect_event_entities(event)
         if entities_lower & event_entities:
@@ -126,13 +135,17 @@ async def _find_matching_event(
 
 
 def _collect_event_entities(event: Event) -> set[str]:
-    """Gather all entity names from alerts linked to an event (lowercase)."""
+    """Gather **non-agency** entity names from all alerts linked to an event,
+    normalized for comparison. Agency / generic names are excluded so overlap
+    reflects shared real subjects only (Slice 4).
+    """
     event_entities: set[str] = set()
     for es in event.event_sources:
         if es.alert and es.alert.entities_json:
             names = es.alert.entities_json.get("names", [])
             if isinstance(names, list):
-                event_entities.update(n.lower() for n in names if n)
+                for n in filter_non_agency_entities(names):
+                    event_entities.add(normalize_entity_name(n))
     return event_entities
 
 
@@ -187,21 +200,44 @@ async def _create_event_for_alert(
     return event
 
 
+def _distinct_outlet_count(event_sources) -> int:
+    """Number of distinct independent outlets among an event's links.
+
+    Source names are normalized (trim + lowercase) before counting so simple
+    case/whitespace variants collapse to one outlet. Missing/blank source names
+    are ignored. Deterministic; no canonical-publisher mapping (kept simple for
+    V1 per spec).
+    """
+    outlets = {
+        normalize_entity_name(es.source_name)
+        for es in event_sources
+        if es.source_name and es.source_name.strip()
+    }
+    return len(outlets)
+
+
 async def _recalculate_cross_source_score(
     event: Event,
     session: AsyncSession,
 ) -> None:
-    """Recount event_sources for this event and update cross_source scores.
+    """Recount distinct outlets for this event and update cross_source scores.
 
     Updates score_cross_source, signal_score_total, and risk_level on ALL
     ProcessedAlerts linked to this event.
+
+    NOTE (Slice 4): this corrects scoring for **future** processing only. Existing
+    historical event/alert scores are NOT recomputed here — a historical rescore
+    is deferred to a later dry-run/backfill slice.
     """
-    # Count distinct sources for this event
+    # Count distinct independent OUTLETS for this event, not link rows.
+    # V1 (Slice 4): N articles from the same outlet (e.g. 5 BleepingComputer
+    # links) count as one source, not N, so repeated same-outlet coverage no
+    # longer inflates the cross-source confirmation factor.
     count_result = await session.execute(
         select(EventSource).where(EventSource.event_id == event.id)
     )
     event_sources = count_result.scalars().all()
-    source_count = len(event_sources)
+    source_count = _distinct_outlet_count(event_sources)
     new_cross_score = compute_cross_source_score(source_count)
 
     # Update all linked ProcessedAlerts
