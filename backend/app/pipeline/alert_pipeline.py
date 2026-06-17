@@ -375,17 +375,28 @@ async def _process_single_item(
     # Re-attach source relationship for event_grouper
     alert.raw_item = raw_item
 
-    # --- Step 5: Event grouping (may raise score_cross_source / signal_score_total) ---
+    # --- Step 5: Event grouping inside a SAVEPOINT ---
+    # The new ProcessedAlert was already flushed above (before this savepoint), so
+    # it survives. begin_nested() isolates grouping's side effects (new
+    # Event/EventSource rows + cross-source recalc): if grouping raises, only
+    # those are rolled back to the savepoint, never the alert, and the outer
+    # transaction stays valid for the hold + commit below.
     try:
-        await find_or_create_event(alert, session)
+        async with session.begin_nested():
+            await find_or_create_event(alert, session)
     except Exception as exc:
-        # Event grouping failed → the FINAL post-grouping cross-source state is
-        # unknown, so under V1 we must NOT auto-publish on a possibly-stale score.
-        # Hold for manual review; the initial score_*/signal_score_total/risk_level
-        # are preserved so an admin can inspect the alert.
+        # Grouping failed → FINAL post-grouping state is unknown, so under V1 we
+        # must NOT auto-publish on a possibly-stale score. The savepoint rollback
+        # EXPIRES the alert (its attrs would otherwise trigger implicit async IO),
+        # so refresh FIRST — before reading alert.id or any field — to restore the
+        # pre-grouping (savepoint) values. score_*/signal_score_total/risk_level
+        # are thus the initial scored values (any partial recalc was rolled back).
+        await session.refresh(alert)
+        alert.raw_item = raw_item
         log.warning(
             f"Event grouping failed for alert {alert.id} (raw_item {raw_item.id}): {exc}. "
-            "Alert put on manual hold (event_grouping_failed)."
+            "Grouping side effects rolled back; alert put on manual hold "
+            "(event_grouping_failed)."
         )
         _apply_terminal_state(
             alert,

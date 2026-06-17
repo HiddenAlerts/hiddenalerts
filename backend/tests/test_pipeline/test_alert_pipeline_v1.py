@@ -356,3 +356,60 @@ async def test_event_grouping_failure_holds(db_session):
     assert a.is_excluded is False
     # Score fields preserved for admin inspection.
     assert a.signal_score_total == 20
+
+
+# --- 14. Grouping mutates the session then raises → savepoint rolls back ------
+
+
+_PARTIAL_EVENT_TITLE = "PARTIAL_SAVEPOINT_EVENT"
+
+
+async def _grouping_mutates_then_raises(alert, session):
+    """Simulate event grouping that creates side effects (a new Event + partial
+    score recalc) and flushes them, then fails mid-way."""
+    from app.models.event import Event
+
+    ev = Event(
+        title=_PARTIAL_EVENT_TITLE,
+        category="Cybercrime",
+        first_detected_at=datetime.utcnow(),
+        last_updated_at=datetime.utcnow(),
+    )
+    session.add(ev)
+    # Partial cross-source recalc, as the real grouper would do before finishing.
+    alert.signal_score_total = 999
+    alert.score_cross_source = 5
+    await session.flush()  # side effects written WITHIN the savepoint
+    raise RuntimeError("grouping blew up after partial mutation")
+
+
+@pytest.mark.asyncio
+async def test_event_grouping_partial_mutation_rolled_back(db_session):
+    """A grouping failure that already mutated the session must leave NO partial
+    event/score side effects (savepoint rollback), keep the alert, and hold it."""
+    from app.models.event import Event
+
+    src = await _make_source(db_session, "FBI Press EG2", 5)
+    raw = await _make_raw(db_session, src, "Grouping Partial One")
+    with patch(f"{_PATH}.find_or_create_event", new=_grouping_mutates_then_raises):
+        await _process(
+            db_session, src, raw,
+            _ai("Cybercrime", ["PartialCo"]),
+            _score(20, level="high"),
+        )
+
+    a = await _get_alert(db_session, raw.id)
+    # Alert saved and held.
+    assert a.is_published is False
+    assert a.publish_decision == "hold"
+    assert a.publish_decision_reason == "event_grouping_failed"
+    assert a.pending_review_reason == "manual_hold"
+    assert a.is_manual_hold is True
+    # Partial score recalc (999 / 5) was rolled back to the initial values.
+    assert a.signal_score_total == 20
+    assert a.score_cross_source == 1
+    # The partial Event side effect was NOT persisted.
+    res = await db_session.execute(
+        select(Event).where(Event.title == _PARTIAL_EVENT_TITLE)
+    )
+    assert res.scalars().first() is None
