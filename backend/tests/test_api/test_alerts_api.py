@@ -528,3 +528,283 @@ async def test_admin_can_access_client_feed(client, db_session):
     )
     assert response.status_code == 200
     assert any(d["id"] == alert.id for d in response.json())
+
+
+# ===========================================================================
+# Slice 6 — internal V1 publication visibility + risk explanation + filters
+# ===========================================================================
+
+_V1_FIELDS = (
+    "risk_band", "publish_decision", "publish_decision_reason", "pending_review_reason",
+    "is_excluded", "excluded_reason", "is_manual_hold", "published_by_rule",
+    "publishing_policy_version", "publication_state_source", "publication_state_updated_at",
+)
+
+
+async def _seed_v1_alert(
+    db_session,
+    *,
+    suffix,
+    signal_score_total=22,
+    risk_band="critical",
+    publish_decision="auto_publish",
+    publish_decision_reason="auto_publish_band_and_gates_passed",
+    pending_review_reason=None,
+    is_published=False,
+    published_by_rule=False,
+    is_excluded=False,
+    excluded_reason=None,
+    is_manual_hold=False,
+    publication_state_source="auto_policy",
+    category="Cybercrime",
+    is_relevant=True,
+):
+    _, raw = await _make_source_and_raw(db_session, url_suffix=suffix)
+    now = datetime.now(timezone.utc)
+    alert = ProcessedAlert(
+        raw_item_id=raw.id,
+        primary_category=category,
+        risk_level="high",
+        signal_score_total=signal_score_total,
+        score_source_credibility=5,
+        score_financial_impact=5,
+        score_victim_scale=4,
+        score_cross_source=5,
+        score_trend_acceleration=3,
+        is_relevant=is_relevant,
+        matched_keywords=["fraud"],
+        processed_at=now,
+        risk_band=risk_band,
+        publish_decision=publish_decision,
+        publish_decision_reason=publish_decision_reason,
+        pending_review_reason=pending_review_reason,
+        is_excluded=is_excluded,
+        excluded_reason=excluded_reason,
+        is_manual_hold=is_manual_hold,
+        published_by_rule=published_by_rule,
+        publishing_policy_version="v1.0",
+        publication_state_source=publication_state_source,
+        publication_state_updated_at=now,
+        is_published=is_published,
+        published_at=now if is_published else None,
+    )
+    db_session.add(alert)
+    await db_session.commit()
+    await db_session.refresh(alert)
+    return alert
+
+
+def _auth(token):
+    return {"Cookie": f"access_token={token}"}
+
+
+@pytest.mark.asyncio
+async def test_list_includes_v1_publication_fields(client, db_session):
+    user = await _create_admin_user(db_session)
+    alert = await _seed_v1_alert(db_session, suffix="v1list", is_published=True, published_by_rule=True)
+    token = _make_token(user)
+
+    resp = await client.get("/api/v1/alerts", headers=_auth(token))
+    assert resp.status_code == 200
+    row = next(d for d in resp.json() if d["id"] == alert.id)
+    for f in _V1_FIELDS:
+        assert f in row, f"missing V1 field in list item: {f}"
+    assert row["publish_decision"] == "auto_publish"
+    assert row["published_by_rule"] is True
+    assert row["risk_band"] == "critical"
+    assert row["publication_state_source"] == "auto_policy"
+    assert row["publish_decision_reason"] == "auto_publish_band_and_gates_passed"
+
+
+@pytest.mark.asyncio
+async def test_detail_includes_v1_fields_and_risk_explanation(client, db_session):
+    user = await _create_admin_user(db_session)
+    alert = await _seed_v1_alert(db_session, suffix="v1detail", is_published=True, published_by_rule=True)
+    token = _make_token(user)
+
+    resp = await client.get(f"/api/v1/alerts/{alert.id}", headers=_auth(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    for f in _V1_FIELDS:
+        assert f in body
+    assert "published_by_user_id" in body
+    re = body["risk_explanation"]
+    assert re is not None
+    assert re["score_total"] == 22            # raw internal 5–25
+    assert re["score_100"] == 88              # normalized
+    assert re["risk_band"] == "critical"
+    assert re["publication_decision"] == "auto_publish"
+
+
+@pytest.mark.asyncio
+async def test_risk_explanation_factors_and_reason(client, db_session):
+    user = await _create_admin_user(db_session)
+    alert = await _seed_v1_alert(
+        db_session, suffix="v1factors", is_published=False,
+        publish_decision="review", publish_decision_reason="source_credibility_below_threshold",
+        pending_review_reason="blocked_by_credibility", risk_band="high",
+    )
+    token = _make_token(user)
+
+    resp = await client.get(f"/api/v1/alerts/{alert.id}", headers=_auth(token))
+    factors = resp.json()["risk_explanation"]["factors"]
+    assert set(factors) == {
+        "source_credibility", "financial_impact", "victim_scale",
+        "cross_source", "trend_acceleration",
+    }
+    assert factors["cross_source"] == 5
+    re = resp.json()["risk_explanation"]
+    assert re["publication_reason"] == "source_credibility_below_threshold"
+    assert re["pending_review_reason"] == "blocked_by_credibility"
+    assert re["source_credibility"] == 4  # from _make_source_and_raw
+
+
+@pytest.mark.asyncio
+async def test_risk_explanation_band_fallback_not_persisted(client, db_session):
+    """risk_band is None on the row but the explanation derives it; DB stays NULL."""
+    user = await _create_admin_user(db_session)
+    alert = await _seed_v1_alert(
+        db_session, suffix="v1fallback", signal_score_total=22, risk_band=None,
+        publish_decision="review", publish_decision_reason="x", pending_review_reason=None,
+    )
+    token = _make_token(user)
+
+    resp = await client.get(f"/api/v1/alerts/{alert.id}", headers=_auth(token))
+    assert resp.json()["risk_explanation"]["risk_band"] == "critical"  # computed fallback
+
+    # The DB column was NOT written by the read path.
+    from sqlalchemy import select as _select
+    row = (
+        await db_session.execute(
+            _select(ProcessedAlert).where(ProcessedAlert.id == alert.id)
+        )
+    ).scalar_one()
+    await db_session.refresh(row)
+    assert row.risk_band is None
+
+
+@pytest.mark.asyncio
+async def test_filter_publish_decision(client, db_session):
+    user = await _create_admin_user(db_session)
+    rev = await _seed_v1_alert(
+        db_session, suffix="fpd", publish_decision="review",
+        pending_review_reason="blocked_by_score", risk_band="medium", signal_score_total=16,
+    )
+    token = _make_token(user)
+    resp = await client.get("/api/v1/alerts?publish_decision=review", headers=_auth(token))
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert all(r["publish_decision"] == "review" for r in rows)
+    assert any(r["id"] == rev.id for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_filter_pending_review_reason(client, db_session):
+    user = await _create_admin_user(db_session)
+    a = await _seed_v1_alert(
+        db_session, suffix="fprr", publish_decision="review",
+        pending_review_reason="blocked_by_credibility", risk_band="high",
+    )
+    token = _make_token(user)
+    resp = await client.get(
+        "/api/v1/alerts?pending_review_reason=blocked_by_credibility", headers=_auth(token)
+    )
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert all(r["pending_review_reason"] == "blocked_by_credibility" for r in rows)
+    assert any(r["id"] == a.id for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_filter_risk_band(client, db_session):
+    user = await _create_admin_user(db_session)
+    a = await _seed_v1_alert(
+        db_session, suffix="frb", publish_decision="review",
+        pending_review_reason="blocked_by_source_rule", risk_band="high",
+    )
+    token = _make_token(user)
+    resp = await client.get("/api/v1/alerts?risk_band=high", headers=_auth(token))
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert all(r["risk_band"] == "high" for r in rows)
+    assert any(r["id"] == a.id for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_filter_is_excluded(client, db_session):
+    user = await _create_admin_user(db_session)
+    a = await _seed_v1_alert(
+        db_session, suffix="fexc", publish_decision="exclude",
+        publish_decision_reason="excluded_low_score", pending_review_reason="excluded_low_score",
+        risk_band="below_60", signal_score_total=8, is_excluded=True,
+        excluded_reason="excluded_low_score",
+    )
+    token = _make_token(user)
+    resp = await client.get("/api/v1/alerts?is_excluded=true", headers=_auth(token))
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert all(r["is_excluded"] is True for r in rows)
+    assert any(r["id"] == a.id for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_filter_is_manual_hold(client, db_session):
+    user = await _create_admin_user(db_session)
+    a = await _seed_v1_alert(
+        db_session, suffix="fhold", publish_decision="hold",
+        publish_decision_reason="event_grouping_failed", pending_review_reason="manual_hold",
+        risk_band="critical", is_manual_hold=True,
+    )
+    token = _make_token(user)
+    resp = await client.get("/api/v1/alerts?is_manual_hold=true", headers=_auth(token))
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert all(r["is_manual_hold"] is True for r in rows)
+    assert any(r["id"] == a.id for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_filter_published_by_rule(client, db_session):
+    user = await _create_admin_user(db_session)
+    a = await _seed_v1_alert(db_session, suffix="fpbr", is_published=True, published_by_rule=True)
+    token = _make_token(user)
+    resp = await client.get("/api/v1/alerts?published_by_rule=true", headers=_auth(token))
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert all(r["published_by_rule"] is True for r in rows)
+    assert any(r["id"] == a.id for r in rows)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "qs",
+    [
+        "publish_decision=bogus",
+        "risk_band=nope",
+        "pending_review_reason=not_a_reason",
+    ],
+)
+async def test_invalid_enum_filter_returns_422(client, db_session, qs):
+    user = await _create_admin_user(db_session)
+    token = _make_token(user)
+    resp = await client.get(f"/api/v1/alerts?{qs}", headers=_auth(token))
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_existing_category_filter_still_works(client, db_session):
+    user = await _create_admin_user(db_session)
+    a = await _seed_v1_alert(db_session, suffix="catf", category="Money Laundering")
+    token = _make_token(user)
+    resp = await client.get("/api/v1/alerts?category=Money Laundering", headers=_auth(token))
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert all(r["primary_category"] == "Money Laundering" for r in rows)
+    assert any(r["id"] == a.id for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_detail_requires_auth(client, db_session):
+    alert = await _seed_v1_alert(db_session, suffix="noauth")
+    resp = await client.get(f"/api/v1/alerts/{alert.id}")
+    assert resp.status_code == 401

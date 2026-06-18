@@ -222,10 +222,15 @@ async def test_public_feed_response_shape(client, db_session):
                   "signal_score", "source_name", "source_url", "published_at"):
         assert field in alert, f"Missing field: {field}"
 
-    # Internal fields must NOT be present
+    # Internal fields must NOT be present (incl. all Slice 6 V1 internal fields)
     for internal_field in ("is_published", "is_relevant", "raw_item_id",
                            "score_source_credibility", "score_financial_impact",
-                           "entities_json", "review_status", "published_by_user_id"):
+                           "entities_json", "review_status", "published_by_user_id",
+                           "risk_band", "publish_decision", "publish_decision_reason",
+                           "pending_review_reason", "excluded_reason", "is_excluded",
+                           "is_manual_hold", "published_by_rule", "publishing_policy_version",
+                           "publication_state_source", "publication_state_updated_at",
+                           "risk_explanation"):
         assert internal_field not in alert, f"Internal field leaked: {internal_field}"
 
 
@@ -467,6 +472,19 @@ async def test_public_detail_safe_fields_only(client, db_session):
         "matched_keywords",
         "relevance_score",
         "signal_score_total",  # list endpoint field name — public detail uses signal_score
+        # Slice 6 V1 internal fields must never appear on the public detail.
+        "risk_band",
+        "publish_decision",
+        "publish_decision_reason",
+        "pending_review_reason",
+        "excluded_reason",
+        "is_excluded",
+        "is_manual_hold",
+        "published_by_rule",
+        "publishing_policy_version",
+        "publication_state_source",
+        "publication_state_updated_at",
+        "risk_explanation",
     )
     for f in forbidden:
         assert f not in data, f"Forbidden field leaked: {f}"
