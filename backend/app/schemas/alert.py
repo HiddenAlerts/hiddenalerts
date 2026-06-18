@@ -37,6 +37,42 @@ class ProcessedAlertRead(BaseModel):
     # Publication state (M3)
     is_published: bool = False
     published_at: datetime | None = None
+    # V1 Alert Publishing state (Slice 6 — internal/admin visibility; additive).
+    # These mirror the processed_alerts columns written by the V1 pipeline so
+    # review queues can see WHY an alert was published / reviewed / excluded /
+    # held without opening the detail page. Never exposed on public endpoints.
+    risk_band: str | None = None
+    publish_decision: str | None = None
+    publish_decision_reason: str | None = None
+    pending_review_reason: str | None = None
+    is_excluded: bool | None = None
+    excluded_reason: str | None = None
+    is_manual_hold: bool | None = None
+    published_by_rule: bool | None = None
+    publishing_policy_version: str | None = None
+    publication_state_source: str | None = None
+    publication_state_updated_at: datetime | None = None
+
+
+class RiskExplanation(BaseModel):
+    """Deterministic, internal-only explanation of an alert's risk + V1 decision.
+
+    Built in the API mapping layer from already-stored fields (no DB writes).
+    `score_total` is the raw internal 5–25 sum; `score_100` is the normalized
+    0–100 value. `risk_band` falls back to a computed band when the column is
+    null (the fallback is response-only and never persisted).
+    """
+
+    score_total: int | None = None
+    score_100: int | None = None
+    risk_level: str | None = None
+    risk_band: str | None = None
+    factors: dict[str, int | None] | None = None
+    publication_decision: str | None = None
+    publication_reason: str | None = None
+    pending_review_reason: str | None = None
+    source: str | None = None
+    source_credibility: int | None = None
 
 
 class ProcessedAlertDetail(ProcessedAlertRead):
@@ -60,6 +96,11 @@ class ProcessedAlertDetail(ProcessedAlertRead):
     event_title: str | None = None
     # Latest review status (populated by API layer)
     review_status: str | None = None
+    # V1 internal detail extras (Slice 6). The reason/state fields are inherited
+    # from ProcessedAlertRead; detail adds the publishing user id (raw nullable
+    # int — no user/profile join) and the structured risk explanation.
+    published_by_user_id: int | None = None
+    risk_explanation: RiskExplanation | None = None
 
 
 class AlertReviewCreate(BaseModel):
