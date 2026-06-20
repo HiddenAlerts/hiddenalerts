@@ -138,7 +138,8 @@ def test_acronym_word_boundaries_no_false_positive():
     )
 
 
-def test_signal_detected_in_matched_keywords_and_entities():
+def test_signal_detected_in_matched_keywords():
+    # Matched keywords ARE part of the haystack (article-derived text).
     assert (
         has_bleepingcomputer_financial_fraud_signal(matched_keywords=["phishing", "credential"])
         is True
@@ -150,6 +151,25 @@ def test_signal_detected_in_matched_keywords_and_entities():
         is True
     )
     assert has_bleepingcomputer_financial_fraud_signal(title=None, summary=None) is False
+
+
+def test_entity_names_alone_do_not_trigger_signal():
+    # M2: entity names are NOT searched — a fraud word inside a company/product
+    # name must not, by itself, trip the signal (negative case 6).
+    assert (
+        has_bleepingcomputer_financial_fraud_signal(
+            title="Quarterly product roundup and company news",
+            entities_json={"names": ["Identity Theft Protection Inc.", "Scam Detector LLC"]},
+        )
+        is False
+    )
+    # But the SAME fraud phrase in the title (article text) does trigger it.
+    assert (
+        has_bleepingcomputer_financial_fraud_signal(
+            title="Identity theft ring exposed targeting consumers"
+        )
+        is True
+    )
 
 
 # --- evaluate_source_rule ----------------------------------------------------
@@ -308,3 +328,189 @@ def test_composed_never_upgrades_review_to_publish():
     # Other source, Medium → review must remain review regardless of source rule.
     d = _v1(_MEDIUM, _APPROVED, "SEC Press Releases", 5)
     assert d.action is PublishDecisionValue.REVIEW
+
+
+# ===========================================================================
+# M2 — BleepingComputer conditional auto-publish precision tuning
+# ===========================================================================
+#
+# The fraud signal is tiered: direct fraud terms qualify alone; ransomware /
+# breach need impact/victim context; technical framing vetoes a contextual
+# signal; entity names are not searched.
+
+
+# --- Pure detector: direct fraud terms qualify on their own ------------------
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Phishing campaign harvests bank credentials",
+        "Business email compromise (BEC) drains corporate accounts",
+        "Payment fraud scheme hits e-commerce shoppers",
+        "Account takeover wave targets banking apps",
+        "Crypto wallet theft via seed phrase scam",
+        "Wire fraud ring indicted after consumer scam",
+        "Identity theft operation exposed",
+        "Infostealer malware harvests saved passwords",
+    ],
+)
+def test_m2_direct_fraud_signal_true(title):
+    assert has_bleepingcomputer_financial_fraud_signal(title=title) is True
+
+
+# --- Pure detector: ransomware needs impact context -------------------------
+
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("Ransomware gang demands payment from hospital", True),
+        ("Ransomware group extortion steals funds from businesses", True),
+        ("Ransomware attack disrupts operations at logistics firm", True),
+        # No impact context → review-first:
+        ("Patch fixes vulnerability that could allow ransomware deployment", False),
+        ("Researchers document a new ransomware strain's encryption", False),
+    ],
+)
+def test_m2_ransomware_requires_impact(title, expected):
+    assert has_bleepingcomputer_financial_fraud_signal(title=title) is expected
+
+
+# --- Pure detector: breach needs victim/financial relevance -----------------
+
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("Breach exposes customer payment data", True),
+        ("Data breach leaks consumer SSNs and credit cards", True),
+        # No victim/financial relevance, or technical framing → review-first:
+        ("Security advisory mentions data exposure risk", False),
+        ("Generic data breach disclosed at unnamed company", False),
+    ],
+)
+def test_m2_breach_requires_victim_or_financial(title, expected):
+    assert has_bleepingcomputer_financial_fraud_signal(title=title) is expected
+
+
+# --- Pure detector: technical context vetoes a contextual signal ------------
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Microsoft releases patch for Windows kernel CVE",
+        "Researcher publishes proof-of-concept exploit (PoC)",
+        "Vendor issues product security advisory for router firmware",
+        "Technical analysis of a memory-safety bug",
+        "Zero-day vulnerability enables remote code execution",
+    ],
+)
+def test_m2_technical_only_stays_review_first(title):
+    assert has_bleepingcomputer_financial_fraud_signal(title=title) is False
+
+
+def test_m2_direct_fraud_survives_technical_terms():
+    # A real phishing campaign that cites a CVE is still fraud-relevant.
+    assert (
+        has_bleepingcomputer_financial_fraud_signal(
+            title="Phishing campaign exploits CVE-2024-1234 to steal bank credentials"
+        )
+        is True
+    )
+
+
+# --- Composed end-to-end: BleepingComputer stored-3, Critical, approved -------
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Phishing campaign steals bank credentials from customers",
+        "BEC payment fraud campaign tricks finance teams",
+        "Crypto wallet theft drains seed phrases from victims",
+        "Ransomware gang demands ransom payment, disrupting hospital operations",
+        "Consumer scam and identity theft ring targets retirees",
+    ],
+)
+def test_m2_bleeping_fraud_auto_publishes(title):
+    d = _v1(_CRITICAL, _APPROVED, "BleepingComputer", 3, title=title)
+    assert d.action is PublishDecisionValue.AUTO_PUBLISH
+    assert d.risk_band is RiskBandValue.CRITICAL
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Microsoft ships patch for critical Windows CVE",          # 1 CVE/patch
+        "Researcher releases proof-of-concept exploit for bug",    # 2 PoC
+        "Vendor publishes product security advisory",              # 3 advisory
+        "Technical analysis of a new malware loader",              # 4 malware analysis
+        "Patch fixes flaw that could be abused for ransomware",    # 5 ransomware, no impact
+        "Generic data breach reported at a company",               # 7 breach, no victim/financial
+    ],
+)
+def test_m2_bleeping_technical_stays_review_first(title):
+    d = _v1(_CRITICAL, _APPROVED, "BleepingComputer", 3, title=title)
+    assert d.action is PublishDecisionValue.REVIEW
+    assert d.pending_review_reason is PendingReviewReason.BLOCKED_BY_SOURCE_RULE
+    assert d.reason == "bleepingcomputer_review_first"
+
+
+def test_m2_bleeping_entity_only_fraud_stays_review_first():
+    # Negative case 6: fraud word only inside an entity name → review-first.
+    d = _v1(
+        _CRITICAL, _APPROVED, "BleepingComputer", 3,
+        title="Weekly product roundup",
+        entities_json={"names": ["Fraud Shield Inc.", "Scam Blocker LLC"]},
+    )
+    assert d.action is PublishDecisionValue.REVIEW
+    assert d.pending_review_reason is PendingReviewReason.BLOCKED_BY_SOURCE_RULE
+
+
+# --- Composed ransomware / breach edge cases --------------------------------
+
+
+def test_m2_ransomware_with_impact_auto_publishes():
+    d = _v1(_CRITICAL, _APPROVED, "BleepingComputer", 3,
+            title="Ransomware group demands payment from hospital")
+    assert d.action is PublishDecisionValue.AUTO_PUBLISH
+
+
+def test_m2_ransomware_in_patch_context_review_first():
+    d = _v1(_CRITICAL, _APPROVED, "BleepingComputer", 3,
+            title="Patch fixes vulnerability that could allow ransomware deployment")
+    assert d.action is PublishDecisionValue.REVIEW
+    assert d.pending_review_reason is PendingReviewReason.BLOCKED_BY_SOURCE_RULE
+
+
+def test_m2_breach_with_payment_data_auto_publishes():
+    d = _v1(_CRITICAL, _APPROVED, "BleepingComputer", 3,
+            title="Breach exposes customer payment data")
+    assert d.action is PublishDecisionValue.AUTO_PUBLISH
+
+
+def test_m2_breach_advisory_review_first():
+    d = _v1(_CRITICAL, _APPROVED, "BleepingComputer", 3,
+            title="Security advisory mentions data exposure risk")
+    assert d.action is PublishDecisionValue.REVIEW
+    assert d.pending_review_reason is PendingReviewReason.BLOCKED_BY_SOURCE_RULE
+
+
+# --- Regression: Krebs + non-Bleeping unaffected by M2 ----------------------
+
+
+def test_m2_regression_krebs_still_auto_publishes():
+    # Krebs stored-3 → effective 4 → auto-publishes (content-agnostic, unchanged).
+    d = _v1(_CRITICAL, _APPROVED, "KrebsOnSecurity", 3,
+            title="Microsoft releases patch for Windows")  # technical title irrelevant for Krebs
+    assert d.action is PublishDecisionValue.AUTO_PUBLISH
+
+
+def test_m2_regression_non_bleeping_source_unaffected():
+    # A generic source with a technical title still auto-publishes on its own
+    # credibility — the BleepingComputer fraud gate does not apply to it.
+    d = _v1(_CRITICAL, _APPROVED, "SEC Press Releases", 4,
+            title="Microsoft releases patch for Windows")
+    assert d.action is PublishDecisionValue.AUTO_PUBLISH
