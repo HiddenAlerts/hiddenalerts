@@ -6,22 +6,25 @@ Adds the source-aware layer on top of the Slice 2 generic policy:
     **effective credibility 4** (a runtime decision only — the ``sources`` table
     is NOT mutated).
   * BleepingComputer is **not globally promoted**. It remains review-first by
-    default, but a BleepingComputer alert with a clear fraud / financial signal
-    (phishing, account takeover, ransomware+extortion, crypto theft, payment
-    fraud, significant data-breach exposure, …) is *conditionally
-    source-eligible* and receives **effective credibility 4 for that alert
-    only** — never a stored credibility change. ``get_effective_source_credibility``
-    still returns BleepingComputer's stored value; the per-alert lift lives only
-    inside :func:`evaluate_source_rule`. Generic vulnerability / patch /
-    product-update / PoC / broad technical-research items stay review-first.
+    default, but a BleepingComputer alert with a *clear* fraud / financial-victim
+    signal is *conditionally source-eligible* and receives **effective
+    credibility 4 for that alert only** — never a stored credibility change.
+    ``get_effective_source_credibility`` still returns BleepingComputer's stored
+    value; the per-alert lift lives only inside :func:`evaluate_source_rule`. The
+    signal is tiered (M2 precision tuning): a direct fraud term (phishing, BEC,
+    payment/bank/wire fraud, account takeover, crypto/wallet theft, identity
+    theft, consumer scam, infostealer, …) qualifies on its own; ransomware /
+    extortion and breach / data-exposure qualify only with impact / victim
+    context; and primarily-technical items (CVE / patch / PoC / advisory /
+    analysis) stay review-first. Entity names are not part of the signal.
   * All other sources have no special rule (effective credibility = stored).
 
-Everything here is pure and side-effect free, and nothing is wired into the
-live pipeline yet (Slice 5 does that). Composition with the generic policy is
-provided by :func:`evaluate_v1_publish_decision`, which never upgrades a
-review/exclude into a publish. A qualifying (fraud-signal) BleepingComputer
-alert can auto-publish via its per-alert conditional credibility when the band
-and category gates also pass; a non-qualifying one is routed to review. The
+Everything here is pure and side-effect free. Composition with the generic
+policy is provided by :func:`evaluate_v1_publish_decision`, which never upgrades
+a review/exclude into a publish (it is wired into the live pipeline via
+``alert_pipeline``). A qualifying (fraud-signal) BleepingComputer alert can
+auto-publish via its per-alert conditional credibility when the band and
+category gates also pass; a non-qualifying one is routed to review. The
 ``sources`` table is never read as a publish credential here and is never
 mutated — only the per-alert effective credibility is used.
 """
@@ -60,61 +63,96 @@ _BLEEPING_FINGERPRINT = "bleepingcomputer"
 
 
 # ---------------------------------------------------------------------------
-# Lexicons for BleepingComputer conditional eligibility
+# Lexicons for the BleepingComputer conditional fraud signal (M2 precision tuning)
 # ---------------------------------------------------------------------------
+#
+# The signal is intentionally tiered rather than a single OR-match over a wide
+# haystack:
+#   (1) DIRECT fraud terms are sufficient on their own (clear fraud / financial-
+#       victim intent), even when technical terms also appear.
+#   (2) RANSOMWARE / extortion qualifies ONLY together with an IMPACT term (3) —
+#       a bare "ransomware" mention in a vuln/patch article is NOT enough.
+#   (4) BREACH / data-exposure qualifies ONLY together with a victim/financial
+#       relevance term (5) — generic "data breach" alone is NOT enough.
+#   (6) TECHNICAL context vetoes a (2)/(4) contextual signal (but never a (1)
+#       direct signal), so primarily-technical items stay review-first.
+# Entity names are deliberately NOT searched (see ``has_bleepingcomputer_...``).
 
-# Positive: clear real-world fraud / financial-crime / consumer-exposure signals.
-# Conservative by construction — multi-word phrases must appear as phrases.
-_FINANCIAL_FRAUD_TERMS: tuple[str, ...] = (
-    "fraud",
-    "scam",
-    "phishing",
-    "credential theft",
-    "credentials",
-    "account takeover",
-    "ato",
-    "business email compromise",
-    "bec",
-    "ransomware",
-    "extortion",
-    "crypto theft",
-    "cryptocurrency theft",
-    "payment fraud",
-    "wire fraud",
-    "identity theft",
-    "data breach",
-    "stolen data",
-    "stolen credentials",
-    "infostealer",
-    "bank fraud",
-    "financial fraud",
+# (1) DIRECT fraud / financial-victim signals — sufficient on their own.
+_DIRECT_FRAUD_TERMS: tuple[str, ...] = (
+    "phishing", "spear phishing", "spear-phishing", "smishing", "vishing",
+    "credential theft", "credential harvesting", "stolen credentials",
+    "harvested credentials", "account takeover", "ato",
+    "business email compromise", "bec",
+    "payment fraud", "bank fraud", "wire fraud", "invoice fraud",
+    "card fraud", "credit card theft", "carding",
+    "crypto theft", "cryptocurrency theft", "wallet theft", "wallet drainer",
+    "seed phrase", "investment scam", "investment fraud", "romance scam",
+    "consumer scam", "tech support scam", "gift card scam", "refund scam",
+    "identity theft", "fraud campaign", "scam campaign",
+    "financial fraud", "infostealer", "money laundering",
 )
 
-# Negative: purely technical / review-first signals (vuln research, patches, …).
+# (2) RANSOMWARE / extortion family — needs an IMPACT term (3) to qualify.
+_RANSOMWARE_TERMS: tuple[str, ...] = (
+    "ransomware", "extortion", "double extortion",
+)
+
+# (3) IMPACT context — financial / victim / operational consequence.
+_IMPACT_TERMS: tuple[str, ...] = (
+    "payment", "payments", "paid", "ransom", "extortion",
+    "victim", "victims", "customers", "consumers", "clients",
+    "businesses", "enterprises", "hospital", "hospitals", "patients",
+    "financial loss", "financial losses", "stolen funds", "funds stolen",
+    "money stolen", "data theft", "data stolen", "data leak", "data leaked",
+    "leaked data", "exfiltration", "exfiltrated",
+    "operations disrupted", "disrupted operations",
+    "disrupt", "disrupts", "disrupting", "disrupted", "shut down",
+    "million", "millions", "billion",
+)
+
+# (4) BREACH / data-exposure family — needs a victim/financial term (5).
+_BREACH_TERMS: tuple[str, ...] = (
+    "data breach", "breach", "data exposure", "data exposed", "exposes",
+    "exposed", "leaked", "leak", "database exposed", "misconfigured database",
+)
+
+# (5) BREACH victim / financial relevance.
+_BREACH_IMPACT_TERMS: tuple[str, ...] = (
+    "customers", "consumers", "clients", "users",
+    "personal information", "personal data", "personally identifiable", "pii",
+    "bank account", "bank accounts", "credit card", "credit cards",
+    "payment data", "payment card", "payment information",
+    "identity theft", "stolen credentials", "fraud risk",
+    "financial data", "financial information",
+    "ssn", "social security number", "social security numbers",
+    "passwords", "medical records", "health records",
+)
+
+# (6) TECHNICAL context — vetoes a contextual (ransomware/breach) signal, never a
+#     direct fraud signal. Primarily-technical BleepingComputer items stay review-first.
 _TECHNICAL_TERMS: tuple[str, ...] = (
-    "patch",
-    "patched",
-    "vulnerability",
-    "cve",
-    "zero-day",
-    "product update",
-    "security update",
-    "bug",
-    "exploit proof-of-concept",
-    "proof-of-concept",
-    "poc",
-    "researcher",
-    "technical analysis",
+    "cve", "patch", "patched", "patch tuesday", "security update",
+    "product update", "software update", "vulnerability", "vulnerabilities",
+    "zero-day", "0-day", "proof-of-concept", "proof of concept", "poc",
+    "exploit poc", "security advisory", "advisory", "bug fix", "bugfix",
+    "remote code execution", "rce", "privilege escalation",
+    "denial of service", "ddos", "technical analysis", "malware analysis",
+    "researcher", "researchers", "reverse engineering",
 )
 
 
 def _compile(terms: tuple[str, ...]) -> list[re.Pattern[str]]:
     """Word-boundary patterns so acronyms (BEC/ATO/PoC/CVE) don't false-match
-    inside larger words (e.g. 'bec' in 'became')."""
+    inside larger words (e.g. 'bec' in 'became', 'ato' in 'potato')."""
     return [re.compile(r"\b" + re.escape(t) + r"\b", re.IGNORECASE) for t in terms]
 
 
-_FINANCIAL_FRAUD_PATTERNS = _compile(_FINANCIAL_FRAUD_TERMS)
+_DIRECT_FRAUD_PATTERNS = _compile(_DIRECT_FRAUD_TERMS)
+_RANSOMWARE_PATTERNS = _compile(_RANSOMWARE_TERMS)
+_IMPACT_PATTERNS = _compile(_IMPACT_TERMS)
+_BREACH_PATTERNS = _compile(_BREACH_TERMS)
+_BREACH_IMPACT_PATTERNS = _compile(_BREACH_IMPACT_TERMS)
 _TECHNICAL_PATTERNS = _compile(_TECHNICAL_TERMS)
 
 
@@ -198,10 +236,15 @@ def _build_haystack(
     title: str | None,
     summary: str | None,
     matched_keywords,
-    entities_json,
     primary_category: str | None,
 ) -> str:
-    """Flatten all text-bearing fields into one lowercase string for matching."""
+    """Flatten the text-bearing fields into one lowercase string for matching.
+
+    Entity names are intentionally NOT included: a fraud word appearing inside a
+    company/product name (e.g. "Identity Theft Protection Inc.") must not, by
+    itself, trip the fraud signal. Only article text — title, summary, category,
+    and matched keywords — is searched.
+    """
     parts: list[str] = []
     for v in (title, summary, primary_category):
         if v:
@@ -213,16 +256,31 @@ def _build_haystack(
     elif isinstance(matched_keywords, (list, tuple, set)):
         parts.extend(str(x) for x in matched_keywords if x)
 
-    if isinstance(entities_json, dict):
-        names = entities_json.get("names")
-        if isinstance(names, list):
-            parts.extend(str(n) for n in names if n)
-
     return " ".join(parts).lower()
 
 
 def _matches_any(haystack: str, patterns: list[re.Pattern[str]]) -> bool:
     return any(p.search(haystack) for p in patterns)
+
+
+def _has_direct_fraud_signal(text: str) -> bool:
+    """Strong, unambiguous fraud / financial-victim term — sufficient alone."""
+    return _matches_any(text, _DIRECT_FRAUD_PATTERNS)
+
+
+def _has_ransomware_with_impact(text: str) -> bool:
+    """Ransomware/extortion AND a financial/victim/operational impact term."""
+    return _matches_any(text, _RANSOMWARE_PATTERNS) and _matches_any(text, _IMPACT_PATTERNS)
+
+
+def _has_breach_with_victim_or_financial_impact(text: str) -> bool:
+    """Breach/data-exposure AND a consumer/financial/victim relevance term."""
+    return _matches_any(text, _BREACH_PATTERNS) and _matches_any(text, _BREACH_IMPACT_PATTERNS)
+
+
+def _has_technical_context(text: str) -> bool:
+    """Primarily-technical framing (CVE/patch/PoC/advisory/analysis/…)."""
+    return _matches_any(text, _TECHNICAL_PATTERNS)
 
 
 def has_bleepingcomputer_financial_fraud_signal(
@@ -233,28 +291,48 @@ def has_bleepingcomputer_financial_fraud_signal(
     entities_json: dict | None = None,
     primary_category: str | None = None,
 ) -> bool:
-    """Conservative detector for a clear financial/fraud signal.
+    """Tiered detector for a *clear* fraud / financial-victim signal (M2 tuned).
 
-    Returns True iff at least one positive financial-fraud term is present in any
-    of the supplied text fields. The positive lexicon is intentionally strict:
-    every term denotes real-world theft / fraud / extortion / credential abuse /
-    consumer-or-enterprise exposure, so its mere presence satisfies the "clearly
-    indicates real-world exposure" bar even when technical terms also appear.
+    Decision (conservative — prefer review when uncertain):
 
-    Items carrying only technical signals (patch, CVE, PoC, vuln research, …) — or
-    no positive signal at all — return False (route to review). This is the
-    conservative default: ambiguous BleepingComputer items go to review.
+      * A **direct** fraud term (phishing, BEC, payment/bank/wire fraud, account
+        takeover, crypto/wallet theft, identity theft, consumer scam, infostealer,
+        …) is sufficient on its own — even alongside technical terms, because a
+        real phishing campaign may cite a CVE and is still fraud-relevant.
+      * **Ransomware / extortion** qualifies only with an impact term (payment,
+        ransom, victims, customers, financial loss, operations disrupted, …); a
+        bare "ransomware" mention in a vuln/patch article does NOT qualify.
+      * **Breach / data-exposure** qualifies only with a consumer/financial/victim
+        term (customers, payment data, identity theft, SSN, …); generic "data
+        breach" alone does NOT qualify.
+      * A ransomware/breach contextual signal is **vetoed** when the item carries
+        technical framing (CVE/patch/PoC/advisory/analysis), so primarily-technical
+        BleepingComputer items stay review-first. The veto never blocks a direct
+        fraud signal.
+
+    ``entities_json`` is accepted for call-site compatibility but intentionally
+    NOT searched — entity names alone cannot trip the signal.
     """
-    haystack = _build_haystack(
+    text = _build_haystack(
         title=title,
         summary=summary,
         matched_keywords=matched_keywords,
-        entities_json=entities_json,
         primary_category=primary_category,
     )
-    if not haystack:
+    if not text:
         return False
-    return _matches_any(haystack, _FINANCIAL_FRAUD_PATTERNS)
+
+    if _has_direct_fraud_signal(text):
+        return True
+
+    contextual = (
+        _has_ransomware_with_impact(text)
+        or _has_breach_with_victim_or_financial_impact(text)
+    )
+    if contextual and not _has_technical_context(text):
+        return True
+
+    return False
 
 
 # ---------------------------------------------------------------------------
