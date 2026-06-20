@@ -63,3 +63,10 @@ data/
 
 # V1 candidate-backfill dry-run reports (contain alert ids / review decisions)
 reports/
+
+# Production DB backups / dumps — NEVER commit (M4 guardrail). data/ and reports/
+# above already cover review inputs and reports; these add backups + dump exts.
+backups/
+*.sql
+*.dump
+*.backup

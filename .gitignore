@@ -60,3 +60,16 @@ alembic/__pycache__/
 
 .local/
 backups/
+
+# Production DB backups / dry-run reports / review inputs — NEVER commit (M4
+# guardrail). `backups/` above already matches at any depth; the anchored paths
+# and dump extensions below are defense-in-depth against a stray `git add`.
+/backups/
+/backend/backups/
+/backend/reports/
+/backend/data/review_inputs/
+*.sql
+*.dump
+*.backup
+
+backend/docs/

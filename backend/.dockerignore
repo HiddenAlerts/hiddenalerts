@@ -1,0 +1,51 @@
+# Docker build-context excludes (M3 guardrail).
+# Build context is the backend/ directory (compose `build: .`). Keep private,
+# generated, and local-only files OUT of the image. Do NOT exclude application
+# source, migrations, requirements, Dockerfile, templates, or runtime config.
+
+# Git / editor
+.git
+.gitignore
+.idea/
+.vscode/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments / local env
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Runtime / generated / private data (never bake into the image)
+data/review_inputs/
+reports/
+backups/
+../backups/
+*.sql
+*.dump
+*.backup
+
+# Logs
+logs/
+*.log
+
+# Test / local artifacts
+test-results/
+tmp/
+temp/
+
+# OS files
+.DS_Store
+Thumbs.db
