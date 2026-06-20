@@ -59,3 +59,7 @@ mastery44u-attachments/
 alembic/__pycache__/
 
 .local/
+data/
+
+# V1 candidate-backfill dry-run reports (contain alert ids / review decisions)
+reports/
