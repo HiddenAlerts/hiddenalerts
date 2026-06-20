@@ -426,3 +426,21 @@ def test_validate_rejects_parse_only_directly():
              "planned_actions": {"approved": [], "rejected": [], "keep_later": []}}
     errors = validate_dry_run_report_for_apply(prior, prior, expected_counts=_EXPECTED)
     assert any("parse_only" in e for e in errors)
+
+
+# --- regression: reviewed_at must use the server default (naive column) --------
+
+
+def test_make_review_row_omits_reviewed_at_for_server_default():
+    """Regression for the Slice 8B Postgres apply failure: AlertReview.reviewed_at
+    is mapped naive (default=func.now()), so the apply tool must NOT set it from a
+    tz-aware datetime (asyncpg rejects that on Postgres; SQLite silently accepts).
+    The ORM object leaves reviewed_at unset so the server default applies at flush.
+    """
+    for decision, status in (("approved", "approved"), ("rejected", "false_positive"),
+                             ("keep_later", "manual_hold")):
+        row = APPLY._make_review_row(5, decision, user_id=None, batch_id="b1")
+        assert row.reviewed_at is None, "reviewed_at must be unset (server default)"
+        assert row.review_status == status
+        assert row.decision_source == "candidate_backfill"
+        assert row.review_batch_id == "b1"

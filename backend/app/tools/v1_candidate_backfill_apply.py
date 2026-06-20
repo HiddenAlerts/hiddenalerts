@@ -206,15 +206,18 @@ def _apply_decision_to_alert(
 
 
 def _make_review_row(
-    alert_id: int, decision: str, *, user_id: int | None, batch_id: str, now: datetime
+    alert_id: int, decision: str, *, user_id: int | None, batch_id: str
 ) -> AlertReview:
+    # reviewed_at is intentionally NOT set here: AlertReview.reviewed_at is mapped
+    # as a naive column (default=func.now()), so populating it from the app's
+    # tz-aware ``now`` is rejected by asyncpg on Postgres. Rely on the server-side
+    # func.now() default, exactly like the other AlertReview creators in the app.
     return AlertReview(
         alert_id=alert_id,
         user_id=user_id,
         review_status=_REVIEW_STATUS[decision],
         decision_source=DecisionSource.CANDIDATE_BACKFILL.value,
         review_batch_id=batch_id,
-        reviewed_at=now,
     )
 
 
@@ -311,7 +314,7 @@ async def run_apply(
             decision = decision_by_id[alert_id]
             alert = by_id[alert_id]
             _apply_decision_to_alert(alert, decision, now=now, user_id=user_id)
-            session.add(_make_review_row(alert_id, decision, user_id=user_id, batch_id=batch_id, now=now))
+            session.add(_make_review_row(alert_id, decision, user_id=user_id, batch_id=batch_id))
             updated[decision].append(alert_id)
             reviews_created += 1
 
