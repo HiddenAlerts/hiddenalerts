@@ -293,6 +293,11 @@ async def test_approve_review_publishes_alert(client, db_session):
 
     await db_session.refresh(alert)
     assert alert.is_published is True
+    # Slice 7A: approval reconciles V1 manual-admin publication state.
+    assert alert.publication_state_source == "manual_admin"
+    assert alert.publish_decision == "auto_publish"
+    assert alert.published_by_rule is False
+    assert alert.publishing_policy_version == "v1.0"
 
 
 @pytest.mark.asyncio
@@ -365,6 +370,10 @@ async def test_false_positive_review_does_not_publish(client, db_session):
 
     await db_session.refresh(alert)
     assert alert.is_published is False
+    # Slice 7A: false positive now also marks V1 exclusion state.
+    assert alert.publish_decision == "exclude"
+    assert alert.is_excluded is True
+    assert alert.publication_state_source == "manual_admin"
 
 
 @pytest.mark.asyncio
@@ -782,6 +791,7 @@ async def test_filter_published_by_rule(client, db_session):
         "publish_decision=bogus",
         "risk_band=nope",
         "pending_review_reason=not_a_reason",
+        "publication_state_source=bogus",
     ],
 )
 async def test_invalid_enum_filter_returns_422(client, db_session, qs):
@@ -808,3 +818,219 @@ async def test_detail_requires_auth(client, db_session):
     alert = await _seed_v1_alert(db_session, suffix="noauth")
     resp = await client.get(f"/api/v1/alerts/{alert.id}")
     assert resp.status_code == 401
+
+
+# ===========================================================================
+# Slice 7A — manual review V1 reconciliation
+# ===========================================================================
+
+
+async def _seed_review_alert(
+    db_session, *, suffix, is_relevant=True, is_published=False, signal_score_total=22,
+    **v1,
+):
+    """Seed a ProcessedAlert with a source/raw for the review endpoint tests."""
+    _, raw = await _make_source_and_raw(db_session, url_suffix=suffix)
+    now = datetime.now(timezone.utc)
+    alert = ProcessedAlert(
+        raw_item_id=raw.id,
+        primary_category="Cybercrime",
+        risk_level="high",
+        signal_score_total=signal_score_total,
+        score_source_credibility=5, score_financial_impact=5, score_victim_scale=4,
+        score_cross_source=5, score_trend_acceleration=3,
+        is_relevant=is_relevant,
+        matched_keywords=["fraud"],
+        processed_at=now,
+        is_published=is_published,
+        published_at=now if is_published else None,
+        **v1,
+    )
+    db_session.add(alert)
+    await db_session.commit()
+    await db_session.refresh(alert)
+    return alert
+
+
+async def _review(client, token, alert_id, status_value, **body):
+    return await client.post(
+        f"/api/v1/alerts/{alert_id}/review",
+        json={"review_status": status_value, **body},
+        headers={"Cookie": f"access_token={token}"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_7a_approve_sets_full_manual_admin_state(client, db_session):
+    user = await _create_admin_user(db_session)
+    alert = await _seed_review_alert(db_session, suffix="7a_appr", signal_score_total=22)
+    token = _make_token(user)
+
+    resp = await _review(client, token, alert.id, "approved")
+    assert resp.status_code == 200
+    await db_session.refresh(alert)
+
+    assert alert.is_published is True
+    assert alert.published_at is not None
+    assert alert.published_by_user_id == user.id
+    assert alert.published_by_rule is False
+    assert alert.publish_decision == "auto_publish"
+    assert alert.publish_decision_reason == "manual_admin_approved"
+    assert alert.pending_review_reason is None
+    assert alert.publication_state_source == "manual_admin"
+    assert alert.publishing_policy_version == "v1.0"
+    assert alert.risk_band == "critical"  # score 22 → critical
+    assert alert.is_excluded is False
+    assert alert.is_manual_hold is False
+
+
+@pytest.mark.asyncio
+async def test_7a_approve_is_idempotent(client, db_session):
+    user = await _create_admin_user(db_session)
+    other_user = await _create_admin_user(db_session)
+    earlier = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    # Already published by a DIFFERENT user, with stale/empty V1 metadata.
+    alert = await _seed_review_alert(
+        db_session, suffix="7a_idem", is_published=True,
+    )
+    alert.published_at = earlier
+    alert.published_by_user_id = other_user.id
+    await db_session.commit()
+
+    token = _make_token(user)
+    resp = await _review(client, token, alert.id, "approved")
+    assert resp.status_code == 200
+    await db_session.refresh(alert)
+
+    # Existing published_at / published_by_user_id preserved (SQLite stores naive
+    # datetimes, so compare tz-agnostically — the value itself is unchanged).
+    assert alert.published_at.replace(tzinfo=None) == earlier.replace(tzinfo=None)
+    assert alert.published_by_user_id == other_user.id
+    # But V1 metadata is now reconciled.
+    assert alert.publication_state_source == "manual_admin"
+    assert alert.publish_decision == "auto_publish"
+    assert alert.publish_decision_reason == "manual_admin_approved"
+
+
+@pytest.mark.asyncio
+async def test_7a_approve_irrelevant_does_not_publish_or_set_auto(client, db_session):
+    user = await _create_admin_user(db_session)
+    alert = await _seed_review_alert(db_session, suffix="7a_irrel", is_relevant=False)
+    token = _make_token(user)
+
+    resp = await _review(client, token, alert.id, "approved")
+    assert resp.status_code == 200
+    await db_session.refresh(alert)
+    assert alert.is_published is False
+    assert alert.publish_decision != "auto_publish"
+
+
+@pytest.mark.asyncio
+async def test_7a_false_positive_marks_exclusion_state(client, db_session):
+    user = await _create_admin_user(db_session)
+    alert = await _seed_review_alert(db_session, suffix="7a_fp", signal_score_total=16)
+    token = _make_token(user)
+
+    resp = await _review(client, token, alert.id, "false_positive")
+    assert resp.status_code == 200
+    await db_session.refresh(alert)
+
+    assert alert.is_published is False
+    assert alert.publish_decision == "exclude"
+    assert alert.publish_decision_reason == "manual_false_positive"
+    assert alert.pending_review_reason == "manual_rejected"
+    assert alert.is_excluded is True
+    assert alert.excluded_reason == "manual_false_positive"
+    assert alert.publication_state_source == "manual_admin"
+    assert alert.is_manual_hold is False
+    assert alert.risk_band == "medium"  # score 16 → medium
+
+
+@pytest.mark.asyncio
+async def test_7a_false_positive_on_published_unpublishes(client, db_session):
+    user = await _create_admin_user(db_session)
+    publisher = await _create_admin_user(db_session)
+    alert = await _seed_review_alert(
+        db_session, suffix="7a_fppub", is_published=True,
+        publish_decision="auto_publish", published_by_rule=True,
+        publication_state_source="auto_policy",
+        published_by_user_id=publisher.id,  # existing publisher to prove it's cleared
+    )
+    token = _make_token(user)
+
+    resp = await _review(client, token, alert.id, "false_positive")
+    assert resp.status_code == 200
+    await db_session.refresh(alert)
+    assert alert.is_published is False
+    assert alert.published_at is None
+    assert alert.published_by_user_id is None  # stale publisher cleared
+
+    # Not returned by the public feed/detail.
+    pub_list = await client.get("/api/alerts")
+    assert all(a["id"] != alert.id for a in pub_list.json()["alerts"])
+    pub_detail = await client.get(f"/api/alerts/{alert.id}")
+    assert pub_detail.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_7a_edited_does_not_overwrite_v1_state(client, db_session):
+    user = await _create_admin_user(db_session)
+    alert = await _seed_review_alert(
+        db_session, suffix="7a_edit", is_published=True,
+        publish_decision="auto_publish", publish_decision_reason="auto_publish_band_and_gates_passed",
+        publication_state_source="auto_policy", published_by_rule=True, risk_band="high",
+    )
+    token = _make_token(user)
+
+    resp = await _review(
+        client, token, alert.id, "edited",
+        edited_summary="New summary", adjusted_risk_level="Low",
+    )
+    assert resp.status_code == 200
+    await db_session.refresh(alert)
+
+    # Content updated…
+    assert alert.summary == "New summary"
+    assert alert.risk_level == "low"
+    # …but V1 publication state untouched.
+    assert alert.publish_decision == "auto_publish"
+    assert alert.publication_state_source == "auto_policy"
+    assert alert.published_by_rule is True
+    assert alert.risk_band == "high"
+    assert alert.is_published is True
+
+
+@pytest.mark.asyncio
+async def test_7a_detail_exposes_reconciled_state(client, db_session):
+    user = await _create_admin_user(db_session)
+    alert = await _seed_review_alert(db_session, suffix="7a_detail")
+    token = _make_token(user)
+    await _review(client, token, alert.id, "approved")
+
+    resp = await client.get(
+        f"/api/v1/alerts/{alert.id}", headers={"Cookie": f"access_token={token}"}
+    )
+    body = resp.json()
+    assert body["publication_state_source"] == "manual_admin"
+    assert body["risk_explanation"]["publication_decision"] == "auto_publish"
+    assert body["risk_explanation"]["publication_reason"] == "manual_admin_approved"
+
+
+@pytest.mark.asyncio
+async def test_7a_list_filter_manual_admin(client, db_session):
+    user = await _create_admin_user(db_session)
+    alert = await _seed_review_alert(db_session, suffix="7a_filter")
+    token = _make_token(user)
+    await _review(client, token, alert.id, "approved")
+
+    resp = await client.get(
+        "/api/v1/alerts?publication_state_source=manual_admin",
+        headers={"Cookie": f"access_token={token}"},
+    )
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert all(r["publication_state_source"] == "manual_admin" for r in rows)
+    target = next(r for r in rows if r["id"] == alert.id)
+    # Manual approvals are identifiable: auto_publish decision but NOT by rule.
+    assert target["publish_decision"] == "auto_publish"
+    assert target["published_by_rule"] is False

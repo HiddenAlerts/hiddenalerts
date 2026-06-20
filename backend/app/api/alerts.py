@@ -30,10 +30,15 @@ from app.models.raw_item import RawItem
 from app.models.source import Source
 from app.models.user import User
 from app.pipeline.publishing.constants import (
+    DECISION_SOURCES,
     PENDING_REVIEW_REASONS,
     PUBLISH_DECISIONS,
     RISK_BANDS,
+    DecisionSource,
+    PendingReviewReason,
+    PublishDecisionValue,
 )
+from app.pipeline.publishing.publishing_policy import DEFAULT_V1_POLICY
 from app.pipeline.publishing.risk_bands import compute_risk_band
 from app.schemas.alert import (
     AlertReviewCreate,
@@ -65,6 +70,74 @@ def publish_alert(alert: ProcessedAlert, user_id: int) -> None:
         alert.published_at = datetime.now(timezone.utc)
     if alert.published_by_user_id is None:
         alert.published_by_user_id = user_id
+
+
+# ---------------------------------------------------------------------------
+# Manual review → V1 publication-state reconciliation (Slice 7A)
+# ---------------------------------------------------------------------------
+
+
+def _risk_band_for_alert(alert: ProcessedAlert) -> str:
+    """Risk band derived from the alert's stored internal score (read-only)."""
+    return compute_risk_band(alert.signal_score_total).value
+
+
+def apply_manual_approval_state(
+    alert: ProcessedAlert, user_id: int, *, now: datetime | None = None
+) -> None:
+    """Publish an alert via manual admin approval and reconcile its V1 state.
+
+    Distinguished from policy auto-publishing by ``publication_state_source =
+    "manual_admin"`` and ``published_by_rule = False`` (we deliberately reuse the
+    existing ``auto_publish`` action rather than add a new enum value this slice).
+
+    Idempotent: preserves an existing ``published_at`` / ``published_by_user_id``
+    so re-approving an already-published alert just refreshes (reconciles) the V1
+    metadata. Caller must commit.
+    """
+    now = now or datetime.now(timezone.utc)
+    alert.is_published = True
+    if alert.published_at is None:
+        alert.published_at = now
+    if alert.published_by_user_id is None:
+        alert.published_by_user_id = user_id
+    alert.published_by_rule = False
+    alert.is_excluded = False
+    alert.excluded_reason = None
+    alert.is_manual_hold = False
+    alert.risk_band = _risk_band_for_alert(alert)
+    alert.publish_decision = PublishDecisionValue.AUTO_PUBLISH.value
+    alert.publish_decision_reason = "manual_admin_approved"
+    alert.pending_review_reason = None
+    alert.publishing_policy_version = DEFAULT_V1_POLICY.version
+    alert.publication_state_source = DecisionSource.MANUAL_ADMIN.value
+    alert.publication_state_updated_at = now
+
+
+def apply_manual_false_positive_state(
+    alert: ProcessedAlert, *, now: datetime | None = None
+) -> None:
+    """Mark an alert as a manual false positive: exclude + unpublish.
+
+    A false positive must not remain visible in public/subscriber feeds, so an
+    already-published alert is unpublished (intentional safety correction). The
+    row, review history, and score fields are preserved. Caller must commit.
+    """
+    now = now or datetime.now(timezone.utc)
+    alert.is_published = False
+    alert.published_at = None
+    alert.published_by_user_id = None  # clear stale publisher — no longer published
+    alert.published_by_rule = False
+    alert.publish_decision = PublishDecisionValue.EXCLUDE.value
+    alert.publish_decision_reason = "manual_false_positive"
+    alert.pending_review_reason = PendingReviewReason.MANUAL_REJECTED.value
+    alert.is_excluded = True
+    alert.excluded_reason = "manual_false_positive"
+    alert.is_manual_hold = False
+    alert.risk_band = _risk_band_for_alert(alert)
+    alert.publishing_policy_version = DEFAULT_V1_POLICY.version
+    alert.publication_state_source = DecisionSource.MANUAL_ADMIN.value
+    alert.publication_state_updated_at = now
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +329,9 @@ async def list_alerts(
     is_excluded: bool | None = Query(None, description="V1: filter excluded alerts"),
     is_manual_hold: bool | None = Query(None, description="V1: filter manually-held alerts"),
     published_by_rule: bool | None = Query(None, description="V1: filter auto-policy-published alerts"),
+    publication_state_source: str | None = Query(
+        None, description="V1 decision source: auto_policy|manual_admin|candidate_backfill|system_migration"
+    ),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -269,6 +345,7 @@ async def list_alerts(
         (publish_decision, PUBLISH_DECISIONS, "publish_decision"),
         (pending_review_reason, PENDING_REVIEW_REASONS, "pending_review_reason"),
         (risk_band, RISK_BANDS, "risk_band"),
+        (publication_state_source, DECISION_SOURCES, "publication_state_source"),
     ):
         if value is not None and value not in allowed:
             raise HTTPException(
@@ -312,6 +389,8 @@ async def list_alerts(
         stmt = stmt.where(ProcessedAlert.is_manual_hold == is_manual_hold)
     if published_by_rule is not None:
         stmt = stmt.where(ProcessedAlert.published_by_rule == published_by_rule)
+    if publication_state_source is not None:
+        stmt = stmt.where(ProcessedAlert.publication_state_source == publication_state_source)
     if source_id is not None:
         stmt = stmt.where(RawItem.source_id == source_id)
     if source is not None:
@@ -437,23 +516,24 @@ async def submit_review(
     )
     db.add(review)
 
-    # If edited summary provided, update the alert's summary
+    # Content edits apply regardless of decision (existing behavior preserved):
+    # editing summary/risk_level is NOT a publish/reject decision and must not
+    # touch V1 publication state.
     if payload.edited_summary:
         alert.summary = payload.edited_summary
-
-    # If risk level override provided, update the alert
     if payload.adjusted_risk_level:
         alert.risk_level = payload.adjusted_risk_level.lower()
 
-    # Publish on approval — only if alert is relevant and not already published.
-    # AUDIT (Slice 6, no behavior change): publish_alert() sets is_published /
-    # published_at / published_by_user_id but does NOT yet populate the V1
-    # publication-state fields (publication_state_source='manual_admin',
-    # publish_decision, risk_band, …). Reconciling manual reviews into V1 state is
-    # a documented follow-up for a later manual-review slice — intentionally not
-    # implemented here.
-    if payload.review_status == "approved" and alert.is_relevant and not alert.is_published:
-        publish_alert(alert, user_id=user.id)
+    # Slice 7A — reconcile the manual decision into V1 publication state.
+    if payload.review_status == "approved":
+        # Irrelevant alerts are never published (existing behavior) and do NOT
+        # receive an auto_publish decision state.
+        if alert.is_relevant:
+            apply_manual_approval_state(alert, user_id=user.id)
+    elif payload.review_status == "false_positive":
+        # Exclude + unpublish (safety): a false positive must not stay visible.
+        apply_manual_false_positive_state(alert)
+    # "edited" → content already updated above; V1 publication state untouched.
 
     await db.commit()
     await db.refresh(review)
