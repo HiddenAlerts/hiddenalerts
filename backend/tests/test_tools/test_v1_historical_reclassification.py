@@ -26,6 +26,7 @@ from app.tools.v1_historical_reclassification import (
     CONFIRM_TOKEN,
     run_apply,
     run_dry_run,
+    run_recorrect,
 )
 
 _IDX = [0]
@@ -351,3 +352,66 @@ async def test_dry_run_does_not_mutate(db_session):
     snap = await _snapshot(db_session, a.id)
     assert snap.publish_decision is None
     assert snap.publication_state_source is None
+
+
+# --- 9. Re-scored score/factors are persisted (score/band/factors agree) -------
+
+
+@pytest.mark.asyncio
+async def test_apply_persists_rescored_score_and_factors(db_session, tmp_path):
+    from app.pipeline.publishing.risk_bands import compute_risk_band
+    from app.pipeline.signal_scorer import derive_risk_level
+    a = await _seed(db_session, score_total=22, cred_factor=4, cross_factor=5, fin=5, vic=4, trend=4)
+    await _link_event(db_session, a, ["Solo Outlet"])  # 1 distinct outlet → cross 5→1
+    a_id = a.id
+    rpt = tmp_path / "dry.json"
+    dry = await _prior_report(db_session, rpt)
+    plan = next(p for p in dry["planned"] if p["alert_id"] == a_id)
+    assert plan["rescored"] is True
+    new_score = plan["new_score"]
+    assert new_score == 22 - 4 - 5 + 4 + 1  # cred 4→4 (generic src), cross 5→1
+
+    await run_apply(db_session, apply=True, dry_run_report_path=rpt, batch_id="b-persist", confirm=CONFIRM_TOKEN)
+    snap = await _snapshot(db_session, a_id)
+    assert snap.signal_score_total == new_score
+    assert snap.score_source_credibility == 4
+    assert snap.score_cross_source == 1
+    assert snap.risk_band == compute_risk_band(new_score).value          # band agrees
+    assert snap.risk_level == derive_risk_level(new_score)               # legacy level agrees
+
+
+@pytest.mark.asyncio
+async def test_recorrect_fixes_diverged_band_and_audits(db_session, tmp_path):
+    from app.pipeline.publishing.risk_bands import compute_risk_band
+    a = await _seed(db_session, score_total=22)
+    a_id = a.id
+    rpt = tmp_path / "dry.json"
+    await _prior_report(db_session, rpt)
+    await run_apply(db_session, apply=True, dry_run_report_path=rpt, batch_id="b-src", confirm=CONFIRM_TOKEN)
+
+    # simulate a pre-fix divergence: tamper the band so it disagrees with the score
+    snap = await _snapshot(db_session, a_id)
+    snap.risk_band = "critical"
+    await db_session.commit()
+
+    # recorrect dry-run reports the change and never plans an auto_publish
+    dry = await run_recorrect(db_session, source_batch_id="b-src")
+    assert dry["mode"] == "recorrect_dry_run"
+    assert dry["auto_publish_in_plan"] == []
+    assert any(c["alert_id"] == a_id for c in dry["changes"])
+
+    # guard: confirm required for apply
+    refused = await run_recorrect(db_session, source_batch_id="b-src", apply=True)
+    assert refused["mode"] == "apply_refused"
+
+    out = await run_recorrect(db_session, source_batch_id="b-src", apply=True, confirm=CONFIRM_TOKEN)
+    assert out["applied"] is True and out["corrected"] == 1
+    snap2 = await _snapshot(db_session, a_id)
+    assert snap2.is_published is False
+    assert snap2.risk_band == compute_risk_band(snap2.signal_score_total).value  # band fixed
+    rows = await _reviews_for(db_session, a_id)
+    assert any(r.review_batch_id == "b-src-recorrect" for r in rows)
+
+    # idempotent: a second recorrect finds nothing to change
+    again = await run_recorrect(db_session, source_batch_id="b-src")
+    assert again["changes"] == []

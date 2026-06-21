@@ -100,3 +100,17 @@ def test_anti_veto_in_article_text_still_suppresses():
         title="Terrorism financing ring laundered money via a shell company",
         primary_category="Money Laundering",
     ) is False
+
+
+# --- lexicon precision: bare "gang" must not over-fire on in-scope cyber actors -
+
+
+def test_bare_gang_does_not_overfire_on_cyber_actor():
+    # "ShinyHunters gang" / "cybercrime gang" are fraud actors, not street gangs.
+    assert veto(title="ShinyHunters gang breached retailer systems", primary_category="Cybercrime") is False
+    assert veto(title="Cybercrime gang stole customer records", primary_category="Cybercrime") is False
+
+
+def test_genuine_street_gang_still_vetoed():
+    assert veto(title="Street gang shooting leaves three dead", primary_category="Other") is True
+    assert veto(title="Gang member convicted in a fatal shooting", primary_category="Other") is True
