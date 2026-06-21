@@ -44,9 +44,12 @@ _OUT_OF_SCOPE_TERMS: tuple[str, ...] = (
     "military contractor", "bombing", "shooting", "sniper", "school shooting",
     "armed robbery", "violent crime", "murder", "homicide", "kidnap",
     "hostage", "political violence",
-    # Drugs / general crime
+    # Drugs / general crime. NOTE: bare "gang"/"gangs" is intentionally excluded —
+    # it over-fires on in-scope fraud actors ("ransomware gang", "cybercrime gang",
+    # "ShinyHunters gang"). Genuine street-gang violence is caught by the specific
+    # phrasings below plus the violence terms (shooting/murder/violent crime).
     "drug trafficking", "narcotics trafficking", "narcotics conspiracy",
-    "fugitive", "gang", "gangs", "criminal gang", "street gang",
+    "fugitive", "criminal gang", "street gang", "gang violence", "gang member",
     # Political / disinformation
     "disinformation", "election interference",
 )

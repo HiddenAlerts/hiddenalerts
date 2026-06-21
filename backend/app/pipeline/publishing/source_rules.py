@@ -310,13 +310,17 @@ def has_bleepingcomputer_financial_fraud_signal(
         BleepingComputer items stay review-first. The veto never blocks a direct
         fraud signal.
 
-    ``entities_json`` is accepted for call-site compatibility but intentionally
-    NOT searched — entity names alone cannot trip the signal.
+    ``entities_json`` and ``matched_keywords`` are accepted for call-site
+    compatibility but intentionally NOT searched. Entity names alone cannot trip
+    the signal; ``matched_keywords`` are the keyword-filter's tags and can be stale
+    or mis-tagged (e.g. a CSAM article frozen-tagged "crypto theft"), so they must
+    not lift BleepingComputer's credibility on their own — the fraud signal is read
+    from the article TEXT only. This mirrors the topic-veto anti-veto fix.
     """
     text = _build_haystack(
         title=title,
         summary=summary,
-        matched_keywords=matched_keywords,
+        matched_keywords=None,  # stale/mis-tagged tags must not trip the signal
         primary_category=primary_category,
     )
     if not text:

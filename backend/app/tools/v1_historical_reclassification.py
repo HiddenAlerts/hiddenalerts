@@ -69,7 +69,7 @@ from app.pipeline.publishing.source_rules import (
     evaluate_v1_publish_decision,
 )
 from app.pipeline.publishing.topic_veto import should_route_to_review_by_topic
-from app.pipeline.signal_scorer import compute_cross_source_score
+from app.pipeline.signal_scorer import compute_cross_source_score, derive_risk_level
 
 CONFIRM_TOKEN = "APPLY_V1_HISTORICAL_RECLASSIFICATION"
 _BUCKETS = ("review", "exclude", "hold")
@@ -110,6 +110,9 @@ class Classification:
     would_auto_publish: bool
     topic_vetoed: bool
     rescored: bool
+    # Recomputed factors (persisted when rescored so score/band/factors agree).
+    new_cred: int | None = None
+    new_cross: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -163,22 +166,23 @@ async def _distinct_outlets_for_alert(session: AsyncSession, alert_id: int) -> i
 
 async def _recompute_total(
     session: AsyncSession, alert: ProcessedAlert, effective_credibility: int | None
-) -> tuple[int | None, bool]:
+) -> tuple[int | None, int | None, int | None, bool]:
     """Re-score by swapping ONLY the credibility + cross-source factors on top of
     the stored total (financial / victim / trend are preserved exactly). Returns
-    (new_total, rescored). rescored is False when the stored factors are missing."""
+    (new_total, new_cred, new_cross, rescored); the factors are None and rescored
+    is False when the stored factors are missing."""
     stored_total = alert.signal_score_total
     stored_cred = alert.score_source_credibility
     stored_cross = alert.score_cross_source
     if stored_total is None or stored_cred is None or stored_cross is None:
-        return stored_total, False
+        return stored_total, None, None, False
 
     new_cred = max(1, min(5, effective_credibility if effective_credibility is not None else stored_cred))
     outlet_count = await _distinct_outlets_for_alert(session, alert.id)
     new_cross = compute_cross_source_score(outlet_count)
 
-    new_total = stored_total - stored_cred - stored_cross + new_cred + new_cross
-    return max(5, min(25, new_total)), True
+    new_total = max(5, min(25, stored_total - stored_cred - stored_cross + new_cred + new_cross))
+    return new_total, new_cred, new_cross, True
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +211,9 @@ async def _classify(session: AsyncSession, alert: ProcessedAlert) -> Classificat
         entities_json=alert.entities_json,
         primary_category=alert.primary_category,
     )
-    new_total, rescored = await _recompute_total(session, alert, rule.effective_credibility)
+    new_total, new_cred, new_cross, rescored = await _recompute_total(
+        session, alert, rule.effective_credibility
+    )
 
     decision = evaluate_v1_publish_decision(
         signal_score_total=new_total,
@@ -290,6 +296,8 @@ async def _classify(session: AsyncSession, alert: ProcessedAlert) -> Classificat
         would_auto_publish=would_auto_publish,
         topic_vetoed=topic_vetoed,
         rescored=rescored,
+        new_cred=new_cred,
+        new_cross=new_cross,
     )
 
 
@@ -315,6 +323,14 @@ def _apply_classification(
     alert.is_excluded = cls.is_excluded
     alert.excluded_reason = cls.excluded_reason
     alert.is_manual_hold = cls.is_manual_hold
+
+    # Persist the re-scored values so score, band, factors, and legacy risk_level
+    # all agree on the V1-corrected score (only when a full re-score happened).
+    if cls.rescored and cls.new_score is not None:
+        alert.signal_score_total = cls.new_score
+        alert.score_source_credibility = cls.new_cred
+        alert.score_cross_source = cls.new_cross
+        alert.risk_level = derive_risk_level(cls.new_score)
 
     alert.publishing_policy_version = DEFAULT_V1_POLICY.version
     alert.publication_state_source = DecisionSource.SYSTEM_MIGRATION.value
@@ -537,6 +553,86 @@ async def run_apply(
     }
 
 
+async def run_recorrect(
+    session: AsyncSession,
+    *,
+    source_batch_id: str,
+    apply: bool = False,
+    confirm: str | None = None,
+    correction_batch_id: str | None = None,
+    user_id: int | None = None,
+) -> dict:
+    """Re-classify the rows of a PRIOR batch with the current logic and persist the
+    full state (now including the re-scored score + factors), so a batch applied
+    before the score-persistence fix becomes internally consistent. Dry-run by
+    default; apply needs the confirm token. Never publishes (classify-only writer).
+    """
+    ids = sorted({
+        i for i in (await session.execute(
+            select(AlertReview.alert_id).where(AlertReview.review_batch_id == source_batch_id)
+        )).scalars().all() if i is not None
+    })
+    if not ids:
+        return _refused([f"no_rows_for_batch: {source_batch_id}"], source_batch_id=source_batch_id)
+
+    stmt = (
+        select(ProcessedAlert)
+        .where(ProcessedAlert.id.in_(ids))
+        .options(selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source))
+    )
+    # Compute ALL classifications BEFORE any mutation (re-score reads stored fields).
+    alerts = {a.id: a for a in (await session.execute(stmt)).scalars().all()}
+    cls_by_id = {aid: await _classify(session, alerts[aid]) for aid in ids if aid in alerts}
+
+    changes = []
+    for aid, cls in cls_by_id.items():
+        a = alerts[aid]
+        before = {"publish_decision": a.publish_decision, "score": a.signal_score_total, "band": a.risk_band}
+        after = {"publish_decision": cls.publish_decision, "score": cls.new_score, "band": cls.risk_band}
+        if before != after:
+            changes.append({"alert_id": aid, "before": before, "after": after})
+
+    auto_pub = sorted(aid for aid, c in cls_by_id.items() if c.publish_decision == PublishDecisionValue.AUTO_PUBLISH.value)
+    report = {
+        "mode": "recorrect_dry_run",
+        "source_batch_id": source_batch_id,
+        "selected": len(cls_by_id),
+        "changes": changes,
+        "auto_publish_in_plan": auto_pub,  # MUST be empty
+        "passed": not auto_pub,
+    }
+    if not apply:
+        return report
+    if confirm != CONFIRM_TOKEN:
+        return _refused([f"confirm_required: pass --confirm {CONFIRM_TOKEN}"], source_batch_id=source_batch_id)
+    if auto_pub:
+        return _refused([f"plan_contains_auto_publish: {auto_pub}"], source_batch_id=source_batch_id)
+
+    correction_batch_id = correction_batch_id or f"{source_batch_id}-recorrect"
+    now = datetime.now(timezone.utc)
+    try:
+        locked = {a.id: a for a in (await session.execute(_maybe_lock(stmt, session))).scalars().all()}
+        for aid in ids:
+            cls = cls_by_id[aid]
+            _apply_classification(locked[aid], cls, now=now, user_id=user_id)
+            session.add(_make_review_row(aid, cls.bucket, user_id=user_id, batch_id=correction_batch_id))
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        return _refused([f"recorrect_failed_rolled_back: {exc}"], source_batch_id=source_batch_id)
+
+    return {
+        "mode": "recorrect",
+        "applied": True,
+        "source_batch_id": source_batch_id,
+        "correction_batch_id": correction_batch_id,
+        "corrected": len(cls_by_id),
+        "changes": changes,
+        "generated_at": now.isoformat(),
+        "passed": True,
+    }
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -553,8 +649,20 @@ def console_summary(report: dict) -> str:
             f"Audit rows created: {report['review_records_created']}",
             f"Passed: {report['passed']}",
         ])
+    if mode in ("recorrect", "recorrect_dry_run"):
+        head = "V1 Historical Re-classification RECORRECT" + (" (dry-run)" if mode == "recorrect_dry_run" else "")
+        lines = [head, f"Source batch: {report['source_batch_id']}", f"Selected: {report.get('selected', report.get('corrected'))}",
+                 f"Rows changed by current logic: {len(report['changes'])}"]
+        for ch in report["changes"]:
+            lines.append(f"  id={ch['alert_id']}: {ch['before']} -> {ch['after']}")
+        if mode == "recorrect":
+            lines.append(f"Correction batch: {report['correction_batch_id']}  Applied: {report['corrected']}")
+        else:
+            lines.append("No database changes were applied.")
+        lines.append(f"Passed: {report['passed']}")
+        return "\n".join(lines)
     if mode == "apply_refused":
-        return "V1 Historical Re-classification APPLY REFUSED\n" + "\n".join(
+        return "V1 Historical Re-classification REFUSED\n" + "\n".join(
             f"  - {e}" for e in report["errors"]
         ) + "\nNo database changes were applied."
     c = report["counts"]
@@ -576,17 +684,27 @@ async def _main_async(args: argparse.Namespace) -> int:
     from app.database import AsyncSessionLocal  # local import: keep module test-friendly
 
     async with AsyncSessionLocal() as session:
-        report = await run_apply(
-            session,
-            apply=args.apply,
-            dry_run_report_path=args.dry_run_report,
-            batch_id=args.batch_id,
-            confirm=args.confirm,
-            user_id=args.user_id,
-            in_scope_only=args.in_scope_only,
-            min_internal_score=args.min_internal_score,
-            limit=args.limit,
-        )
+        if args.recorrect_batch_id:
+            report = await run_recorrect(
+                session,
+                source_batch_id=args.recorrect_batch_id,
+                apply=args.apply,
+                confirm=args.confirm,
+                correction_batch_id=args.correction_batch_id,
+                user_id=args.user_id,
+            )
+        else:
+            report = await run_apply(
+                session,
+                apply=args.apply,
+                dry_run_report_path=args.dry_run_report,
+                batch_id=args.batch_id,
+                confirm=args.confirm,
+                user_id=args.user_id,
+                in_scope_only=args.in_scope_only,
+                min_internal_score=args.min_internal_score,
+                limit=args.limit,
+            )
 
     if args.output:
         out = Path(args.output)
@@ -616,6 +734,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-id", help="Audit batch id (required for --apply).")
     parser.add_argument("--confirm", help=f"Must equal {CONFIRM_TOKEN} for --apply.")
     parser.add_argument("--user-id", type=int, default=None, help="Optional reviewer user id for audit rows.")
+    parser.add_argument("--recorrect-batch-id", default=None,
+                        help="Re-classify+persist a prior batch's rows with current logic (dry-run unless --apply --confirm).")
+    parser.add_argument("--correction-batch-id", default=None,
+                        help="Audit batch id for the recorrect (default: <source>-recorrect).")
     args = parser.parse_args(argv)
     return asyncio.run(_main_async(args))
 

@@ -138,18 +138,21 @@ def test_acronym_word_boundaries_no_false_positive():
     )
 
 
-def test_signal_detected_in_matched_keywords():
-    # Matched keywords ARE part of the haystack (article-derived text).
+def test_matched_keywords_alone_do_not_trip_signal():
+    # Hardening: matched_keywords are the keyword-filter's tags and can be stale or
+    # mis-tagged, so they must NOT trip the fraud signal on their own — the signal
+    # is read from the article TEXT (title/summary/category). A fraud term present
+    # only in matched_keywords does not lift BleepingComputer's credibility.
     assert (
         has_bleepingcomputer_financial_fraud_signal(matched_keywords=["phishing", "credential"])
-        is True
+        is False
     )
     assert (
-        has_bleepingcomputer_financial_fraud_signal(
-            matched_keywords={"phishing": 1}
-        )
-        is True
+        has_bleepingcomputer_financial_fraud_signal(matched_keywords={"phishing": 1})
+        is False
     )
+    # The SAME fraud term in the article text DOES trip it.
+    assert has_bleepingcomputer_financial_fraud_signal(title="Phishing campaign hits bank customers") is True
     assert has_bleepingcomputer_financial_fraud_signal(title=None, summary=None) is False
 
 
