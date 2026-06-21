@@ -58,3 +58,45 @@ def test_word_boundary_no_false_match():
 def test_signal_detected_in_summary_and_matched_keywords():
     assert veto(summary="An ISIS-linked weapons cell", primary_category="Other") is True
     assert veto(title="Routine update", matched_keywords=["espionage"], primary_category="Cybercrime") is True
+
+
+# --- anti-veto must NOT be suppressed by a stale/mis-tagged matched_keyword ----
+
+
+def test_csam_not_suppressed_by_mistagged_fraud_keyword():
+    # The id-89 regression: a CSAM story whose matched_keywords were mis-tagged
+    # "crypto theft"/"ransomware" (article mentions neither) must still be vetoed.
+    assert veto(
+        title="UK probes Telegram, teen chat sites over CSAM sharing concerns",
+        summary="Ofcom is investigating the sharing of child sexual abuse material.",
+        matched_keywords=["ransomware", "crypto theft"],
+        primary_category="Cybercrime",
+    ) is True
+
+
+def test_absolute_csam_overrides_even_real_text_fraud_term():
+    # Child-exploitation is absolute: even a genuine fraud term in the text does
+    # not let it through (routes to review, never auto-publish).
+    assert veto(
+        title="CSAM ring busted",
+        summary="The ring laundered money via crypto wallets.",
+        primary_category="Cybercrime",
+    ) is True
+
+
+def test_anti_veto_only_in_keywords_does_not_suppress():
+    # Non-absolute out-of-scope: an anti-veto term present ONLY in matched_keywords
+    # (not the article text) must NOT cancel the veto.
+    assert veto(
+        title="Drug trafficking ring arrested at the border",
+        matched_keywords=["wire fraud", "money laundering"],
+        primary_category="Other",
+    ) is True
+
+
+def test_anti_veto_in_article_text_still_suppresses():
+    # Anti-veto term in the actual title/summary still overrides (unchanged behavior).
+    assert veto(
+        title="Terrorism financing ring laundered money via a shell company",
+        primary_category="Money Laundering",
+    ) is False

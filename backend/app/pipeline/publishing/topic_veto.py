@@ -7,10 +7,14 @@ disinformation, …) AND carries no direct fraud / financial-crime signal, the
 alert is routed to **review** (never auto-published) so an admin can decide.
 
 It NEVER blocks a genuine fraud item: a direct fraud / financial-crime
-"anti-veto" term overrides the topic veto (e.g. "terrorism financing via money
-laundering" stays publishable). Because the veto only routes to *review* (not
-exclude), a false positive is fully admin-recoverable, so the lexicon can lean
-toward catching off-topic content.
+"anti-veto" term in the article TEXT overrides the topic veto (e.g. "terrorism
+financing via money laundering" stays publishable). The anti-veto deliberately
+ignores ``matched_keywords`` (the keyword-filter's tags, which can be stale or
+mis-tagged), and child-exploitation topics are absolute (never overridden) — both
+guards added after a CSAM article (id 89) with a mis-tagged "crypto theft" keyword
+evaded the veto. Because the veto only routes to *review* (not exclude), a false
+positive is fully admin-recoverable, so the lexicon can lean toward catching
+off-topic content.
 
 Mirrors the M2 tiered pattern in ``source_rules.py`` and reuses its word-boundary
 primitives (``_compile`` / ``_build_haystack`` / ``_matches_any``). The term lists
@@ -47,6 +51,17 @@ _OUT_OF_SCOPE_TERMS: tuple[str, ...] = (
     "disinformation", "election interference",
 )
 
+# Absolute out-of-scope: child sexual abuse / exploitation. These are NEVER
+# overridden by a fraud anti-veto — there is no legitimate reason to auto-publish
+# a CSAM story on a fraud feed, even if it carries an incidental financial term or
+# a stale/mis-tagged fraud keyword (see the id-89 regression: a CSAM article whose
+# matched_keywords were mis-tagged "crypto theft" suppressed the veto).
+_ABSOLUTE_OUT_OF_SCOPE_TERMS: tuple[str, ...] = (
+    "child sexual abuse", "child sex abuse", "child sex", "csam",
+    "child exploitation", "child sexual exploitation", "child abuse",
+    "child pornography", "sexual abuse material",
+)
+
 # If ANY of these clear fraud / financial-crime signals appears, do NOT veto —
 # the alert has a financial mechanism even if an off-topic term also appears.
 _ANTI_VETO_FRAUD_TERMS: tuple[str, ...] = (
@@ -66,11 +81,16 @@ _ANTI_VETO_FRAUD_TERMS: tuple[str, ...] = (
 )
 
 _OUT_OF_SCOPE_PATTERNS = _compile(_OUT_OF_SCOPE_TERMS)
+_ABSOLUTE_PATTERNS = _compile(_ABSOLUTE_OUT_OF_SCOPE_TERMS)
 _ANTI_VETO_PATTERNS = _compile(_ANTI_VETO_FRAUD_TERMS)
 
 
 def has_out_of_scope_topic(text: str) -> bool:
     return _matches_any(text, _OUT_OF_SCOPE_PATTERNS)
+
+
+def has_absolute_out_of_scope_topic(text: str) -> bool:
+    return _matches_any(text, _ABSOLUTE_PATTERNS)
 
 
 def has_anti_veto_fraud_signal(text: str) -> bool:
@@ -86,18 +106,41 @@ def should_route_to_review_by_topic(
 ) -> bool:
     """True if the alert should be routed to review on topic-scope grounds.
 
-    Out-of-scope term present AND no direct fraud / financial-crime anti-veto term.
+    Out-of-scope topic present AND no direct fraud / financial-crime anti-veto term
+    in the article TEXT. Two refinements keep a stale/mis-tagged ``matched_keywords``
+    tag from suppressing the veto (the id-89 CSAM regression):
+
+    * The anti-veto runs over the article text only (title + summary + category),
+      NOT ``matched_keywords`` — those are the keyword-filter's tags and can be
+      stale or over-matched, so they must not cancel the veto on their own.
+      Out-of-scope detection still uses the full haystack (keywords included), so
+      the veto only gets harder to suppress, never easier.
+    * Absolute out-of-scope topics (child sexual abuse / exploitation) are NEVER
+      overridden by an anti-veto.
+
     Entity names are excluded from the haystack (reuses ``_build_haystack``) so a
     company/product name can't trip the veto.
     """
-    text = _build_haystack(
+    full = _build_haystack(
         title=title,
         summary=summary,
         matched_keywords=matched_keywords,
         primary_category=primary_category,
     )
-    if not text:
+    if not full:
         return False
-    if _matches_any(text, _ANTI_VETO_PATTERNS):
-        return False  # clear fraud / financial-crime signal → never veto
-    return _matches_any(text, _OUT_OF_SCOPE_PATTERNS)
+    # Absolute out-of-scope (CSAM / child exploitation): always route to review.
+    if _matches_any(full, _ABSOLUTE_PATTERNS):
+        return True
+    if not _matches_any(full, _OUT_OF_SCOPE_PATTERNS):
+        return False
+    # Anti-veto considers the article TEXT only — never matched_keywords.
+    text_only = _build_haystack(
+        title=title,
+        summary=summary,
+        matched_keywords=None,
+        primary_category=primary_category,
+    )
+    if _matches_any(text_only, _ANTI_VETO_PATTERNS):
+        return False  # clear fraud / financial-crime signal in the text → never veto
+    return True
