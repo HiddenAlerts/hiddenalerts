@@ -40,7 +40,10 @@ from app.pipeline.publishing.constants import (
 )
 from app.pipeline.publishing.publishing_policy import DEFAULT_V1_POLICY, PublishDecision
 from app.pipeline.publishing.risk_bands import compute_risk_band
-from app.pipeline.publishing.source_rules import evaluate_v1_publish_decision
+from app.pipeline.publishing.source_rules import (
+    evaluate_source_rule,
+    evaluate_v1_publish_decision,
+)
 from app.pipeline.signal_scorer import compute_signal_score
 
 log = logging.getLogger(__name__)
@@ -333,9 +336,30 @@ async def _process_single_item(
         log.debug(f"raw_item {raw_item.id}: AI marked not relevant, excluded")
         return
 
+    # --- Step 2.5: Effective source credibility (V1 source rules) ---
+    # KrebsOnSecurity is floored to 4, and a fraud-signal BleepingComputer item is
+    # conditionally lifted to 4. This effective value feeds BOTH the risk SCORE
+    # (the source-credibility factor in Step 3) AND the publish gate (Step 6) — so
+    # the source promotion can actually raise an alert's band, not only pass the
+    # credibility gate (OPEN-1 fix). A non-special source keeps its stored value.
+    source_rule = evaluate_source_rule(
+        source_name=source.name,
+        stored_credibility=source.credibility_score,
+        title=title,
+        summary=ai_result.summary,
+        matched_keywords=matched_keywords,
+        entities_json={"names": ai_result.entities},
+        primary_category=ai_result.primary_category,
+    )
+    effective_credibility = (
+        source_rule.effective_credibility
+        if source_rule.effective_credibility is not None
+        else source.credibility_score
+    )
+
     # --- Step 3: Initial signal scoring (cross_source=1 for a brand-new alert) ---
     score_result = await compute_signal_score(
-        source_credibility=source.credibility_score,
+        source_credibility=effective_credibility,
         financial_impact_estimate=ai_result.financial_impact_estimate,
         victim_scale=ai_result.victim_scale,
         event_source_count=1,
