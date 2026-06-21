@@ -246,8 +246,14 @@ class TestSubscriberAlertsContent:
         with _patch_validator(_claims(sub=sub_id)):
             sub = await client.get("/api/v1/subscriber/alerts?limit=500", headers=_AUTH)
         assert public.status_code == 200 and sub.status_code == 200
-        # Same DB state → byte-identical bodies.
-        assert sub.json() == public.json()
+        # OPEN-6: subscriber list = public list PLUS a V1 `risk_band` per item
+        # (Critical badge). Every other field stays identical to public.
+        pub_alerts = public.json()["alerts"]
+        sub_alerts = sub.json()["alerts"]
+        assert len(sub_alerts) == len(pub_alerts)
+        for s, p in zip(sub_alerts, pub_alerts):
+            assert s["risk_band"] in ("critical", "high", "medium", "below_60")
+            assert {k: v for k, v in s.items() if k != "risk_band"} == p
 
     async def test_signal_score_is_0_100_and_risk_derived(
         self, client: AsyncClient, db_session: AsyncSession
@@ -304,7 +310,16 @@ class TestSubscriberAlertDetail:
                 f"/api/v1/subscriber/alerts/{alert.id}", headers=_AUTH
             )
         assert public.status_code == 200 and sub.status_code == 200
-        assert sub.json() == public.json()
+        sub_body = sub.json()
+        # OPEN-6: subscriber detail = public detail PLUS `risk_band` + the curated
+        # `risk_explanation`. Every other field stays identical to public.
+        assert sub_body["risk_band"] in ("critical", "high", "medium", "below_60")
+        assert "risk_explanation" in sub_body
+        rest = {
+            k: v for k, v in sub_body.items()
+            if k not in ("risk_band", "risk_explanation")
+        }
+        assert rest == public.json()
 
     async def test_unpublished_returns_404(
         self, client: AsyncClient, db_session: AsyncSession

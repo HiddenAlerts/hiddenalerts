@@ -151,6 +151,26 @@ class EventDetail(EventRead):
 # ---------------------------------------------------------------------------
 
 
+class SubscriberRiskExplanation(BaseModel):
+    """Curated, subscriber-safe "why this score" (OPEN-6) for the alert detail.
+
+    Risk Score, Risk Level, Scoring Factors as High/Medium/Low, Primary Exposure, 
+    and Reason for Score. Built deterministically from stored fields 
+    (see ``app/api/_alert_enrichment.py``).
+    Contains NO internal V1 moderation fields (publish_decision /
+    pending_review_reason / publication_state_source / is_excluded / …).
+    """
+
+    score: int | None = None  # 0–100
+    risk_band: str | None = None  # critical | high | medium | below_60
+    risk_level: str | None = None  # legacy high | medium | low
+    confidence: str | None = None  # High | Medium | Low
+    factors: dict[str, int | None] | None = None  # raw per-factor scores
+    factor_labels: dict[str, str] | None = None  # per-factor High/Medium/Low
+    primary_exposure: list[str] = []
+    reason_for_score: list[str] = []
+
+
 class ClientAlertRead(BaseModel):
     """Subscriber-safe alert summary — only published alerts are served via client endpoints."""
 
@@ -161,6 +181,9 @@ class ClientAlertRead(BaseModel):
     source_name: str | None = None
     item_url: str | None = None
     risk_level: str | None
+    # V1 risk band (OPEN-6) — enables a Critical badge + Critical/High/Medium
+    # filtering on the subscriber UI (legacy `risk_level` cannot distinguish them).
+    risk_band: str | None = None
     primary_category: str | None
     # 0–100 (Ken-approved 2026-05-06). DB column is 5–25 internally; mapper normalizes.
     signal_score_total: int | None
@@ -173,12 +196,14 @@ class ClientAlertRead(BaseModel):
 
 
 class ClientAlertDetail(ClientAlertRead):
-    """Subscriber-safe alert detail — adds category and entities."""
+    """Subscriber-safe alert detail — adds category, entities, and risk explanation."""
 
     secondary_category: str | None = None
     # Normalised entity list — extracted from entities_json for stable frontend consumption.
     # Internal format {"names": [...]} is unwrapped to a plain list here.
     entities: list[str] = []
+    # Curated "why this score" (OPEN-6).
+    risk_explanation: SubscriberRiskExplanation | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +331,34 @@ class PublicAlertsResponse(BaseModel):
     """
 
     alerts: list[PublicAlertRead]
+
+
+# ---------------------------------------------------------------------------
+# Subscriber-enriched feed schemas (OPEN-6) — used ONLY by /api/v1/subscriber/*.
+# These extend the public schemas with the Critical-badge `risk_band` and the
+# curated risk explanation, populated only on the authenticated subscriber path.
+# The public PublicAlert* schemas above are intentionally left unchanged so the
+# unauthenticated public feed never gains these fields (its leak tests stay valid).
+# ---------------------------------------------------------------------------
+
+
+class SubscriberAlertRead(PublicAlertRead):
+    """Public list item + V1 `risk_band` for the Critical/High/Medium badge."""
+
+    risk_band: str | None = None
+
+
+class SubscriberAlertsResponse(BaseModel):
+    """Wrapper for the subscriber alerts feed (mirrors PublicAlertsResponse)."""
+
+    alerts: list[SubscriberAlertRead]
+
+
+class SubscriberAlertDetail(PublicAlertDetail):
+    """Public enriched detail + V1 `risk_band` + the curated risk explanation."""
+
+    risk_band: str | None = None
+    risk_explanation: SubscriberRiskExplanation | None = None
 
 
 class PublicCategoryBreakdown(BaseModel):

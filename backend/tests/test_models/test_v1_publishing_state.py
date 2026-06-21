@@ -158,6 +158,7 @@ def test_pending_review_reason_vocabulary():
         "blocked_by_score",
         "blocked_by_category",
         "blocked_by_source_rule",
+        "blocked_by_topic_scope",
         "manual_review_only",
         "excluded_low_score",
         "ai_rejected",

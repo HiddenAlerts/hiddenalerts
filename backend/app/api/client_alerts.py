@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api._alert_enrichment import build_risk_explanation, risk_band_for
 from app.api._risk import risk_level_from_score, risk_score_100
 from app.auth import require_subscriber_or_admin
 from app.database import get_db
@@ -24,6 +25,7 @@ from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.source import Source
 from app.models.user import User
+from app.pipeline.publishing.constants import RISK_BANDS
 from app.schemas.alert import ClientAlertDetail, ClientAlertRead
 
 log = logging.getLogger(__name__)
@@ -33,6 +35,11 @@ router = APIRouter(prefix="/client", tags=["client"])
 # Internal-score equivalents of Ken's M3 final 0–100 bands.
 _RISK_HIGH_INTERNAL = 18
 _RISK_MEDIUM_INTERNAL = 10
+
+# Internal-score equivalents of the V1 risk bands (risk_bands.py: 20/18/15).
+_BAND_CRITICAL_INTERNAL = 20
+_BAND_HIGH_INTERNAL = 18
+_BAND_MEDIUM_INTERNAL = 15
 
 
 def _score_filter_for_risk_level(risk_level: str):
@@ -49,6 +56,23 @@ def _score_filter_for_risk_level(risk_level: str):
     if norm == "low":
         return ProcessedAlert.signal_score_total < _RISK_MEDIUM_INTERNAL
     return ProcessedAlert.risk_level == norm
+
+
+def _score_filter_for_risk_band(risk_band: str):
+    """Filter by V1 risk band (OPEN-6) via the score range, so it works for both
+    post-V1 (stored band) and legacy (computed) alerts consistently."""
+    norm = risk_band.lower().strip()
+    if norm == "critical":
+        return ProcessedAlert.signal_score_total >= _BAND_CRITICAL_INTERNAL
+    if norm == "high":
+        return (ProcessedAlert.signal_score_total >= _BAND_HIGH_INTERNAL) & (
+            ProcessedAlert.signal_score_total < _BAND_CRITICAL_INTERNAL
+        )
+    if norm == "medium":
+        return (ProcessedAlert.signal_score_total >= _BAND_MEDIUM_INTERNAL) & (
+            ProcessedAlert.signal_score_total < _BAND_HIGH_INTERNAL
+        )
+    return ProcessedAlert.signal_score_total < _BAND_MEDIUM_INTERNAL  # below_60
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +104,8 @@ def _to_client_read(alert: ProcessedAlert) -> ClientAlertRead:
         source_name=source_name,
         item_url=item_url,
         risk_level=derived_risk_level,
+        # V1 band for the Critical/High/Medium badge (stored, computed fallback).
+        risk_band=risk_band_for(alert),
         primary_category=alert.primary_category,
         # `signal_score_total` is exposed on the 0–100 frontend scale.
         signal_score_total=risk_score_100(alert.signal_score_total),
@@ -104,6 +130,7 @@ def _to_client_detail(alert: ProcessedAlert) -> ClientAlertDetail:
         **base.model_dump(),
         secondary_category=alert.secondary_category,
         entities=entities,
+        risk_explanation=build_risk_explanation(alert),
     )
 
 
@@ -115,6 +142,7 @@ def _to_client_detail(alert: ProcessedAlert) -> ClientAlertDetail:
 @router.get("/alerts", response_model=list[ClientAlertRead])
 async def list_client_alerts(
     risk_level: str | None = Query(None, description="Filter by risk level: low, medium, high"),
+    risk_band: str | None = Query(None, description="Filter by V1 band: critical, high, medium, below_60"),
     category: str | None = Query(None, description="Filter by primary_category"),
     source: str | None = Query(None, description="Filter by source name (partial match, case-insensitive)"),
     limit: int = Query(50, ge=1, le=500),
@@ -123,6 +151,11 @@ async def list_client_alerts(
     _user: User = Depends(require_subscriber_or_admin),
 ) -> list[ClientAlertRead]:
     """Return published alerts visible to subscriber and admin users."""
+    if risk_band is not None and risk_band not in RISK_BANDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Invalid risk_band '{risk_band}'. Allowed: {sorted(RISK_BANDS)}",
+        )
     stmt = (
         select(ProcessedAlert)
         .where(ProcessedAlert.is_published.is_(True))
@@ -140,6 +173,8 @@ async def list_client_alerts(
 
     if risk_level is not None:
         stmt = stmt.where(_score_filter_for_risk_level(risk_level))
+    if risk_band is not None:
+        stmt = stmt.where(_score_filter_for_risk_band(risk_band))
     if category is not None:
         stmt = stmt.where(ProcessedAlert.primary_category == category)
 

@@ -481,3 +481,44 @@ async def test_open1_generic_source_scored_with_stored_value(db_session):
         db_session, src, raw, _ai("Cybercrime", ["FbiCo"]),
     )
     assert cred == 5  # non-special source: stored value used unchanged
+
+
+# --- OPEN-5: deterministic topic veto routes out-of-scope items to review -----
+
+
+@pytest.mark.asyncio
+async def test_open5_offtopic_routed_to_review(db_session):
+    """An otherwise auto-publishable Critical item that is clearly out-of-scope
+    (espionage, no fraud signal) is routed to review by the topic veto."""
+    src = await _make_source(db_session, "FBI Press TV", 5)
+    raw = await _make_raw(db_session, src, "Nation-state espionage breaches a defense network")
+    await _process(
+        db_session, src, raw,
+        _ai("Cybercrime", ["EspionageCo"], summary="A foreign intelligence operation."),
+        _score(22, level="high"),  # Critical band
+        keywords=("espionage",),   # no fraud anti-veto term
+    )
+    a = await _get_alert(db_session, raw.id)
+    assert a.is_published is False
+    assert a.publish_decision == "review"
+    assert a.publish_decision_reason == "blocked_by_topic_scope"
+    assert a.pending_review_reason == "blocked_by_topic_scope"
+    assert a.is_excluded is False and a.is_manual_hold is False
+    assert a.risk_band == "critical"  # band preserved from the score
+
+
+@pytest.mark.asyncio
+async def test_open5_offtopic_with_fraud_signal_still_publishes(db_session):
+    """An out-of-scope word alongside a clear fraud signal is NOT vetoed —
+    terrorism financing via money laundering stays publishable."""
+    src = await _make_source(db_session, "FBI Press TV2", 5)
+    raw = await _make_raw(db_session, src, "Terrorism financing ring laundered money via a shell company")
+    await _process(
+        db_session, src, raw,
+        _ai("Money Laundering", ["LaunderCo"], summary="A money laundering and wire fraud scheme."),
+        _score(22, level="high"),
+        keywords=("money laundering",),
+    )
+    a = await _get_alert(db_session, raw.id)
+    assert a.is_published is True
+    assert a.publish_decision == "auto_publish"

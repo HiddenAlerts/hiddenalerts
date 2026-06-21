@@ -1034,3 +1034,84 @@ async def test_7a_list_filter_manual_admin(client, db_session):
     # Manual approvals are identifiable: auto_publish decision but NOT by rule.
     assert target["publish_decision"] == "auto_publish"
     assert target["published_by_rule"] is False
+
+
+# ---------------------------------------------------------------------------
+# OPEN-6: subscriber-safe risk_band (Critical badge) + curated risk_explanation
+# on the /client/* surface, with no internal V1 field leakage.
+# ---------------------------------------------------------------------------
+
+_CLIENT_FORBIDDEN = {
+    "publish_decision", "publish_decision_reason", "pending_review_reason",
+    "publication_state_source", "publication_state_updated_at", "is_excluded",
+    "excluded_reason", "is_manual_hold", "published_by_rule",
+    "publishing_policy_version", "published_by_user_id",
+}
+
+
+async def _seed_client_alert(db_session, *, suffix, score=22, category="Consumer Scam"):
+    _, raw = await _make_source_and_raw(db_session, url_suffix=suffix)
+    alert = ProcessedAlert(
+        raw_item_id=raw.id, is_relevant=True, is_published=True,
+        primary_category=category, victim_scale_raw="nationwide",
+        matched_keywords=["payment fraud"], summary="A payment fraud scam.",
+        signal_score_total=score,
+        score_source_credibility=5, score_financial_impact=5, score_victim_scale=4,
+        score_cross_source=5, score_trend_acceleration=3,
+        published_at=datetime.now(timezone.utc), processed_at=datetime.now(timezone.utc),
+    )
+    db_session.add(alert)
+    await db_session.commit()
+    return alert
+
+
+@pytest.mark.asyncio
+async def test_client_open6_risk_band_and_explanation(client, db_session):
+    user = await _create_subscriber_user(db_session)
+    alert = await _seed_client_alert(db_session, suffix="o6a", score=22)  # 88/100 → critical
+    hdr = {"Authorization": f"Bearer {_make_token(user)}"}
+
+    lst = await client.get("/api/v1/client/alerts", headers=hdr)
+    assert lst.status_code == 200
+    item = next(a for a in lst.json() if a["id"] == alert.id)
+    assert item["risk_band"] == "critical"  # Critical badge data on the list
+
+    det = await client.get(f"/api/v1/client/alerts/{alert.id}", headers=hdr)
+    assert det.status_code == 200
+    body = det.json()
+    assert body["risk_band"] == "critical"
+    re_ = body["risk_explanation"]
+    assert re_["risk_band"] == "critical" and re_["score"] == 88
+    assert re_["factor_labels"]["source_credibility"] == "High"
+    assert "Consumers" in re_["primary_exposure"] and "Payment Systems" in re_["primary_exposure"]
+    assert "Multiple independent sources" in re_["reason_for_score"]
+    assert re_["confidence"] in ("High", "Medium", "Low")
+
+
+@pytest.mark.asyncio
+async def test_client_open6_no_internal_field_leak(client, db_session):
+    user = await _create_subscriber_user(db_session)
+    alert = await _seed_client_alert(db_session, suffix="o6b")
+    hdr = {"Authorization": f"Bearer {_make_token(user)}"}
+
+    item = (await client.get("/api/v1/client/alerts", headers=hdr)).json()[0]
+    assert _CLIENT_FORBIDDEN.isdisjoint(item.keys())
+    body = (await client.get(f"/api/v1/client/alerts/{alert.id}", headers=hdr)).json()
+    assert _CLIENT_FORBIDDEN.isdisjoint(body.keys())
+    # The curated explanation also carries no internal fields.
+    assert _CLIENT_FORBIDDEN.isdisjoint(body["risk_explanation"].keys())
+
+
+@pytest.mark.asyncio
+async def test_client_risk_band_filter(client, db_session):
+    user = await _create_subscriber_user(db_session)
+    crit = await _seed_client_alert(db_session, suffix="o6c1", score=22)   # critical
+    med = await _seed_client_alert(db_session, suffix="o6c2", score=16)    # medium (64/100)
+    hdr = {"Authorization": f"Bearer {_make_token(user)}"}
+
+    crit_only = await client.get("/api/v1/client/alerts?risk_band=critical", headers=hdr)
+    ids = {a["id"] for a in crit_only.json()}
+    assert crit.id in ids and med.id not in ids
+
+    bad = await client.get("/api/v1/client/alerts?risk_band=bogus", headers=hdr)
+    assert bad.status_code == 422
