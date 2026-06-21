@@ -13,12 +13,17 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import public_alerts as public_alerts_api
 from app.api import search as search_api
+from app.api._alert_enrichment import (
+    band_from_score100,
+    build_risk_explanation,
+    risk_band_for,
+)
 from app.auth.subscriber_access import (
     ActiveSubscriberContext,
     require_active_subscription,
@@ -26,11 +31,14 @@ from app.auth.subscriber_access import (
 from app.auth.supabase import SubscriberContext, get_current_subscriber
 from app.config import settings
 from app.database import get_db
+from app.models.processed_alert import ProcessedAlert
 from app.models.subscription import Subscription
 from app.schemas.alert import (
-    PublicAlertDetail,
     PublicAlertStatsResponse,
     PublicAlertsResponse,
+    SubscriberAlertDetail,
+    SubscriberAlertRead,
+    SubscriberAlertsResponse,
 )
 from app.schemas.search import SearchResponse
 from app.schemas.subscriber import (
@@ -148,7 +156,7 @@ async def subscriber_top_alerts(
     return await public_alerts_api.top_alerts_impl(db)
 
 
-@router.get("/alerts", response_model=PublicAlertsResponse)
+@router.get("/alerts", response_model=SubscriberAlertsResponse)
 async def subscriber_alerts(
     risk_level: str | None = Query(None, description="Filter: low, medium, high"),
     category: str | None = Query(None, description="Filter by category (exact match)"),
@@ -157,28 +165,51 @@ async def subscriber_alerts(
     offset: int = Query(0, ge=0),
     _: ActiveSubscriberContext = Depends(require_active_subscription),
     db: AsyncSession = Depends(get_db),
-) -> PublicAlertsResponse:
-    """Published-alerts feed — mirrors GET /api/alerts."""
-    return await public_alerts_api.list_published_alerts_impl(
+) -> SubscriberAlertsResponse:
+    """Published-alerts feed — mirrors GET /api/alerts, plus the V1 `risk_band`
+    (Critical badge) on each item (OPEN-6). Band derived from the 0–100 score."""
+    pub = await public_alerts_api.list_published_alerts_impl(
         db, risk_level, category, source, limit, offset
+    )
+    return SubscriberAlertsResponse(
+        alerts=[
+            SubscriberAlertRead(**a.model_dump(), risk_band=band_from_score100(a.signal_score))
+            for a in pub.alerts
+        ]
     )
 
 
 @router.get(
     "/alerts/{alert_id}",
-    response_model=PublicAlertDetail,
+    response_model=SubscriberAlertDetail,
     response_model_exclude_none=True,
 )
 async def subscriber_alert_detail(
     alert_id: int,
     _: ActiveSubscriberContext = Depends(require_active_subscription),
     db: AsyncSession = Depends(get_db),
-) -> PublicAlertDetail:
-    """Enriched published-alert detail — mirrors GET /api/alerts/{id}.
+) -> SubscriberAlertDetail:
+    """Enriched published-alert detail — mirrors GET /api/alerts/{id}, plus the
+    V1 `risk_band` and the curated `risk_explanation` (OPEN-6).
 
-    404 if the alert does not exist or is not published.
+    404 if the alert does not exist or is not published. Reuses the public detail
+    mapper (`_to_public_detail`) so the shared fields stay identical; the
+    subscriber-only fields are added here, never on the public endpoint.
     """
-    return await public_alerts_api.published_alert_detail_impl(db, alert_id)
+    result = await db.execute(
+        public_alerts_api._detail_stmt().where(ProcessedAlert.id == alert_id)
+    )
+    alert = result.scalar_one_or_none()
+    if alert is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found"
+        )
+    base = await public_alerts_api._to_public_detail(db, alert)
+    return SubscriberAlertDetail(
+        **base.model_dump(),
+        risk_band=risk_band_for(alert),
+        risk_explanation=build_risk_explanation(alert),
+    )
 
 
 @router.get(

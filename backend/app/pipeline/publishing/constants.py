@@ -47,6 +47,7 @@ class PendingReviewReason(_StrEnum):
     BLOCKED_BY_SCORE = "blocked_by_score"
     BLOCKED_BY_CATEGORY = "blocked_by_category"
     BLOCKED_BY_SOURCE_RULE = "blocked_by_source_rule"
+    BLOCKED_BY_TOPIC_SCOPE = "blocked_by_topic_scope"
     MANUAL_REVIEW_ONLY = "manual_review_only"
     EXCLUDED_LOW_SCORE = "excluded_low_score"
     AI_REJECTED = "ai_rejected"

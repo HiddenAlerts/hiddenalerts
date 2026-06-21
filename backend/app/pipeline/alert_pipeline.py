@@ -44,6 +44,7 @@ from app.pipeline.publishing.source_rules import (
     evaluate_source_rule,
     evaluate_v1_publish_decision,
 )
+from app.pipeline.publishing.topic_veto import should_route_to_review_by_topic
 from app.pipeline.signal_scorer import compute_signal_score
 
 log = logging.getLogger(__name__)
@@ -446,6 +447,35 @@ async def _process_single_item(
 
     # Ensure the post-grouping score is flushed/visible before deciding.
     await session.flush()
+
+    # --- Step 5b: Topic-scope veto (OPEN-5, deterministic defense-in-depth) ---
+    # Behind the AI relevance prompt: if the text is clearly out-of-scope
+    # (terrorism / espionage / drug / homicide / gang / weapons / …) and carries
+    # no direct fraud signal, route to review instead of risking an auto-publish.
+    if should_route_to_review_by_topic(
+        title=title,
+        summary=alert.summary,
+        primary_category=alert.primary_category,
+        matched_keywords=alert.matched_keywords,
+    ):
+        _apply_terminal_state(
+            alert,
+            now=_now,
+            action=PublishDecisionValue.REVIEW,
+            reason="blocked_by_topic_scope",
+            pending_reason=PendingReviewReason.BLOCKED_BY_TOPIC_SCOPE,
+            is_excluded=False,
+            excluded_reason=None,
+            is_manual_hold=False,
+            risk_band=compute_risk_band(alert.signal_score_total),
+        )
+        await session.commit()
+        stats.items_processed += 1
+        log.info(
+            f"raw_item {raw_item.id} → alert {alert.id} "
+            f"[topic_veto decision=review reason=blocked_by_topic_scope]"
+        )
+        return
 
     # --- Step 6: V1 publish decision on the FINAL (post-grouping) score ---
     # NOTE (Slice 5): only the current alert is (re-)evaluated here. Sibling
