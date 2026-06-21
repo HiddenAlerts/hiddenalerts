@@ -417,3 +417,67 @@ async def test_event_grouping_partial_mutation_rolled_back(db_session):
         select(Event).where(Event.title == _PARTIAL_EVENT_TITLE)
     )
     assert res.scalars().first() is None
+
+
+# --- OPEN-1: pipeline feeds EFFECTIVE source credibility into the SCORE --------
+# Previously the risk score used the STORED credibility (3 for Krebs/Bleeping)
+# while only the publish gate used effective-4, so a boundary Krebs/Bleeping-fraud
+# alert could be scored one band lower. These lock that the scorer now receives
+# the effective credibility (Krebs floored to 4; Bleeping-fraud lifted to 4;
+# Bleeping no-signal stays 3; other sources unchanged).
+
+
+async def _credibility_passed_to_scorer(session, source, raw, ai_result, keywords=("fraud",)):
+    """Run the pipeline with compute_signal_score mocked; return the
+    ``source_credibility`` value the pipeline passed into scoring."""
+    stats = ProcessingStats()
+    scorer = AsyncMock(return_value=_score(18, level="high"))
+    with patch(f"{_PATH}.filter_by_keywords", return_value=list(keywords)), \
+         patch(f"{_PATH}.analyze_article", return_value=ai_result), \
+         patch(f"{_PATH}.compute_signal_score", scorer):
+        await _process_single_item(raw, session, stats)
+    return scorer.call_args.kwargs["source_credibility"]
+
+
+@pytest.mark.asyncio
+async def test_open1_krebs_scored_with_effective_credibility_4(db_session):
+    src = await _make_source(db_session, "KrebsOnSecurity", 3)
+    raw = await _make_raw(db_session, src, "Krebs Phishing One")
+    cred = await _credibility_passed_to_scorer(
+        db_session, src, raw,
+        _ai("Cybercrime", ["KrebsCo"], summary="Phishing campaign steals bank credentials"),
+    )
+    assert cred == 4  # stored 3 floored to effective 4 for SCORING (not just the gate)
+
+
+@pytest.mark.asyncio
+async def test_open1_bleeping_fraud_signal_scored_with_effective_4(db_session):
+    src = await _make_source(db_session, "BleepingComputer", 3)
+    raw = await _make_raw(db_session, src, "Bleeping Phishing One")
+    cred = await _credibility_passed_to_scorer(
+        db_session, src, raw,
+        _ai("Cybercrime", ["BleepCo"], summary="Phishing campaign steals bank credentials"),
+    )
+    assert cred == 4  # fraud signal → conditional effective 4 for scoring
+
+
+@pytest.mark.asyncio
+async def test_open1_bleeping_no_signal_scored_with_stored_3(db_session):
+    src = await _make_source(db_session, "BleepingComputer", 3)
+    raw = await _make_raw(db_session, src, "Microsoft security patch released")
+    cred = await _credibility_passed_to_scorer(
+        db_session, src, raw,
+        _ai("Cybercrime", ["BleepCo"], summary="A routine product patch and CVE advisory."),
+        keywords=("patch",),
+    )
+    assert cred == 3  # no fraud signal → stored credibility unchanged for scoring
+
+
+@pytest.mark.asyncio
+async def test_open1_generic_source_scored_with_stored_value(db_session):
+    src = await _make_source(db_session, "FBI Press", 5)
+    raw = await _make_raw(db_session, src, "FBI Fraud One")
+    cred = await _credibility_passed_to_scorer(
+        db_session, src, raw, _ai("Cybercrime", ["FbiCo"]),
+    )
+    assert cred == 5  # non-special source: stored value used unchanged
