@@ -227,3 +227,101 @@ async def test_featured_ignores_archived_bad_data(client: AsyncClient, db_sessio
     with _patch_validator(_claims(sub=sub_id)):
         resp = await client.get(f"{BASE}/featured", headers=_AUTH)
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Library search / filter / pagination edge cases
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "field", ["title", "executive_summary", "main_intelligence_brief"]
+)
+@pytest.mark.asyncio
+async def test_library_q_searches_fields(client: AsyncClient, db_session: AsyncSession, field):
+    token = uuid.uuid4().hex[:8]
+    if field == "title":
+        await _publish(db_session, title=f"Needle {token}")
+    else:
+        await _publish(db_session, **{field: f"<p>needle {token}</p>"})
+    sub_id = await _active_subscriber(db_session)
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(BASE, params={"q": token}, headers=_AUTH)
+    assert resp.json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_library_whitespace_q_behaves_like_no_q(client: AsyncClient, db_session: AsyncSession):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await _publish(db_session, category=cat, risk_level="critical")
+    sub_id = await _active_subscriber(db_session)
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(BASE, params={"category": cat, "q": "   "}, headers=_AUTH)
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+
+
+@pytest.mark.parametrize("risk_level", ["critical", "high"])
+@pytest.mark.asyncio
+async def test_library_risk_level_visible_filters(client: AsyncClient, db_session: AsyncSession, risk_level):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await _publish(db_session, category=cat, risk_level=risk_level)
+    sub_id = await _active_subscriber(db_session)
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(BASE, params={"category": cat, "risk_level": risk_level}, headers=_AUTH)
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["risk_level"] == risk_level
+
+
+@pytest.mark.parametrize("risk_level", ["medium", "low"])
+@pytest.mark.asyncio
+async def test_library_hidden_risk_level_filter_rejected(client: AsyncClient, db_session: AsyncSession, risk_level):
+    sub_id = await _active_subscriber(db_session)
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(BASE, params={"risk_level": risk_level}, headers=_AUTH)
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_library_limit_offset_paging(client: AsyncClient, db_session: AsyncSession):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    for _ in range(3):
+        await _publish(db_session, category=cat, risk_level="critical")
+    sub_id = await _active_subscriber(db_session)
+    with _patch_validator(_claims(sub=sub_id)):
+        page1 = await client.get(BASE, params={"category": cat, "limit": 2, "offset": 0}, headers=_AUTH)
+        page2 = await client.get(BASE, params={"category": cat, "limit": 2, "offset": 2}, headers=_AUTH)
+    b1, b2 = page1.json(), page2.json()
+    assert b1["total"] == 3 and len(b1["items"]) == 2
+    assert b2["total"] == 3 and len(b2["items"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_library_ordering_newest_first(client: AsyncClient, db_session: AsyncSession):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    first = await _publish(db_session, category=cat, risk_level="critical", title="Older")
+    second = await _publish(db_session, category=cat, risk_level="critical", title="Newer")
+    sub_id = await _active_subscriber(db_session)
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(BASE, params={"category": cat}, headers=_AUTH)
+    ids = [item["id"] for item in resp.json()["items"]]
+    assert ids == [second.id, first.id]
+
+
+@pytest.mark.asyncio
+async def test_library_search_never_returns_hidden(client: AsyncClient, db_session: AsyncSession):
+    token = uuid.uuid4().hex[:8]
+    visible = await _publish(db_session, title=f"Visible {token}", risk_level="critical")
+    await _draft(db_session, title=f"Draft {token}")
+    archived = await _publish(db_session, title=f"Archived {token}")
+    await briefs.archive_brief(db_session, archived.id, user_id=None)
+    await _publish(db_session, title=f"Medium {token}", risk_level="medium")
+    await _publish(db_session, title=f"Low {token}", risk_level="low")
+
+    sub_id = await _active_subscriber(db_session)
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(BASE, params={"q": token}, headers=_AUTH)
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == visible.id

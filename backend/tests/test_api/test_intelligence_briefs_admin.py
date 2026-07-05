@@ -541,3 +541,136 @@ async def test_upload_forbidden_for_non_admin(client, db_session, upload_root):
         headers=_auth(subscriber),
     )
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# List search / filter / pagination edge cases
+# ---------------------------------------------------------------------------
+
+
+async def _create(client, admin, **fields) -> dict:
+    payload = {"title": "Brief", **fields}
+    resp = await client.post(BASE, json=payload, headers=_auth(admin))
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+@pytest.mark.parametrize("field", ["executive_summary", "main_intelligence_brief"])
+@pytest.mark.asyncio
+async def test_admin_list_q_searches_content_fields(client, db_session, field):
+    admin = await _make_user(db_session)
+    token = uuid.uuid4().hex[:8]
+    await _create(client, admin, title="Plain", **{field: f"<p>needle {token}</p>"})
+    resp = await client.get(BASE, params={"q": token}, headers=_auth(admin))
+    body = resp.json()
+    assert body["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_list_q_searches_title(client, db_session):
+    admin = await _make_user(db_session)
+    token = uuid.uuid4().hex[:8]
+    await _create(client, admin, title=f"Title {token}")
+    resp = await client.get(BASE, params={"q": f"title {token}"}, headers=_auth(admin))
+    assert resp.json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_list_whitespace_q_behaves_like_no_q(client, db_session):
+    admin = await _make_user(db_session)
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await _create(client, admin, category=cat)
+    resp = await client.get(BASE, params={"category": cat, "q": "   "}, headers=_auth(admin))
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_list_status_filters(client, db_session):
+    admin = await _make_user(db_session)
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await _create(client, admin, category=cat)  # draft
+    resp = await client.get(BASE, params={"category": cat, "status": "draft"}, headers=_auth(admin))
+    assert resp.json()["total"] == 1
+    resp = await client.get(BASE, params={"category": cat, "status": "published"}, headers=_auth(admin))
+    assert resp.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_admin_list_invalid_risk_level_returns_422(client, db_session):
+    admin = await _make_user(db_session)
+    resp = await client.get(BASE, params={"risk_level": "extreme"}, headers=_auth(admin))
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_admin_list_risk_level_filter(client, db_session):
+    admin = await _make_user(db_session)
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await _create(client, admin, category=cat, risk_level="critical")
+    await _create(client, admin, category=cat, risk_level="low")
+    resp = await client.get(BASE, params={"category": cat, "risk_level": "critical"}, headers=_auth(admin))
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["risk_level"] == "critical"
+
+
+@pytest.mark.asyncio
+async def test_admin_list_brief_type_filter_and_validation(client, db_session):
+    admin = await _make_user(db_session)
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await _create(client, admin, category=cat)
+    ok = await client.get(BASE, params={"category": cat, "brief_type": "intelligence_brief"}, headers=_auth(admin))
+    assert ok.json()["total"] == 1
+    bad = await client.get(BASE, params={"brief_type": "memo"}, headers=_auth(admin))
+    assert bad.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_admin_list_is_premium_filter(client, db_session):
+    admin = await _make_user(db_session)
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await _create(client, admin, category=cat)  # is_premium defaults True
+    yes = await client.get(BASE, params={"category": cat, "is_premium": "true"}, headers=_auth(admin))
+    assert yes.json()["total"] == 1
+    no = await client.get(BASE, params={"category": cat, "is_premium": "false"}, headers=_auth(admin))
+    assert no.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_admin_list_is_featured_filter(client, db_session):
+    admin = await _make_user(db_session)
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    created = await _create(
+        client, admin, category=cat, risk_level="critical",
+        executive_summary="<p>s</p>", main_intelligence_brief="<p>b</p>", risk_score=90,
+    )
+    bid = created["id"]
+    await client.post(f"{BASE}/{bid}/publish", headers=_auth(admin))
+    await client.post(f"{BASE}/{bid}/feature", headers=_auth(admin))
+    resp = await client.get(BASE, params={"category": cat, "is_featured": "true"}, headers=_auth(admin))
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["is_featured"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_list_limit_offset_paging(client, db_session):
+    admin = await _make_user(db_session)
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    for _ in range(3):
+        await _create(client, admin, category=cat)
+    page1 = await client.get(BASE, params={"category": cat, "limit": 2, "offset": 0}, headers=_auth(admin))
+    b1 = page1.json()
+    assert b1["total"] == 3 and len(b1["items"]) == 2
+    page2 = await client.get(BASE, params={"category": cat, "limit": 2, "offset": 2}, headers=_auth(admin))
+    b2 = page2.json()
+    assert b2["total"] == 3 and len(b2["items"]) == 1
+
+
+@pytest.mark.parametrize("params", [{"limit": 0}, {"limit": 9999}, {"offset": -1}])
+@pytest.mark.asyncio
+async def test_admin_list_invalid_paging_returns_422(client, db_session, params):
+    admin = await _make_user(db_session)
+    resp = await client.get(BASE, params=params, headers=_auth(admin))
+    assert resp.status_code == 422

@@ -123,6 +123,23 @@ class BriefFeatureEligibilityError(Exception):
         self.reason = reason
 
 
+def _brief_search_filter(q: str | None):
+    """Build a case-insensitive search predicate over the searchable text
+    columns (title, executive summary, main brief), or ``None`` when there is no
+    meaningful query. A blank or whitespace-only ``q`` yields no filter rather
+    than a useless ``ILIKE '%%'`` that matches everything.
+    """
+    clean_q = q.strip() if q else ""
+    if not clean_q:
+        return None
+    pattern = f"%{clean_q}%"
+    return or_(
+        IntelligenceBrief.title.ilike(pattern),
+        IntelligenceBrief.executive_summary.ilike(pattern),
+        IntelligenceBrief.main_intelligence_brief.ilike(pattern),
+    )
+
+
 async def get_brief(db: AsyncSession, brief_id: int) -> IntelligenceBrief | None:
     """Return a brief by id, or ``None`` if it does not exist."""
     result = await db.execute(
@@ -164,15 +181,9 @@ async def list_briefs(
         filters.append(IntelligenceBrief.is_featured == is_featured)
     if is_premium is not None:
         filters.append(IntelligenceBrief.is_premium == is_premium)
-    if q:
-        pattern = f"%{q.strip()}%"
-        filters.append(
-            or_(
-                IntelligenceBrief.title.ilike(pattern),
-                IntelligenceBrief.executive_summary.ilike(pattern),
-                IntelligenceBrief.main_intelligence_brief.ilike(pattern),
-            )
-        )
+    search = _brief_search_filter(q)
+    if search is not None:
+        filters.append(search)
 
     total = (
         await db.execute(
@@ -519,16 +530,9 @@ async def list_subscriber_briefs(
         filters.append(IntelligenceBrief.category == category)
     if risk_level is not None:
         filters.append(IntelligenceBrief.risk_level == risk_level)
-    clean_q = q.strip() if q else ""
-    if clean_q:
-        pattern = f"%{clean_q}%"
-        filters.append(
-            or_(
-                IntelligenceBrief.title.ilike(pattern),
-                IntelligenceBrief.executive_summary.ilike(pattern),
-                IntelligenceBrief.main_intelligence_brief.ilike(pattern),
-            )
-        )
+    search = _brief_search_filter(q)
+    if search is not None:
+        filters.append(search)
 
     total = (
         await db.execute(

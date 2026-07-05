@@ -793,3 +793,75 @@ def test_subscriber_schemas_include_is_featured():
     # is_featured is intentionally exposed for frontend featured-card badges.
     assert "is_featured" in SubscriberBriefDetail.model_fields
     assert "is_featured" in SubscriberBriefListItem.model_fields
+
+
+# ---------------------------------------------------------------------------
+# List search / pagination hardening
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_admin_list_whitespace_q_applies_no_search(db_session):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await service.create_brief(db_session, _publishable(category=cat), user_id=None)
+    _, total = await service.list_briefs(db_session, category=cat, q="   ")
+    assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_list_q_searches_all_text_fields(db_session):
+    token = uuid.uuid4().hex[:8]
+    await service.create_brief(db_session, _publishable(title=f"Title {token}"), user_id=None)
+    await service.create_brief(
+        db_session, _publishable(title="X", executive_summary=f"<p>{token}</p>"), user_id=None
+    )
+    await service.create_brief(
+        db_session, _publishable(title="Y", main_intelligence_brief=f"<p>{token}</p>"), user_id=None
+    )
+    _, total = await service.list_briefs(db_session, q=token)
+    assert total == 3
+
+
+@pytest.mark.asyncio
+async def test_admin_list_pagination_total_and_offset(db_session):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    for _ in range(3):
+        await service.create_brief(db_session, _publishable(category=cat), user_id=None)
+    items, total = await service.list_briefs(db_session, category=cat, limit=2, offset=0)
+    assert total == 3 and len(items) == 2
+    items2, total2 = await service.list_briefs(db_session, category=cat, limit=2, offset=2)
+    assert total2 == 3 and len(items2) == 1
+
+
+@pytest.mark.asyncio
+async def test_subscriber_list_whitespace_q_applies_no_search(db_session):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await _published(db_session, category=cat, risk_level="critical")
+    _, total = await service.list_subscriber_briefs(db_session, category=cat, q="  ")
+    assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_subscriber_list_pagination_total_and_offset(db_session):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    for _ in range(3):
+        await _published(db_session, category=cat, risk_level="critical")
+    items, total = await service.list_subscriber_briefs(db_session, category=cat, limit=2, offset=0)
+    assert total == 3 and len(items) == 2
+    items2, total2 = await service.list_subscriber_briefs(db_session, category=cat, limit=2, offset=2)
+    assert total2 == 3 and len(items2) == 1
+
+
+@pytest.mark.asyncio
+async def test_subscriber_visibility_holds_under_search(db_session):
+    token = uuid.uuid4().hex[:8]
+    visible = await _published(db_session, title=f"Visible {token}", risk_level="critical")
+    await service.create_brief(db_session, _publishable(title=f"Draft {token}"), user_id=None)
+    await _published(db_session, title=f"Medium {token}", risk_level="medium")
+    await _published(db_session, title=f"Low {token}", risk_level="low")
+    archived = await _published(db_session, title=f"Archived {token}")
+    await service.archive_brief(db_session, archived.id, user_id=None)
+
+    items, total = await service.list_subscriber_briefs(db_session, q=token)
+    assert total == 1
+    assert items[0].id == visible.id
