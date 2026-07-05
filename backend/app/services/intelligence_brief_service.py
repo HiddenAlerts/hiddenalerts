@@ -10,6 +10,7 @@ responses, keeping raw database errors away from clients.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import func, or_, select
@@ -59,6 +60,9 @@ READ_TIME_FIELDS = (
 )
 
 _MAX_SLUG_LENGTH = 255
+# How many numeric suffixes (-2, -3, …) to try before falling back to a random
+# token. Keeps slug disambiguation bounded rather than looping indefinitely.
+_SLUG_SUFFIX_SCAN_LIMIT = 1000
 _BRIEF_CODE_MAX_RETRIES = 5
 
 
@@ -230,7 +234,10 @@ async def update_brief(
 
     if "title" in data:
         brief.title = data["title"]
-    if "slug" in data:
+    # Only a non-empty slug in the payload changes the stored slug. An explicit
+    # ``slug: null`` (or "") is treated as "leave it as-is" rather than silently
+    # regenerating from the title.
+    if data.get("slug"):
         brief.slug = await _resolve_slug(
             db, provided=data["slug"], title=brief.title, exclude_id=brief.id
         )
@@ -307,26 +314,49 @@ async def _resolve_slug(
     A caller-supplied slug is normalised and must remain non-empty and unique —
     a collision is an explicit error (409). A slug generated from the title is
     made unique automatically by appending ``-2``, ``-3``, … so drafts never
-    fail to save on a title clash.
+    fail to save on a title clash. All slugs are kept within the column's
+    255-character limit, and the suffix always fits in that budget.
     """
     if provided:
-        base = normalize_slug(provided, fallback="")
+        base = _truncate_slug(normalize_slug(provided, fallback=""), _MAX_SLUG_LENGTH)
         if not base:
             raise InvalidSlugError(provided)
         if await _slug_taken(db, base, exclude_id):
             raise SlugConflictError(base)
         return base
 
-    base = normalize_slug(title)
+    base = _truncate_slug(normalize_slug(title), _MAX_SLUG_LENGTH)
     if not await _slug_taken(db, base, exclude_id):
         return base
 
-    suffix = 2
-    while True:
-        candidate = f"{base}-{suffix}"[:_MAX_SLUG_LENGTH]
+    for suffix in range(2, _SLUG_SUFFIX_SCAN_LIMIT + 1):
+        candidate = _slug_with_suffix(base, str(suffix))
         if not await _slug_taken(db, candidate, exclude_id):
             return candidate
-        suffix += 1
+
+    # Extremely unlikely fallback: a random token guarantees termination without
+    # ever re-producing an already-tried candidate.
+    candidate = _slug_with_suffix(base, uuid.uuid4().hex[:8])
+    if await _slug_taken(db, candidate, exclude_id):
+        raise SlugConflictError(candidate)
+    return candidate
+
+
+def _truncate_slug(slug: str, max_length: int) -> str:
+    """Trim a slug to at most ``max_length`` characters, dropping any trailing
+    hyphen left by the cut."""
+    return slug[:max_length].rstrip("-")
+
+
+def _slug_with_suffix(base: str, suffix: str) -> str:
+    """Combine a base slug with a disambiguating suffix within the length limit.
+
+    The base is trimmed first so ``<base>-<suffix>`` never exceeds
+    ``_MAX_SLUG_LENGTH``.
+    """
+    reserved = len(suffix) + 1  # +1 for the hyphen separator
+    trimmed = _truncate_slug(base, _MAX_SLUG_LENGTH - reserved)
+    return f"{trimmed}-{suffix}"
 
 
 async def _slug_taken(

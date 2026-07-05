@@ -36,6 +36,13 @@ class SupportingAlert(BaseModel):
     url: str = Field(min_length=1)
     title: str | None = None
 
+    @field_validator("url")
+    @classmethod
+    def _url_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("url must not be blank")
+        return value.strip()
+
 
 def _blank_to_error(value: str, field_name: str) -> str:
     """Reject strings that are empty or whitespace-only."""

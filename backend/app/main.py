@@ -48,15 +48,15 @@ app = FastAPI(
 )
 
 # CORS: lock to the frontend origin when ``FRONTEND_BASE_URL`` is configured,
-# else stay open for the MVP public feed. POST is enabled here (not earlier
-# slices) because Auth/Payment Phase 1 Slice 3 ships POST billing endpoints.
-# Subscriber auth uses Authorization: Bearer (Supabase token); no cookies →
-# allow_credentials stays at its False default.
+# else stay open for the MVP public feed. GET/POST/PUT cover the read feeds,
+# billing/checkout, and the admin CMS write endpoints. Subscriber auth uses
+# Authorization: Bearer (Supabase token); no cookies → allow_credentials stays
+# at its False default.
 _cors_origins = [settings.frontend_base_url.rstrip("/")] if settings.frontend_base_url else ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
     allow_headers=["*"],
 )
 

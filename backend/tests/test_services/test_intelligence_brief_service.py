@@ -66,6 +66,11 @@ def test_supporting_alert_without_url_rejected():
         IntelligenceBriefCreate(title="X", supporting_alerts=[{"title": "no url"}])
 
 
+def test_supporting_alert_whitespace_url_rejected():
+    with pytest.raises(ValidationError):
+        IntelligenceBriefCreate(title="X", supporting_alerts=[{"url": "   "}])
+
+
 def test_key_signals_wrong_type_rejected():
     with pytest.raises(ValidationError):
         IntelligenceBriefCreate(title="X", key_signals="not-a-list")
@@ -364,3 +369,47 @@ async def test_list_filters_and_pagination(db_session):
     )
     assert total == 1
     assert items[0].risk_level == "critical"
+
+
+# ---------------------------------------------------------------------------
+# Slug hardening
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_slug_null_keeps_current_slug(db_session):
+    brief = await service.create_brief(
+        db_session, IntelligenceBriefCreate(title="Keep My Slug"), user_id=None
+    )
+    original = brief.slug
+    updated = await service.update_brief(
+        db_session,
+        brief.id,
+        IntelligenceBriefUpdate(slug=None, category="Fraud"),
+        user_id=None,
+    )
+    assert updated.slug == original
+    assert updated.category == "Fraud"
+
+
+@pytest.mark.asyncio
+async def test_long_generated_slug_truncated_to_255(db_session):
+    long_title = "a" * 400
+    brief = await service.create_brief(
+        db_session, IntelligenceBriefCreate(title=long_title), user_id=None
+    )
+    assert len(brief.slug) <= 255
+
+
+@pytest.mark.asyncio
+async def test_duplicate_long_generated_slug_gets_valid_suffix(db_session):
+    long_title = "a" * 400
+    first = await service.create_brief(
+        db_session, IntelligenceBriefCreate(title=long_title), user_id=None
+    )
+    second = await service.create_brief(
+        db_session, IntelligenceBriefCreate(title=long_title), user_id=None
+    )
+    assert first.slug != second.slug
+    assert len(second.slug) <= 255
+    assert second.slug.endswith("-2")
