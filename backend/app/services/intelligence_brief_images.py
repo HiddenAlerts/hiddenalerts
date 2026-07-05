@@ -24,9 +24,17 @@ logger = logging.getLogger(__name__)
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
 
 # Only raster formats we can serve safely. SVG is excluded on purpose (it can
-# carry script); GIF and everything else are simply not on the allowlist.
-ALLOWED_CONTENT_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
-ALLOWED_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp"})
+# carry script); GIF and everything else are simply not on the allowlist. Each
+# extension is pinned to the exact content type the client must send, so a file
+# cannot claim one format via its name and another via its content type.
+_EXTENSION_CONTENT_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+ALLOWED_EXTENSIONS = frozenset(_EXTENSION_CONTENT_TYPES)
+ALLOWED_CONTENT_TYPES = frozenset(_EXTENSION_CONTENT_TYPES.values())
 
 _IMAGE_SUBDIR = "intelligence-briefs"
 _URL_PREFIX = "/uploads"
@@ -44,10 +52,10 @@ def _image_dir() -> Path:
 async def read_validated_upload(upload: UploadFile | None) -> tuple[bytes, str]:
     """Validate an uploaded image and return ``(content, extension)``.
 
-    Enforces the content-type allowlist, the extension allowlist, a non-empty
-    body and the 5 MB size cap. At most ``MAX_UPLOAD_BYTES + 1`` bytes are read
-    so an oversized upload cannot exhaust memory. The original filename is only
-    inspected for its extension and is never used for storage.
+    Enforces the content-type allowlist, the extension allowlist, that the two
+    agree, a non-empty body and the 5 MB size cap. At most ``MAX_UPLOAD_BYTES + 1``
+    bytes are read so an oversized upload cannot exhaust memory. The original
+    filename is only inspected for its extension and is never used for storage.
     """
     if upload is None or not upload.filename:
         raise ImageValidationError("no file provided")
@@ -62,6 +70,11 @@ async def read_validated_upload(upload: UploadFile | None) -> tuple[bytes, str]:
     if extension not in ALLOWED_EXTENSIONS:
         raise ImageValidationError(
             f"unsupported file extension: {extension or 'none'}"
+        )
+
+    if _EXTENSION_CONTENT_TYPES[extension] != content_type:
+        raise ImageValidationError(
+            f"file extension {extension} does not match content type {content_type}"
         )
 
     content = await upload.read(MAX_UPLOAD_BYTES + 1)
@@ -97,12 +110,28 @@ def save_image(content: bytes, extension: str) -> tuple[str, str]:
 def delete_image(stored_path: str | None) -> None:
     """Best-effort deletion of a stored image. Never raises.
 
-    Used for cleanup when replacing or removing an image; a failure here must not
-    fail the request, so it is logged and swallowed.
+    As a safety guard the resolved target must live inside the featured-image
+    directory — a path pointing anywhere else (a stale/absolute value, an attempt
+    to escape the upload root) is logged and left untouched. Used for cleanup
+    when replacing or removing an image; a failure here must not fail the
+    request, so it is logged and swallowed.
     """
     if not stored_path:
         return
     try:
-        Path(stored_path).unlink(missing_ok=True)
+        image_dir = _image_dir().resolve()
+        target = Path(stored_path).resolve()
+    except OSError as exc:
+        logger.warning("could not resolve featured image %s: %s", stored_path, exc)
+        return
+
+    if not target.is_relative_to(image_dir):
+        logger.warning(
+            "refusing to delete featured image outside upload dir: %s", stored_path
+        )
+        return
+
+    try:
+        target.unlink(missing_ok=True)
     except OSError as exc:
         logger.warning("could not delete featured image %s: %s", stored_path, exc)

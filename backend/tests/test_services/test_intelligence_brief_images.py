@@ -13,6 +13,7 @@ from app.services import intelligence_brief_service as service
 from app.services.intelligence_brief_images import (
     ImageValidationError,
     MAX_UPLOAD_BYTES,
+    delete_image,
 )
 
 
@@ -90,6 +91,26 @@ async def test_unsupported_content_type_rejected(db_session, upload_root):
     with pytest.raises(ImageValidationError):
         await service.set_featured_image(
             db_session, brief.id, _upload(b"data", "x.jpg", "image/gif"), user_id=None
+        )
+
+
+@pytest.mark.parametrize(
+    "filename, content_type",
+    [
+        ("photo.jpg", "image/png"),
+        ("photo.jpeg", "image/webp"),
+        ("photo.png", "image/jpeg"),
+        ("photo.webp", "image/jpeg"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_extension_content_type_mismatch_rejected(
+    db_session, upload_root, filename, content_type
+):
+    brief = await _make_brief(db_session)
+    with pytest.raises(ImageValidationError):
+        await service.set_featured_image(
+            db_session, brief.id, _upload(b"data", filename, content_type), user_id=None
         )
 
 
@@ -175,3 +196,41 @@ async def test_set_image_missing_brief_raises(db_session, upload_root):
 async def test_remove_image_missing_brief_raises(db_session, upload_root):
     with pytest.raises(service.BriefNotFoundError):
         await service.remove_featured_image(db_session, 999999, user_id=None)
+
+
+# ---------------------------------------------------------------------------
+# delete_image path safety
+# ---------------------------------------------------------------------------
+
+
+def test_delete_image_removes_file_inside_dir(upload_root):
+    image_dir = upload_root / "intelligence-briefs"
+    image_dir.mkdir(parents=True)
+    target = image_dir / "keep.jpg"
+    target.write_bytes(b"data")
+
+    delete_image(str(target))
+    assert not target.exists()
+
+
+def test_delete_image_refuses_path_outside_dir(upload_root):
+    # A path that resolves outside the featured-image directory must be left alone.
+    outside = upload_root / "outside.jpg"
+    outside.write_bytes(b"data")
+
+    delete_image(str(outside))
+    assert outside.exists()
+
+
+def test_delete_image_refuses_traversal_escape(upload_root):
+    image_dir = upload_root / "intelligence-briefs"
+    image_dir.mkdir(parents=True)
+    outside = upload_root / "secret.jpg"
+    outside.write_bytes(b"data")
+
+    delete_image(str(image_dir / ".." / "secret.jpg"))
+    assert outside.exists()
+
+
+def test_delete_image_none_is_noop():
+    delete_image(None)
