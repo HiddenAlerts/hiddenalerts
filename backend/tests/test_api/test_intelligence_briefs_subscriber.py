@@ -100,6 +100,7 @@ async def test_library_returns_only_visible(client: AsyncClient, db_session: Asy
     body = resp.json()
     assert body["total"] == 2
     assert {item["risk_level"] for item in body["items"]} == {"critical", "high"}
+    assert all("is_featured" in item for item in body["items"])
 
 
 @pytest.mark.asyncio
@@ -139,6 +140,8 @@ async def test_detail_by_slug(client: AsyncClient, db_session: AsyncSession):
     body = resp.json()
     assert body["slug"] == brief.slug
     assert body["main_intelligence_brief"] is not None
+    # is_featured is intentionally exposed for featured-card badges.
+    assert "is_featured" in body
 
 
 @pytest.mark.asyncio
@@ -147,10 +150,11 @@ async def test_detail_hidden_slugs_return_404(client: AsyncClient, db_session: A
     archived = await _publish(db_session)
     await briefs.archive_brief(db_session, archived.id, user_id=None)
     medium = await _publish(db_session, risk_level="medium")
+    low = await _publish(db_session, risk_level="low")
 
     sub_id = await _active_subscriber(db_session)
     with _patch_validator(_claims(sub=sub_id)):
-        for slug in (draft.slug, archived.slug, medium.slug, "no-such-slug"):
+        for slug in (draft.slug, archived.slug, medium.slug, low.slug, "no-such-slug"):
             resp = await client.get(f"{BASE}/{slug}", headers=_AUTH)
             assert resp.status_code == 404, slug
 
@@ -202,3 +206,24 @@ async def test_featured_missing_returns_404(client: AsyncClient, db_session: Asy
         resp = await client.get(f"{BASE}/featured", headers=_AUTH)
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Featured intelligence brief not found"
+
+
+@pytest.mark.asyncio
+async def test_featured_ignores_archived_bad_data(client: AsyncClient, db_session: AsyncSession):
+    # An archived brief carrying a stale is_featured=True must never surface.
+    await db_session.execute(
+        update(IntelligenceBrief)
+        .values(is_featured=False, featured_order=None)
+        .execution_options(synchronize_session=False)
+    )
+    await db_session.flush()
+
+    brief = await _publish(db_session, risk_level="critical")
+    await briefs.archive_brief(db_session, brief.id, user_id=None)
+    brief.is_featured = True
+    await db_session.flush()
+
+    sub_id = await _active_subscriber(db_session)
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(f"{BASE}/featured", headers=_AUTH)
+    assert resp.status_code == 404

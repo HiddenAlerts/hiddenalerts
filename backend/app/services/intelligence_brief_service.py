@@ -519,8 +519,9 @@ async def list_subscriber_briefs(
         filters.append(IntelligenceBrief.category == category)
     if risk_level is not None:
         filters.append(IntelligenceBrief.risk_level == risk_level)
-    if q:
-        pattern = f"%{q.strip()}%"
+    clean_q = q.strip() if q else ""
+    if clean_q:
+        pattern = f"%{clean_q}%"
         filters.append(
             or_(
                 IntelligenceBrief.title.ilike(pattern),

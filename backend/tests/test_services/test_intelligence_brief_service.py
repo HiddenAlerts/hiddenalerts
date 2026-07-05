@@ -753,7 +753,7 @@ async def test_featured_returns_none_when_absent(db_session):
     assert await service.get_featured_subscriber_brief(db_session) is None
 
 
-@pytest.mark.parametrize("bad", ["draft", "medium"])
+@pytest.mark.parametrize("bad", ["draft", "medium", "archived"])
 @pytest.mark.asyncio
 async def test_featured_ignores_hidden_even_if_flagged(db_session, bad):
     # Force is_featured onto a hidden brief (simulating bad data) and confirm it
@@ -761,8 +761,11 @@ async def test_featured_ignores_hidden_even_if_flagged(db_session, bad):
     await _clear_featured(db_session)
     if bad == "draft":
         brief = await service.create_brief(db_session, _publishable(), user_id=None)
-    else:
+    elif bad == "medium":
         brief = await _published(db_session, risk_level="medium")
+    else:
+        brief = await _published(db_session, risk_level="critical")
+        await service.archive_brief(db_session, brief.id, user_id=None)
     brief.is_featured = True
     await db_session.flush()
 
@@ -770,8 +773,23 @@ async def test_featured_ignores_hidden_even_if_flagged(db_session, bad):
 
 
 def test_subscriber_schemas_exclude_admin_fields():
+    hidden = (
+        "analyst_notes",
+        "featured_image_path",
+        "created_by_user_id",
+        "updated_by_user_id",
+        "created_at",
+        "updated_at",
+        "status",
+        "is_premium",
+        "featured_order",
+    )
     for schema in (SubscriberBriefDetail, SubscriberBriefListItem):
-        assert "analyst_notes" not in schema.model_fields
-        assert "featured_image_path" not in schema.model_fields
-        assert "created_by_user_id" not in schema.model_fields
-        assert "updated_by_user_id" not in schema.model_fields
+        for field in hidden:
+            assert field not in schema.model_fields, field
+
+
+def test_subscriber_schemas_include_is_featured():
+    # is_featured is intentionally exposed for frontend featured-card badges.
+    assert "is_featured" in SubscriberBriefDetail.model_fields
+    assert "is_featured" in SubscriberBriefListItem.model_fields
