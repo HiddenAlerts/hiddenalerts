@@ -35,9 +35,10 @@ jinja2>=3.1.0
 # Billing (Auth/Payment Phase 1)
 stripe>=10.0.0
 
-# Spreadsheet input (V1 candidate-backfill dry-run/apply tooling — XLSX support).
-# NOTE: a Docker image rebuild is required before XLSX input works in the running
-# containers; CSV input needs no extra dependency.
+# HTML sanitisation — sanitises admin-authored rich-text HTML before storage. 
+# nh3 (Rust/ammonia binding) is the maintained successor to bleach.
+nh3>=0.2.15
+
 openpyxl>=3.1.0
 
 # Testing
