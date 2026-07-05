@@ -7,6 +7,8 @@ separately (see test_migration_0011_structure + manual Postgres check), since
 the unit-test engine builds the schema from metadata rather than running
 migrations.
 """
+import uuid
+
 import pytest
 from sqlalchemy import select
 
@@ -60,10 +62,11 @@ def test_foreign_keys_target_users():
 async def test_create_minimal_brief_applies_defaults(db_session):
     """A minimal insert (only the NOT NULL non-defaulted fields) should get all
     lifecycle defaults from the model."""
+    nonce = uuid.uuid4().hex[:8]
     brief = IntelligenceBrief(
-        brief_code="HA-20260705-001",
+        brief_code=f"HA-20260705-{nonce}",
         title="North Korean IT Worker Infiltration Networks",
-        slug="north-korean-it-worker-infiltration-networks",
+        slug=f"north-korean-it-worker-infiltration-networks-{nonce}",
     )
     db_session.add(brief)
     await db_session.flush()
@@ -88,10 +91,12 @@ async def test_create_minimal_brief_applies_defaults(db_session):
 @pytest.mark.asyncio
 async def test_jsonb_fields_roundtrip(db_session):
     """JSONB list/object fields persist and read back intact (JSON on SQLite)."""
+    nonce = uuid.uuid4().hex[:8]
+    slug = f"the-account-takeover-economy-{nonce}"
     brief = IntelligenceBrief(
-        brief_code="HA-20260705-002",
+        brief_code=f"HA-20260705-{nonce}",
         title="The Account Takeover Economy",
-        slug="the-account-takeover-economy",
+        slug=slug,
         tags=["Account Takeover", "Credential Theft"],
         primary_entities=["Mobile Banking Users"],
         key_signals=["Use of stolen identities", "Laptop farm operation"],
@@ -102,9 +107,7 @@ async def test_jsonb_fields_roundtrip(db_session):
 
     fetched = (
         await db_session.execute(
-            select(IntelligenceBrief).where(
-                IntelligenceBrief.slug == "the-account-takeover-economy"
-            )
+            select(IntelligenceBrief).where(IntelligenceBrief.slug == slug)
         )
     ).scalar_one()
     assert fetched.tags == ["Account Takeover", "Credential Theft"]
