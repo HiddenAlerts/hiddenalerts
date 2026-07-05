@@ -611,3 +611,167 @@ async def test_unfeature_clears_state_and_is_idempotent(db_session):
     # Idempotent: unfeaturing again is a no-op, not an error.
     again = await service.unfeature_brief(db_session, brief.id, user_id=None)
     assert again.is_featured is False
+
+
+# ---------------------------------------------------------------------------
+# Subscriber-facing reads
+# ---------------------------------------------------------------------------
+
+from sqlalchemy import update  # noqa: E402
+
+from app.schemas.intelligence_brief import (  # noqa: E402
+    SubscriberBriefDetail,
+    SubscriberBriefListItem,
+)
+
+
+async def _published(db_session, *, risk_level="critical", **overrides):
+    brief = await service.create_brief(
+        db_session, _publishable(risk_level=risk_level, **overrides), user_id=None
+    )
+    return await service.publish_brief(db_session, brief.id, user_id=None)
+
+
+async def _clear_featured(db_session):
+    """Drop any leaked featured rows in this transaction (rolled back per test)."""
+    await db_session.execute(
+        update(IntelligenceBrief)
+        .values(is_featured=False, featured_order=None)
+        .execution_options(synchronize_session=False)
+    )
+    await db_session.flush()
+
+
+@pytest.mark.parametrize("risk_level", ["critical", "high"])
+@pytest.mark.asyncio
+async def test_library_returns_published_visible(db_session, risk_level):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await _published(db_session, category=cat, risk_level=risk_level)
+    items, total = await service.list_subscriber_briefs(db_session, category=cat)
+    assert total == 1
+    assert items[0].risk_level == risk_level
+
+
+@pytest.mark.asyncio
+async def test_library_excludes_draft(db_session):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await service.create_brief(
+        db_session, _publishable(category=cat), user_id=None
+    )  # never published
+    _, total = await service.list_subscriber_briefs(db_session, category=cat)
+    assert total == 0
+
+
+@pytest.mark.asyncio
+async def test_library_excludes_archived(db_session):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    brief = await _published(db_session, category=cat)
+    await service.archive_brief(db_session, brief.id, user_id=None)
+    _, total = await service.list_subscriber_briefs(db_session, category=cat)
+    assert total == 0
+
+
+@pytest.mark.parametrize("risk_level", ["medium", "low"])
+@pytest.mark.asyncio
+async def test_library_excludes_published_medium_low(db_session, risk_level):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await _published(db_session, category=cat, risk_level=risk_level)
+    _, total = await service.list_subscriber_briefs(db_session, category=cat)
+    assert total == 0
+
+
+@pytest.mark.asyncio
+async def test_library_category_and_risk_filter(db_session):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    await _published(db_session, category=cat, risk_level="critical")
+    await _published(db_session, category=cat, risk_level="high")
+
+    _, total_all = await service.list_subscriber_briefs(db_session, category=cat)
+    assert total_all == 2
+
+    items, total = await service.list_subscriber_briefs(
+        db_session, category=cat, risk_level="critical"
+    )
+    assert total == 1
+    assert items[0].risk_level == "critical"
+
+
+@pytest.mark.asyncio
+async def test_library_search_matches_title_and_body(db_session):
+    token = uuid.uuid4().hex[:8]
+    await _published(db_session, title=f"Account Takeover {token}")
+    await _published(
+        db_session, title="Unrelated", main_intelligence_brief=f"<p>mentions {token}</p>"
+    )
+    _, total = await service.list_subscriber_briefs(db_session, q=token)
+    assert total == 2
+
+
+@pytest.mark.asyncio
+async def test_library_orders_newest_published_first(db_session):
+    cat = f"cat-{uuid.uuid4().hex[:8]}"
+    first = await _published(db_session, category=cat, title="Older")
+    second = await _published(db_session, category=cat, title="Newer")
+    items, _ = await service.list_subscriber_briefs(db_session, category=cat)
+    # Newest-first: the more recently published (higher id on ties) leads.
+    assert [b.id for b in items] == [second.id, first.id]
+
+
+@pytest.mark.asyncio
+async def test_detail_by_slug_returns_visible(db_session):
+    brief = await _published(db_session, risk_level="high")
+    found = await service.get_subscriber_brief_by_slug(db_session, brief.slug)
+    assert found is not None
+    assert found.id == brief.id
+
+
+@pytest.mark.asyncio
+async def test_detail_by_slug_hidden_returns_none(db_session):
+    draft = await service.create_brief(db_session, _publishable(), user_id=None)
+    archived = await _published(db_session)
+    await service.archive_brief(db_session, archived.id, user_id=None)
+    medium = await _published(db_session, risk_level="medium")
+
+    assert await service.get_subscriber_brief_by_slug(db_session, draft.slug) is None
+    assert await service.get_subscriber_brief_by_slug(db_session, archived.slug) is None
+    assert await service.get_subscriber_brief_by_slug(db_session, medium.slug) is None
+    assert await service.get_subscriber_brief_by_slug(db_session, "does-not-exist") is None
+
+
+@pytest.mark.asyncio
+async def test_featured_returns_visible_featured(db_session):
+    brief = await _published(db_session, risk_level="critical")
+    await service.feature_brief(db_session, brief.id, user_id=None)
+    featured = await service.get_featured_subscriber_brief(db_session)
+    assert featured is not None
+    assert featured.id == brief.id
+
+
+@pytest.mark.asyncio
+async def test_featured_returns_none_when_absent(db_session):
+    await _clear_featured(db_session)
+    assert await service.get_featured_subscriber_brief(db_session) is None
+
+
+@pytest.mark.parametrize("bad", ["draft", "medium"])
+@pytest.mark.asyncio
+async def test_featured_ignores_hidden_even_if_flagged(db_session, bad):
+    # Force is_featured onto a hidden brief (simulating bad data) and confirm it
+    # never surfaces through the subscriber featured query.
+    await _clear_featured(db_session)
+    if bad == "draft":
+        brief = await service.create_brief(db_session, _publishable(), user_id=None)
+    else:
+        brief = await _published(db_session, risk_level="medium")
+    brief.is_featured = True
+    await db_session.flush()
+
+    assert await service.get_featured_subscriber_brief(db_session) is None
+
+
+def test_subscriber_schemas_exclude_admin_fields():
+    for schema in (SubscriberBriefDetail, SubscriberBriefListItem):
+        assert "analyst_notes" not in schema.model_fields
+        assert "featured_image_path" not in schema.model_fields
+        assert "created_by_user_id" not in schema.model_fields
+        assert "updated_by_user_id" not in schema.model_fields

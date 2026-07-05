@@ -482,6 +482,114 @@ async def remove_featured_image(
     return brief
 
 
+# ---------------------------------------------------------------------------
+# Subscriber-facing reads
+# ---------------------------------------------------------------------------
+
+
+def _subscriber_visible_conditions():
+    """WHERE conditions restricting a query to subscriber-visible briefs.
+
+    Subscribers only ever see published briefs at critical/high risk. This is the
+    single definition of that rule so the library, detail and featured queries
+    can never drift apart.
+    """
+    return (
+        IntelligenceBrief.status == BriefStatus.PUBLISHED.value,
+        IntelligenceBrief.risk_level.in_(sorted(SUBSCRIBER_VISIBLE_RISK_LEVELS)),
+    )
+
+
+async def list_subscriber_briefs(
+    db: AsyncSession,
+    *,
+    q: str | None = None,
+    category: str | None = None,
+    risk_level: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> tuple[list[IntelligenceBrief], int]:
+    """List subscriber-visible briefs, newest published first.
+
+    Returns the page plus the total match count. ``risk_level`` may only narrow
+    within the already-visible critical/high set (validated at the API layer).
+    """
+    filters = list(_subscriber_visible_conditions())
+    if category is not None:
+        filters.append(IntelligenceBrief.category == category)
+    if risk_level is not None:
+        filters.append(IntelligenceBrief.risk_level == risk_level)
+    if q:
+        pattern = f"%{q.strip()}%"
+        filters.append(
+            or_(
+                IntelligenceBrief.title.ilike(pattern),
+                IntelligenceBrief.executive_summary.ilike(pattern),
+                IntelligenceBrief.main_intelligence_brief.ilike(pattern),
+            )
+        )
+
+    total = (
+        await db.execute(
+            select(func.count()).select_from(IntelligenceBrief).where(*filters)
+        )
+    ).scalar_one()
+
+    rows = (
+        (
+            await db.execute(
+                select(IntelligenceBrief)
+                .where(*filters)
+                .order_by(
+                    IntelligenceBrief.published_at.desc().nullslast(),
+                    IntelligenceBrief.id.desc(),
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows), total
+
+
+async def get_subscriber_brief_by_slug(
+    db: AsyncSession, slug: str
+) -> IntelligenceBrief | None:
+    """Return a subscriber-visible brief by slug, or ``None``.
+
+    Returns ``None`` for a non-existent slug and, identically, for a brief that
+    exists but is hidden (draft/archived/medium/low) — the caller turns both into
+    a 404 so a hidden brief's existence is never revealed.
+    """
+    result = await db.execute(
+        select(IntelligenceBrief).where(
+            IntelligenceBrief.slug == slug, *_subscriber_visible_conditions()
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_featured_subscriber_brief(
+    db: AsyncSession,
+) -> IntelligenceBrief | None:
+    """Return the featured brief if it is subscriber-visible, else ``None``.
+
+    The visibility conditions are applied alongside ``is_featured`` so a stale or
+    mis-set featured flag on a hidden brief can never leak.
+    """
+    result = await db.execute(
+        select(IntelligenceBrief)
+        .where(
+            IntelligenceBrief.is_featured.is_(True),
+            *_subscriber_visible_conditions(),
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 def _validate_publishable(brief: IntelligenceBrief) -> None:
     """Check a brief carries the minimum content required to publish.
 

@@ -201,3 +201,77 @@ class IntelligenceBriefListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# ---------------------------------------------------------------------------
+# Subscriber-facing schemas
+#
+# These are deliberately separate from the admin schemas: they expose only
+# fields a paid subscriber may see and never carry admin-only content
+# (analyst_notes), internal storage paths (featured_image_path) or audit fields.
+# ---------------------------------------------------------------------------
+
+
+class SubscriberBriefListItem(BaseModel):
+    """Card-level view of a brief for the subscriber library."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    brief_code: str
+    title: str
+    slug: str
+    category: str | None
+    risk_score: int | None
+    risk_level: str | None
+    featured_image_url: str | None
+    time_horizon: str | None
+    executive_summary: str | None
+    tags: list[str] | None
+    primary_entities: list[str] | None
+    alerts_count: int
+    read_time_minutes: int
+    is_featured: bool
+    published_at: datetime | None
+
+
+class SubscriberBriefDetail(BaseModel):
+    """Full subscriber-visible brief content (no admin-only fields)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    brief_code: str
+    title: str
+    slug: str
+    category: str | None
+    risk_score: int | None
+    risk_level: str | None
+    primary_entities: list[str] | None
+    tags: list[str] | None
+    featured_image_url: str | None
+    time_horizon: str | None
+
+    executive_summary: str | None
+    why_this_matters: str | None
+    key_signals: list[str] | None
+    risk_assessment: str | None
+    what_others_miss: str | None
+    implications: str | None
+    main_intelligence_brief: str | None
+    supporting_alerts: list[SupportingAlert] | None
+
+    alerts_count: int
+    confidence_level: str | None
+    read_time_minutes: int
+    is_featured: bool
+    published_at: datetime | None
+
+
+class SubscriberBriefListResponse(BaseModel):
+    """Paginated envelope for the subscriber library endpoint."""
+
+    items: list[SubscriberBriefListItem]
+    total: int
+    limit: int
+    offset: int
