@@ -1,10 +1,9 @@
-"""Pure helper functions for the Intelligence Brief module (Slice 1).
+"""Pure helper functions for the Intelligence Brief module.
 
 These are deliberately side-effect-free and DB-agnostic so they are trivially
 unit-testable. Anything that needs a database (slug/brief-code *uniqueness*, the
-daily brief-code *sequence* lookup) is intentionally left to the service/API
-layer in a later slice — these helpers only produce well-formed values from
-their inputs.
+daily brief-code *sequence* lookup) lives in the service layer — these helpers
+only produce well-formed values from their inputs.
 """
 from __future__ import annotations
 

@@ -2,9 +2,8 @@
 
 Asserts the migration is chained off 0010 and that its downgrade drops exactly
 what upgrade creates (reversibility by construction). The live upgrade/downgrade
-round-trip is verified separately against a scratch Postgres database (Slice 1
-manual verification), since the unit-test engine is SQLite-built-from-metadata
-and does not run Alembic.
+round-trip is verified separately against a scratch Postgres database, since the
+unit-test engine is SQLite-built-from-metadata and does not run Alembic.
 """
 import importlib.util
 from pathlib import Path

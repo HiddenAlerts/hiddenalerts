@@ -77,9 +77,8 @@ BRIEF_CONFIDENCE_LEVELS: frozenset[str] = frozenset(v.value for v in BriefConfid
 BRIEF_TIME_HORIZONS: frozenset[str] = frozenset(v.value for v in BriefTimeHorizon)
 BRIEF_TYPES: frozenset[str] = frozenset(v.value for v in BriefType)
 
-# Risk levels a subscriber is allowed to see (enforced at the API layer in a
-# later slice; declared here so the model, schemas, and routes share one source
-# of truth).
+# Risk levels a subscriber is allowed to see. Enforced by the subscriber API;
+# declared here so the model, schemas, and routes share one source of truth.
 SUBSCRIBER_VISIBLE_RISK_LEVELS: frozenset[str] = frozenset(
     {BriefRiskLevel.CRITICAL.value, BriefRiskLevel.HIGH.value}
 )
