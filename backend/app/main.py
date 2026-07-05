@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
@@ -56,12 +57,18 @@ _cors_origins = [settings.frontend_base_url.rstrip("/")] if settings.frontend_ba
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
 # Static files (dashboard CSS, JS)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+# User-uploaded media (admin-uploaded featured images). Kept separate from the
+# app's own static assets. The directory is created if missing so the mount
+# succeeds on a fresh deployment.
+os.makedirs(settings.upload_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 # Register routers
 from app.api.health import router as health_router  # noqa: E402

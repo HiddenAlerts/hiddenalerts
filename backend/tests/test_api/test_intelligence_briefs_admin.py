@@ -6,9 +6,18 @@ import uuid
 import pytest
 
 from app.auth import create_access_token, hash_password
+from app.config import settings
 from app.models.user import User
+from app.services.intelligence_brief_images import MAX_UPLOAD_BYTES
 
 BASE = "/api/v1/admin/intelligence-briefs"
+
+
+@pytest.fixture
+def upload_root(monkeypatch, tmp_path):
+    """Redirect featured-image writes to a throwaway tmp path for each test."""
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path))
+    return tmp_path
 
 
 async def _make_user(db_session, role: str = "admin") -> User:
@@ -390,4 +399,145 @@ async def test_lifecycle_actions_require_auth(client):
 async def test_lifecycle_actions_forbidden_for_non_admin(client, db_session):
     subscriber = await _make_user(db_session, role="subscriber")
     resp = await client.post(f"{BASE}/1/publish", headers=_auth(subscriber))
+    assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Featured image upload / remove
+# ---------------------------------------------------------------------------
+
+
+async def _create_brief(client, admin, **overrides) -> int:
+    payload = {"title": "Image brief", **overrides}
+    resp = await client.post(BASE, json=payload, headers=_auth(admin))
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+def _image(filename: str, content_type: str, content: bytes = b"image-bytes") -> dict:
+    return {"file": (filename, content, content_type)}
+
+
+@pytest.mark.asyncio
+async def test_admin_can_upload_featured_image(client, db_session, upload_root):
+    admin = await _make_user(db_session)
+    brief_id = await _create_brief(client, admin)
+    resp = await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image("photo.jpg", "image/jpeg"),
+        headers=_auth(admin),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["featured_image_url"].startswith("/uploads/intelligence-briefs/")
+    assert body["featured_image_url"].endswith(".jpg")
+
+
+@pytest.mark.parametrize(
+    "filename, content_type",
+    [("photo.png", "image/png"), ("photo.webp", "image/webp")],
+)
+@pytest.mark.asyncio
+async def test_upload_png_and_webp(client, db_session, upload_root, filename, content_type):
+    admin = await _make_user(db_session)
+    brief_id = await _create_brief(client, admin)
+    resp = await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image(filename, content_type),
+        headers=_auth(admin),
+    )
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.asyncio
+async def test_upload_missing_brief_returns_404(client, db_session, upload_root):
+    admin = await _make_user(db_session)
+    resp = await client.post(
+        f"{BASE}/999999/featured-image",
+        files=_image("photo.jpg", "image/jpeg"),
+        headers=_auth(admin),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_upload_invalid_type_returns_422(client, db_session, upload_root):
+    admin = await _make_user(db_session)
+    brief_id = await _create_brief(client, admin)
+    resp = await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image("evil.svg", "image/svg+xml"),
+        headers=_auth(admin),
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_upload_too_large_returns_422(client, db_session, upload_root):
+    admin = await _make_user(db_session)
+    brief_id = await _create_brief(client, admin)
+    resp = await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image("big.jpg", "image/jpeg", content=b"\x00" * (MAX_UPLOAD_BYTES + 1)),
+        headers=_auth(admin),
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_admin_can_replace_featured_image(client, db_session, upload_root):
+    admin = await _make_user(db_session)
+    brief_id = await _create_brief(client, admin)
+    first = await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image("a.jpg", "image/jpeg"),
+        headers=_auth(admin),
+    )
+    second = await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image("b.png", "image/png"),
+        headers=_auth(admin),
+    )
+    assert second.status_code == 200
+    assert second.json()["featured_image_url"] != first.json()["featured_image_url"]
+    assert second.json()["featured_image_url"].endswith(".png")
+
+
+@pytest.mark.asyncio
+async def test_admin_can_remove_featured_image(client, db_session, upload_root):
+    admin = await _make_user(db_session)
+    brief_id = await _create_brief(client, admin)
+    await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image("a.jpg", "image/jpeg"),
+        headers=_auth(admin),
+    )
+    resp = await client.request("DELETE", f"{BASE}/{brief_id}/featured-image", headers=_auth(admin))
+    assert resp.status_code == 200
+    assert resp.json()["featured_image_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_remove_missing_brief_returns_404(client, db_session, upload_root):
+    admin = await _make_user(db_session)
+    resp = await client.request("DELETE", f"{BASE}/999999/featured-image", headers=_auth(admin))
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_upload_requires_auth(client, upload_root):
+    resp = await client.post(
+        f"{BASE}/1/featured-image", files=_image("a.jpg", "image/jpeg")
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_upload_forbidden_for_non_admin(client, db_session, upload_root):
+    subscriber = await _make_user(db_session, role="subscriber")
+    resp = await client.post(
+        f"{BASE}/1/featured-image",
+        files=_image("a.jpg", "image/jpeg"),
+        headers=_auth(subscriber),
+    )
     assert resp.status_code == 403

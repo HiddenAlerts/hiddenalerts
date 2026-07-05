@@ -30,6 +30,11 @@ from app.schemas.intelligence_brief import (
     IntelligenceBriefUpdate,
 )
 from app.services.html_sanitizer import sanitize_html
+from app.services.intelligence_brief_images import (
+    delete_image,
+    read_validated_upload,
+    save_image,
+)
 from app.services.intelligence_brief_helpers import (
     calculate_read_time,
     count_supporting_alerts,
@@ -420,6 +425,60 @@ async def unfeature_brief(
 
     await db.flush()
     await db.refresh(brief)
+    return brief
+
+
+async def set_featured_image(
+    db: AsyncSession, brief_id: int, upload, *, user_id: int | None = None
+) -> IntelligenceBrief:
+    """Store (or replace) a brief's featured image.
+
+    The new file is written first, then the DB row is updated. Only once the new
+    image is safely persisted is the previous file removed, so a failure never
+    leaves the brief pointing at a missing image. If the DB update fails after
+    the new file is written, that orphan file is cleaned up before re-raising.
+    """
+    brief = await get_brief(db, brief_id)
+    if brief is None:
+        raise BriefNotFoundError(brief_id)
+
+    content, extension = await read_validated_upload(upload)
+    previous_path = brief.featured_image_path
+    stored_path, public_url = save_image(content, extension)
+
+    brief.featured_image_path = stored_path
+    brief.featured_image_url = public_url
+    brief.updated_by_user_id = user_id
+
+    try:
+        await db.flush()
+    except Exception:
+        delete_image(stored_path)
+        raise
+    await db.refresh(brief)
+
+    if previous_path and previous_path != stored_path:
+        delete_image(previous_path)
+    return brief
+
+
+async def remove_featured_image(
+    db: AsyncSession, brief_id: int, *, user_id: int | None = None
+) -> IntelligenceBrief:
+    """Clear a brief's featured image and delete the file. Idempotent."""
+    brief = await get_brief(db, brief_id)
+    if brief is None:
+        raise BriefNotFoundError(brief_id)
+
+    previous_path = brief.featured_image_path
+    brief.featured_image_url = None
+    brief.featured_image_path = None
+    brief.updated_by_user_id = user_id
+
+    await db.flush()
+    await db.refresh(brief)
+
+    delete_image(previous_path)
     return brief
 
 

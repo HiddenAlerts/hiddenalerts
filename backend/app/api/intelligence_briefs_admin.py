@@ -10,7 +10,7 @@ Mounted under ``/api/v1`` in ``app.main``, giving paths such as
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_admin
@@ -28,6 +28,7 @@ from app.schemas.intelligence_brief import (
     IntelligenceBriefUpdate,
 )
 from app.services import intelligence_brief_service as service
+from app.services.intelligence_brief_images import ImageValidationError
 
 router = APIRouter(prefix="/admin/intelligence-briefs", tags=["intelligence-briefs-admin"])
 
@@ -226,6 +227,47 @@ async def unfeature_intelligence_brief(
     """Clear a brief's featured state (idempotent)."""
     try:
         brief = await service.unfeature_brief(db, brief_id, user_id=user.id)
+    except service.BriefNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Intelligence brief not found"
+        ) from exc
+
+    await db.commit()
+    return brief
+
+
+@router.post("/{brief_id}/featured-image", response_model=IntelligenceBriefDetail)
+async def upload_featured_image(
+    brief_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+) -> IntelligenceBriefDetail:
+    """Upload or replace a brief's featured image (multipart/form-data)."""
+    try:
+        brief = await service.set_featured_image(db, brief_id, file, user_id=user.id)
+    except service.BriefNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Intelligence brief not found"
+        ) from exc
+    except ImageValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+    await db.commit()
+    return brief
+
+
+@router.delete("/{brief_id}/featured-image", response_model=IntelligenceBriefDetail)
+async def remove_featured_image(
+    brief_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+) -> IntelligenceBriefDetail:
+    """Remove a brief's featured image (idempotent)."""
+    try:
+        brief = await service.remove_featured_image(db, brief_id, user_id=user.id)
     except service.BriefNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Intelligence brief not found"

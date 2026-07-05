@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     app_port: int = 8000
     log_level: str = "INFO"
 
+    # Root directory for user-uploaded files (served at /uploads). In production
+    # this should point at a persistent, VPS-mounted volume so uploads survive
+    # container rebuilds.
+    upload_dir: str = "uploads"
+
     # Scheduler
     scheduler_enabled: bool = True
     scheduler_interval_hours: int = 6
