@@ -13,14 +13,17 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.intelligence_brief import IntelligenceBrief
 from app.models.intelligence_brief_constants import (
+    BRIEF_RISK_LEVELS,
     DEFAULT_BRIEF_STATUS,
     DEFAULT_BRIEF_TYPE,
+    SUBSCRIBER_VISIBLE_RISK_LEVELS,
+    BriefStatus,
 )
 from app.schemas.intelligence_brief import (
     IntelligenceBriefCreate,
@@ -65,6 +68,14 @@ _MAX_SLUG_LENGTH = 255
 _SLUG_SUFFIX_SCAN_LIMIT = 1000
 _BRIEF_CODE_MAX_RETRIES = 5
 
+# Rich-text fields that must carry content before a brief can be published.
+_PUBLISH_REQUIRED_TEXT = ("executive_summary", "main_intelligence_brief")
+
+# Risk levels eligible to become the global featured brief. This is the same
+# critical/high set the subscriber library exposes — only briefs a subscriber
+# could actually see are allowed to be featured.
+_FEATURE_ELIGIBLE_RISK_LEVELS = SUBSCRIBER_VISIBLE_RISK_LEVELS
+
 
 class BriefNotFoundError(Exception):
     """Raised when a brief id does not exist."""
@@ -84,6 +95,26 @@ class SlugConflictError(Exception):
 
 class BriefCodeAllocationError(Exception):
     """Raised when a unique brief_code could not be allocated after retries."""
+
+
+class BriefPublishValidationError(Exception):
+    """Raised when a brief is missing the content required to be published.
+
+    Carries the list of offending field names so the API can tell the admin
+    exactly what to fill in.
+    """
+
+    def __init__(self, fields: list[str]) -> None:
+        super().__init__(f"brief is not ready to publish: {', '.join(sorted(fields))}")
+        self.fields = sorted(fields)
+
+
+class BriefFeatureEligibilityError(Exception):
+    """Raised when a brief does not meet the rules to become the featured brief."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 async def get_brief(db: AsyncSession, brief_id: int) -> IntelligenceBrief | None:
@@ -283,6 +314,152 @@ async def update_brief(
         raise
     await db.refresh(brief)
     return brief
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle actions
+# ---------------------------------------------------------------------------
+
+
+async def publish_brief(
+    db: AsyncSession, brief_id: int, *, user_id: int | None = None
+) -> IntelligenceBrief:
+    """Move a brief to the published state.
+
+    Publishing is allowed from draft or archived. ``published_at`` is stamped on
+    the first publish and preserved thereafter, so re-publishing (or publishing a
+    previously-published-then-archived brief) keeps the original publication
+    date. Featuring is a separate action and is never triggered here.
+    """
+    brief = await get_brief(db, brief_id)
+    if brief is None:
+        raise BriefNotFoundError(brief_id)
+
+    _validate_publishable(brief)
+
+    brief.status = BriefStatus.PUBLISHED.value
+    if brief.published_at is None:
+        brief.published_at = datetime.now(timezone.utc)
+    brief.updated_by_user_id = user_id
+
+    await db.flush()
+    await db.refresh(brief)
+    return brief
+
+
+async def archive_brief(
+    db: AsyncSession, brief_id: int, *, user_id: int | None = None
+) -> IntelligenceBrief:
+    """Archive a brief and drop it out of the featured slot.
+
+    Archiving is allowed from any state (idempotent when already archived).
+    ``published_at`` is intentionally left untouched to preserve publication
+    history; a re-published brief keeps its original date.
+    """
+    brief = await get_brief(db, brief_id)
+    if brief is None:
+        raise BriefNotFoundError(brief_id)
+
+    brief.status = BriefStatus.ARCHIVED.value
+    brief.is_featured = False
+    brief.featured_order = None
+    brief.updated_by_user_id = user_id
+
+    await db.flush()
+    await db.refresh(brief)
+    return brief
+
+
+async def feature_brief(
+    db: AsyncSession, brief_id: int, *, user_id: int | None = None
+) -> IntelligenceBrief:
+    """Make a brief the single global featured brief.
+
+    Only a published critical/high brief is eligible. The one-featured-brief
+    invariant is enforced here: any other featured rows are cleared and flushed
+    within the same transaction before this brief is marked featured, so a
+    successful commit can never leave two featured briefs.
+    """
+    brief = await get_brief(db, brief_id)
+    if brief is None:
+        raise BriefNotFoundError(brief_id)
+
+    _validate_feature_eligible(brief)
+
+    await db.execute(
+        update(IntelligenceBrief)
+        .where(
+            IntelligenceBrief.id != brief.id,
+            IntelligenceBrief.is_featured.is_(True),
+        )
+        .values(is_featured=False, featured_order=None)
+        .execution_options(synchronize_session=False)
+    )
+
+    brief.is_featured = True
+    brief.featured_order = 1
+    brief.updated_by_user_id = user_id
+
+    await db.flush()
+    await db.refresh(brief)
+    return brief
+
+
+async def unfeature_brief(
+    db: AsyncSession, brief_id: int, *, user_id: int | None = None
+) -> IntelligenceBrief:
+    """Clear the featured state of a brief. Idempotent when not featured."""
+    brief = await get_brief(db, brief_id)
+    if brief is None:
+        raise BriefNotFoundError(brief_id)
+
+    brief.is_featured = False
+    brief.featured_order = None
+    brief.updated_by_user_id = user_id
+
+    await db.flush()
+    await db.refresh(brief)
+    return brief
+
+
+def _validate_publishable(brief: IntelligenceBrief) -> None:
+    """Check a brief carries the minimum content required to publish.
+
+    Raises ``BriefPublishValidationError`` listing every missing/invalid field.
+    Category, confidence_level and key_signals are deliberately not required here
+    so lifecycle testing is not blocked; tighten this set if the content contract
+    changes.
+    """
+    missing: list[str] = []
+
+    for field in ("title", "slug", "brief_code"):
+        if not (getattr(brief, field) or "").strip():
+            missing.append(field)
+
+    if brief.risk_score is None or not (0 <= brief.risk_score <= 100):
+        missing.append("risk_score")
+    if brief.risk_level not in BRIEF_RISK_LEVELS:
+        missing.append("risk_level")
+
+    for field in _PUBLISH_REQUIRED_TEXT:
+        value = getattr(brief, field)
+        if not value or not value.strip():
+            missing.append(field)
+
+    if missing:
+        raise BriefPublishValidationError(missing)
+
+
+def _validate_feature_eligible(brief: IntelligenceBrief) -> None:
+    """Enforce the featured-brief eligibility rules (published + critical/high)."""
+    if brief.status != BriefStatus.PUBLISHED.value:
+        raise BriefFeatureEligibilityError(
+            "only a published brief can be featured"
+        )
+    if brief.risk_level not in _FEATURE_ELIGIBLE_RISK_LEVELS:
+        raise BriefFeatureEligibilityError(
+            "only critical or high risk briefs can be featured"
+        )
 
 
 # ---------------------------------------------------------------------------

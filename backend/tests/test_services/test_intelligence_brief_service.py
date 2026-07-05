@@ -413,3 +413,180 @@ async def test_duplicate_long_generated_slug_gets_valid_suffix(db_session):
     assert first.slug != second.slug
     assert len(second.slug) <= 255
     assert second.slug.endswith("-2")
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle: publish / archive / feature / unfeature
+# ---------------------------------------------------------------------------
+
+
+def _publishable(title: str = "Publishable brief", **overrides) -> IntelligenceBriefCreate:
+    """A create payload carrying every field required to publish."""
+    fields = dict(
+        title=title,
+        risk_score=90,
+        risk_level="critical",
+        executive_summary="<p>Executive summary</p>",
+        main_intelligence_brief="<p>Full brief body</p>",
+    )
+    fields.update(overrides)
+    return IntelligenceBriefCreate(**fields)
+
+
+async def _make(db_session, **overrides) -> IntelligenceBrief:
+    return await service.create_brief(db_session, _publishable(**overrides), user_id=None)
+
+
+@pytest.mark.asyncio
+async def test_publish_sets_status(db_session):
+    brief = await _make(db_session)
+    published = await service.publish_brief(db_session, brief.id, user_id=None)
+    assert published.status == "published"
+
+
+@pytest.mark.asyncio
+async def test_publish_sets_published_at_when_null(db_session):
+    brief = await _make(db_session)
+    assert brief.published_at is None
+    published = await service.publish_brief(db_session, brief.id, user_id=None)
+    assert published.published_at is not None
+
+
+@pytest.mark.asyncio
+async def test_publish_preserves_existing_published_at(db_session):
+    brief = await _make(db_session)
+    first = await service.publish_brief(db_session, brief.id, user_id=None)
+    original = first.published_at
+    # Archive then re-publish; the original publication date must be preserved.
+    await service.archive_brief(db_session, brief.id, user_id=None)
+    republished = await service.publish_brief(db_session, brief.id, user_id=None)
+    assert republished.published_at == original
+
+
+@pytest.mark.asyncio
+async def test_publish_sets_updated_by(db_session):
+    from app.models.user import User
+    from app.auth import hash_password
+
+    user = User(
+        email=f"pub_{uuid.uuid4().hex[:6]}@test.com",
+        password_hash=hash_password("x"),
+        is_active=True,
+        role="admin",
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    brief = await _make(db_session)
+    published = await service.publish_brief(db_session, brief.id, user_id=user.id)
+    assert published.updated_by_user_id == user.id
+
+
+@pytest.mark.parametrize("missing_field", ["risk_score", "risk_level", "executive_summary", "main_intelligence_brief"])
+@pytest.mark.asyncio
+async def test_publish_rejects_missing_required_field(db_session, missing_field):
+    brief = await _make(db_session, **{missing_field: None})
+    with pytest.raises(service.BriefPublishValidationError) as excinfo:
+        await service.publish_brief(db_session, brief.id, user_id=None)
+    assert missing_field in excinfo.value.fields
+
+
+@pytest.mark.asyncio
+async def test_publish_missing_brief_raises(db_session):
+    with pytest.raises(service.BriefNotFoundError):
+        await service.publish_brief(db_session, 999999, user_id=None)
+
+
+@pytest.mark.asyncio
+async def test_archive_sets_status_and_clears_featured(db_session):
+    brief = await _make(db_session)
+    await service.publish_brief(db_session, brief.id, user_id=None)
+    featured = await service.feature_brief(db_session, brief.id, user_id=None)
+    assert featured.is_featured is True
+    assert featured.featured_order == 1
+
+    archived = await service.archive_brief(db_session, brief.id, user_id=None)
+    assert archived.status == "archived"
+    assert archived.is_featured is False
+    assert archived.featured_order is None
+
+
+@pytest.mark.asyncio
+async def test_archive_preserves_published_at(db_session):
+    brief = await _make(db_session)
+    published = await service.publish_brief(db_session, brief.id, user_id=None)
+    published_at = published.published_at
+    archived = await service.archive_brief(db_session, brief.id, user_id=None)
+    assert archived.published_at == published_at
+
+
+@pytest.mark.asyncio
+async def test_feature_rejects_draft(db_session):
+    brief = await _make(db_session)  # still draft
+    with pytest.raises(service.BriefFeatureEligibilityError):
+        await service.feature_brief(db_session, brief.id, user_id=None)
+
+
+@pytest.mark.asyncio
+async def test_feature_rejects_archived(db_session):
+    brief = await _make(db_session)
+    await service.publish_brief(db_session, brief.id, user_id=None)
+    await service.archive_brief(db_session, brief.id, user_id=None)
+    with pytest.raises(service.BriefFeatureEligibilityError):
+        await service.feature_brief(db_session, brief.id, user_id=None)
+
+
+@pytest.mark.parametrize("risk_level", ["medium", "low"])
+@pytest.mark.asyncio
+async def test_feature_rejects_medium_low(db_session, risk_level):
+    brief = await _make(db_session, risk_level=risk_level)
+    await service.publish_brief(db_session, brief.id, user_id=None)
+    with pytest.raises(service.BriefFeatureEligibilityError):
+        await service.feature_brief(db_session, brief.id, user_id=None)
+
+
+@pytest.mark.parametrize("risk_level", ["critical", "high"])
+@pytest.mark.asyncio
+async def test_feature_accepts_published_critical_high(db_session, risk_level):
+    brief = await _make(db_session, risk_level=risk_level)
+    await service.publish_brief(db_session, brief.id, user_id=None)
+    featured = await service.feature_brief(db_session, brief.id, user_id=None)
+    assert featured.is_featured is True
+    assert featured.featured_order == 1
+
+
+@pytest.mark.asyncio
+async def test_feature_clears_previous_featured(db_session):
+    a = await _make(db_session, title="Brief A")
+    b = await _make(db_session, title="Brief B")
+    await service.publish_brief(db_session, a.id, user_id=None)
+    await service.publish_brief(db_session, b.id, user_id=None)
+
+    await service.feature_brief(db_session, a.id, user_id=None)
+    await service.feature_brief(db_session, b.id, user_id=None)
+
+    # The bulk clear bypasses the identity map; refresh A to read committed state.
+    await db_session.refresh(a)
+    assert a.is_featured is False
+    assert a.featured_order is None
+    assert b.is_featured is True
+
+    # Invariant: at most one featured brief exists.
+    featured, total = await service.list_briefs(db_session, is_featured=True)
+    assert total == 1
+    assert featured[0].id == b.id
+
+
+@pytest.mark.asyncio
+async def test_unfeature_clears_state_and_is_idempotent(db_session):
+    brief = await _make(db_session)
+    await service.publish_brief(db_session, brief.id, user_id=None)
+    await service.feature_brief(db_session, brief.id, user_id=None)
+
+    unfeatured = await service.unfeature_brief(db_session, brief.id, user_id=None)
+    assert unfeatured.is_featured is False
+    assert unfeatured.featured_order is None
+
+    # Idempotent: unfeaturing again is a no-op, not an error.
+    again = await service.unfeature_brief(db_session, brief.id, user_id=None)
+    assert again.is_featured is False

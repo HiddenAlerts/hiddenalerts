@@ -1,11 +1,12 @@
 """Admin CMS endpoints for Intelligence Briefs.
 
-Create, list, detail and update for analysts managing briefs. All routes require
-an admin user. Publishing, archiving, featuring, featured-image upload and the
-subscriber-facing endpoints live elsewhere.
+CRUD plus the lifecycle actions (publish, archive, feature, unfeature) analysts
+use to manage briefs. All routes require an admin user. Featured-image upload and
+the subscriber-facing endpoints live elsewhere.
 
-Mounted under ``/api/v1`` in ``app.main``, giving the public paths
-``/api/v1/admin/intelligence-briefs`` and ``/api/v1/admin/intelligence-briefs/{brief_id}``.
+Mounted under ``/api/v1`` in ``app.main``, giving paths such as
+``/api/v1/admin/intelligence-briefs`` and
+``/api/v1/admin/intelligence-briefs/{brief_id}/publish``.
 """
 from __future__ import annotations
 
@@ -147,6 +148,87 @@ async def update_intelligence_brief(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"slug already in use: {exc.slug}",
+        ) from exc
+
+    await db.commit()
+    return brief
+
+
+@router.post("/{brief_id}/publish", response_model=IntelligenceBriefDetail)
+async def publish_intelligence_brief(
+    brief_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+) -> IntelligenceBriefDetail:
+    """Publish a brief once it has the required content."""
+    try:
+        brief = await service.publish_brief(db, brief_id, user_id=user.id)
+    except service.BriefNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Intelligence brief not found"
+        ) from exc
+    except service.BriefPublishValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Brief cannot be published, missing or invalid: {exc.fields}",
+        ) from exc
+
+    await db.commit()
+    return brief
+
+
+@router.post("/{brief_id}/archive", response_model=IntelligenceBriefDetail)
+async def archive_intelligence_brief(
+    brief_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+) -> IntelligenceBriefDetail:
+    """Archive a brief and remove it from the featured slot."""
+    try:
+        brief = await service.archive_brief(db, brief_id, user_id=user.id)
+    except service.BriefNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Intelligence brief not found"
+        ) from exc
+
+    await db.commit()
+    return brief
+
+
+@router.post("/{brief_id}/feature", response_model=IntelligenceBriefDetail)
+async def feature_intelligence_brief(
+    brief_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+) -> IntelligenceBriefDetail:
+    """Make a brief the single global featured brief."""
+    try:
+        brief = await service.feature_brief(db, brief_id, user_id=user.id)
+    except service.BriefNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Intelligence brief not found"
+        ) from exc
+    except service.BriefFeatureEligibilityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.reason
+        ) from exc
+
+    await db.commit()
+    return brief
+
+
+@router.post("/{brief_id}/unfeature", response_model=IntelligenceBriefDetail)
+async def unfeature_intelligence_brief(
+    brief_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+) -> IntelligenceBriefDetail:
+    """Clear a brief's featured state (idempotent)."""
+    try:
+        brief = await service.unfeature_brief(db, brief_id, user_id=user.id)
+    except service.BriefNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Intelligence brief not found"
         ) from exc
 
     await db.commit()

@@ -220,3 +220,173 @@ async def test_update_missing_returns_404(client, db_session):
         f"{BASE}/999999", json={"title": "Nope"}, headers=_auth(admin)
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_cannot_set_status_or_featured(client, db_session):
+    admin = await _make_user(db_session)
+    created = await client.post(BASE, json={"title": "CRUD only"}, headers=_auth(admin))
+    brief_id = created.json()["id"]
+
+    # status / is_featured are not in the update schema — extra keys are ignored,
+    # so lifecycle cannot be changed through generic PUT.
+    resp = await client.put(
+        f"{BASE}/{brief_id}",
+        json={"status": "published", "is_featured": True, "category": "X"},
+        headers=_auth(admin),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "draft"
+    assert body["is_featured"] is False
+    assert body["category"] == "X"
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle actions
+# ---------------------------------------------------------------------------
+
+_PUBLISHABLE = {
+    "risk_score": 90,
+    "risk_level": "critical",
+    "executive_summary": "<p>Executive summary</p>",
+    "main_intelligence_brief": "<p>Full brief body</p>",
+}
+
+
+async def _create_publishable(client, admin, **overrides) -> int:
+    payload = {"title": "Publishable", **_PUBLISHABLE, **overrides}
+    resp = await client.post(BASE, json=payload, headers=_auth(admin))
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_admin_can_publish(client, db_session):
+    admin = await _make_user(db_session)
+    brief_id = await _create_publishable(client, admin)
+    resp = await client.post(f"{BASE}/{brief_id}/publish", headers=_auth(admin))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "published"
+    assert body["published_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_publish_missing_returns_404(client, db_session):
+    admin = await _make_user(db_session)
+    resp = await client.post(f"{BASE}/999999/publish", headers=_auth(admin))
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_publish_invalid_returns_422(client, db_session):
+    admin = await _make_user(db_session)
+    # A sparse draft missing risk_score/level and content cannot be published.
+    created = await client.post(BASE, json={"title": "Sparse"}, headers=_auth(admin))
+    brief_id = created.json()["id"]
+    resp = await client.post(f"{BASE}/{brief_id}/publish", headers=_auth(admin))
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_admin_can_archive(client, db_session):
+    admin = await _make_user(db_session)
+    brief_id = await _create_publishable(client, admin)
+    resp = await client.post(f"{BASE}/{brief_id}/archive", headers=_auth(admin))
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "archived"
+
+
+@pytest.mark.asyncio
+async def test_archive_missing_returns_404(client, db_session):
+    admin = await _make_user(db_session)
+    resp = await client.post(f"{BASE}/999999/archive", headers=_auth(admin))
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_archive_clears_featured_state(client, db_session):
+    admin = await _make_user(db_session)
+    brief_id = await _create_publishable(client, admin)
+    await client.post(f"{BASE}/{brief_id}/publish", headers=_auth(admin))
+    await client.post(f"{BASE}/{brief_id}/feature", headers=_auth(admin))
+
+    resp = await client.post(f"{BASE}/{brief_id}/archive", headers=_auth(admin))
+    body = resp.json()
+    assert body["status"] == "archived"
+    assert body["is_featured"] is False
+    assert body["featured_order"] is None
+
+
+@pytest.mark.asyncio
+async def test_admin_can_feature_eligible_brief(client, db_session):
+    admin = await _make_user(db_session)
+    brief_id = await _create_publishable(client, admin, risk_level="high")
+    await client.post(f"{BASE}/{brief_id}/publish", headers=_auth(admin))
+    resp = await client.post(f"{BASE}/{brief_id}/feature", headers=_auth(admin))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["is_featured"] is True
+    assert body["featured_order"] == 1
+
+
+@pytest.mark.asyncio
+async def test_feature_missing_returns_404(client, db_session):
+    admin = await _make_user(db_session)
+    resp = await client.post(f"{BASE}/999999/feature", headers=_auth(admin))
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_feature_ineligible_returns_422(client, db_session):
+    admin = await _make_user(db_session)
+    # Draft (not published) is ineligible for featuring.
+    brief_id = await _create_publishable(client, admin)
+    resp = await client.post(f"{BASE}/{brief_id}/feature", headers=_auth(admin))
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_feature_replaces_existing_featured(client, db_session):
+    admin = await _make_user(db_session)
+    a = await _create_publishable(client, admin, title="Feature A")
+    b = await _create_publishable(client, admin, title="Feature B")
+    await client.post(f"{BASE}/{a}/publish", headers=_auth(admin))
+    await client.post(f"{BASE}/{b}/publish", headers=_auth(admin))
+
+    await client.post(f"{BASE}/{a}/feature", headers=_auth(admin))
+    await client.post(f"{BASE}/{b}/feature", headers=_auth(admin))
+
+    a_detail = await client.get(f"{BASE}/{a}", headers=_auth(admin))
+    b_detail = await client.get(f"{BASE}/{b}", headers=_auth(admin))
+    assert a_detail.json()["is_featured"] is False
+    assert b_detail.json()["is_featured"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_can_unfeature(client, db_session):
+    admin = await _make_user(db_session)
+    brief_id = await _create_publishable(client, admin)
+    await client.post(f"{BASE}/{brief_id}/publish", headers=_auth(admin))
+    await client.post(f"{BASE}/{brief_id}/feature", headers=_auth(admin))
+
+    resp = await client.post(f"{BASE}/{brief_id}/unfeature", headers=_auth(admin))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["is_featured"] is False
+    assert body["featured_order"] is None
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_actions_require_auth(client):
+    for action in ("publish", "archive", "feature", "unfeature"):
+        resp = await client.post(f"{BASE}/1/{action}")
+        assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_actions_forbidden_for_non_admin(client, db_session):
+    subscriber = await _make_user(db_session, role="subscriber")
+    resp = await client.post(f"{BASE}/1/publish", headers=_auth(subscriber))
+    assert resp.status_code == 403
