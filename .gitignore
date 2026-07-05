@@ -1,0 +1,80 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# AI
+.claude/
+CLAUDE.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+
+# Conda
+.conda/
+
+# IDE
+.idea/
+backend/.idea/
+.vscode/
+*.iml
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+postgres_data/
+
+# Local experiments / client attachments (not code)
+app/Experiments
+mastery44u-attachments/
+
+# Alembic — only ignore cache, NOT the migration files themselves
+alembic/__pycache__/
+
+.local/
+backups/
+
+# Production DB backups / dry-run reports / review inputs — NEVER commit (M4
+# guardrail). `backups/` above already matches at any depth; the anchored paths
+# and dump extensions below are defense-in-depth against a stray `git add`.
+/backups/
+/backend/backups/
+/backend/reports/
+/backend/data/review_inputs/
+*.sql
+*.dump
+*.backup
+
+backend/docs/
+backend/data/
