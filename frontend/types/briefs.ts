@@ -1,0 +1,56 @@
+export type BriefRiskLabel = 'Critical' | 'High' | 'Medium' | 'Low';
+
+/**
+ * Visual theme key used to render an inline gradient + icon cover for a brief.
+ * Keeps card visuals consistent without bundling per-brief imagery.
+ */
+export type BriefCoverTheme =
+  | 'emerging-threat'
+  | 'financial-crime'
+  | 'cyber'
+  | 'national-security'
+  | 'fraud'
+  | 'identity'
+  | 'corruption'
+  | 'organized-crime';
+
+export type SubscriberBrief = {
+  id: string;
+  slug: string;
+  title: string;
+  /** Primary category, used by the card label, category filter, and sidebar list. */
+  category: string;
+  /** Broader coverage tags (a brief can belong to several coverage areas). */
+  coverageAreas: string[];
+  /** ISO date (yyyy-mm-dd) the brief was published. */
+  date: string;
+  riskScore: number;
+  riskLabel: BriefRiskLabel;
+  coverTheme: BriefCoverTheme;
+  /** Number of supporting/verified sources cited in the brief. */
+  sourceCount: number;
+  /** Added or updated within the current week. */
+  isNew?: boolean;
+  /** Renders a "Confidential" marker on the featured/detail surfaces. */
+  confidential?: boolean;
+  /** Single brief surfaced in the hero "Featured Intelligence Brief" slot. */
+  featured?: boolean;
+  summary: string;
+  href: string;
+};
+
+export type BriefRiskFilterValue = 'all' | 'critical' | 'high' | 'medium' | 'low';
+
+export type BriefSortValue = 'newest' | 'oldest' | 'risk-high' | 'risk-low';
+
+export type BriefFilters = {
+  search: string;
+  category: string;
+  risk: BriefRiskFilterValue;
+  sort: BriefSortValue;
+};
+
+export type BriefCountItem = {
+  label: string;
+  count: number;
+};
