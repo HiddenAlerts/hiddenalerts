@@ -9,6 +9,7 @@ import pytest
 from app.pipeline.ai_processor import (
     AIAnalysisResult,
     AIProcessingError,
+    SYSTEM_PROMPT,
     analyze_article,
 )
 
@@ -91,6 +92,39 @@ async def test_analyze_article_success():
     assert result.victim_scale == "multiple"
     assert result.is_relevant is True
     assert result.ai_model == "gpt-4o-mini-2024-07-18"
+
+
+@pytest.mark.asyncio
+async def test_analyze_article_violent_crime_irrelevant():
+    """Violent crime, coup, or murder articles should be parsed as is_relevant=False."""
+    parsed = _make_parsed_analysis(
+        summary="Defendants charged following an armed coup attack.",
+        primary_category="Other",
+        entities=["John Doe"],
+        financial_impact_estimate="none",
+        victim_scale="multiple",
+        is_relevant=False,
+    )
+    mock_completion = _make_mock_completion(parsed)
+
+    with patch("app.pipeline.ai_processor.openai.AsyncOpenAI") as MockClient:
+        mock_instance = MockClient.return_value
+        mock_instance.beta.chat.completions.parse = AsyncMock(return_value=mock_completion)
+
+        with patch("app.pipeline.ai_processor.settings") as mock_settings:
+            mock_settings.openai_api_key = "sk-test"
+            mock_settings.openai_model = "gpt-4o-mini"
+            mock_settings.ai_max_retries = 1
+            mock_settings.ai_retry_delay_seconds = 0.0
+
+            result = await analyze_article(
+                title="Armed Coup Attack",
+                text="An armed coup attack resulted in multiple charges. " * 10,
+                matched_keywords=["conspiracy", "charged"],
+            )
+
+    assert result.is_relevant is False
+    assert result.primary_category == "Other"
 
 
 @pytest.mark.asyncio
@@ -196,3 +230,34 @@ async def test_analyze_article_no_api_key():
                 text="test content " * 20,
                 matched_keywords=["fraud"],
             )
+
+
+# ---------------------------------------------------------------------------
+# SYSTEM_PROMPT content tests — verify Ken's financial-risk intelligence scope
+# ---------------------------------------------------------------------------
+
+
+def test_system_prompt_includes_financial_risk_intelligence_scope():
+    """Prompt must call out OFAC/sanctions, governance, liquidity, transparency,
+    and network exposure as relevant financial-risk signals."""
+    assert "FINANCIAL RISK INTELLIGENCE SCOPE" in SYSTEM_PROMPT
+    for phrase in (
+        "OFAC",
+        "sanctions",
+        "governance failure",
+        "transparency failure",
+        "liquidity risk",
+        "network exposure",
+        "blocked entities",
+    ):
+        assert phrase in SYSTEM_PROMPT, f"Missing financial-risk phrase: {phrase!r}"
+
+
+def test_system_prompt_conditions_cybercrime_and_organized_crime_on_financial_relevance():
+    """Cybercrime and organized crime must be conditional on financial relevance,
+    not blanket-relevant categories."""
+    assert "Cybercrime IS relevant only when tied to" in SYSTEM_PROMPT
+    assert "Organized crime IS relevant only when" in SYSTEM_PROMPT
+    # General arrests / fugitives must be explicitly excluded from default relevance
+    assert "General arrests" in SYSTEM_PROMPT
+    assert "fugitives" in SYSTEM_PROMPT

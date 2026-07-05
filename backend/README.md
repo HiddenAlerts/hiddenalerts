@@ -84,12 +84,14 @@ hiddenalerts/
 │       ├── 0001_initial_schema.py      # All tables + seed 10 sources
 │       ├── 0002_signal_scoring.py      # credibility_score + 6 scoring fields
 │       ├── 0003_fix_source_urls.py     # Correct RSS URLs; FTC/FinCEN → HTML
-│       └── 0004_ai_fields_and_admin_seed.py  # 3 AI columns + admin user seed
+│       ├── 0004_ai_fields_and_admin_seed.py  # 3 AI columns + admin user seed
+│       ├── 0005_user_roles.py         # M3: role, full_name, email prefs, last_login_at
+│       └── 0006_alert_publication.py  # M3: is_published, published_at, published_by_user_id
 ├── app/
 │   ├── main.py                         # FastAPI app + lifespan + static mount
 │   ├── config.py                       # Pydantic settings (loaded from .env)
 │   ├── database.py                     # Async engine + session factory
-│   ├── auth.py                         # JWT + bcrypt utilities + get_current_user
+│   ├── auth.py                         # JWT + bcrypt utilities; cookie + Bearer auth; role dependencies
 │   ├── models/
 │   │   ├── base.py                     # DeclarativeBase
 │   │   ├── source.py                   # SOURCES table
@@ -104,7 +106,8 @@ hiddenalerts/
 │   │   ├── source.py                   # SourceRead, SourceUpdate
 │   │   ├── raw_item.py                 # RawItemRead, RawItemDetail
 │   │   ├── run_log.py                  # RunLogRead
-│   │   └── alert.py                    # ProcessedAlertRead/Detail, EventRead/Detail
+│   │   ├── alert.py                    # ProcessedAlertRead/Detail, EventRead/Detail
+│   │   └── auth.py                     # M3: LoginRequest, TokenResponse, UserRead, ChangePasswordRequest
 │   ├── sources/                        # Source adapters (10 total — unchanged from M1)
 │   │   ├── base.py
 │   │   ├── rss_adapter.py
@@ -128,7 +131,10 @@ hiddenalerts/
 │   │   ├── sources.py                  # CRUD + trigger endpoints
 │   │   ├── raw_items.py                # Query + stats endpoints
 │   │   ├── alerts.py                   # M2: alerts + events REST API
-│   │   └── dashboard.py               # M2: Jinja2 HTML routes
+│   │   ├── auth.py                     # M3: JSON auth endpoints (login, me, change-password)
+│   │   ├── client_alerts.py           # M3: subscriber-safe published alert feed
+│   │   ├── public_alerts.py           # M3 Slice 4: public feed (list, detail, stats) — no auth
+│   │   └── dashboard.py               # M2: Jinja2 HTML routes (admin-only)
 │   ├── templates/                      # Jinja2 HTML templates
 │   │   ├── base.html                   # Bootstrap 5 layout + navbar
 │   │   ├── auth/login.html             # Login page
@@ -149,7 +155,8 @@ hiddenalerts/
 │   └── test_api/
 │       ├── test_health.py              # API smoke tests
 │       ├── test_auth.py                # JWT, bcrypt, login endpoint
-│       └── test_alerts_api.py          # Alerts + events REST API
+│       ├── test_alerts_api.py          # Alerts + events REST API
+│       └── test_public_alerts.py      # M3 Slice 4: public list, detail, stats — no auth
 ├── .env.example                        # All config variables with defaults
 ├── .env.production.example             # Production config template
 ├── alembic.ini
@@ -247,6 +254,9 @@ http://localhost:8000/docs           → Swagger UI (all endpoints)
 | `JWT_EXPIRE_MINUTES` | `43200` | Token lifetime (30 days) |
 | `ADMIN_EMAIL` | _(empty)_ | Admin user email — set before first migration |
 | `ADMIN_PASSWORD` | _(empty)_ | Admin user password (plain-text; hashed at migration time) |
+| `TEST_SUBSCRIBER_EMAIL` | _(empty)_ | Optional test subscriber seed (M3, dev only) |
+| `TEST_SUBSCRIBER_PASSWORD` | _(empty)_ | Test subscriber password (plain-text) |
+| `TEST_SUBSCRIBER_FULL_NAME` | `Test Subscriber` | Test subscriber display name |
 
 ---
 
@@ -263,7 +273,7 @@ http://localhost:8000/docs           → Swagger UI (all endpoints)
 | `events` | Grouped fraud events across multiple sources |
 | `event_sources` | Links events to their contributing alerts |
 | `alert_reviews` | Human review decisions on alerts |
-| `users` | Admin users for dashboard access |
+| `users` | Admin and subscriber users — role-aware (`admin` / `subscriber`) |
 | `weekly_reports` | Generated weekly intelligence reports (Milestone 3) |
 
 ### `processed_alerts` — Key Columns (M2)
@@ -284,8 +294,8 @@ http://localhost:8000/docs           → Swagger UI (all endpoints)
 | `score_victim_scale` | INTEGER | 1–5 |
 | `score_cross_source` | INTEGER | 1–5 |
 | `score_trend_acceleration` | INTEGER | 1–5 |
-| `signal_score_total` | INTEGER | Sum of 5 factors (5–25) |
-| `risk_level` | VARCHAR | `low` (≤6) / `medium` (7–12) / `high` (≥13) |
+| `signal_score_total` | INTEGER | Internal sum of 5 factors (5–25). API responses normalize this to 0–100 before exposing it (the field name in the response is also `signal_score` / `signal_score_total`, but the value is on a 0–100 scale). |
+| `risk_level` | VARCHAR | M3 final 0–100 bands (Ken-approved May 06): `low` (1–39) / `medium` (40–69) / `high` (≥70). Public, admin, and client endpoints all derive risk from the score at read time rather than from this stored column, so legacy rows with stale levels still display correctly. |
 
 ### Migrations
 
@@ -301,6 +311,8 @@ alembic revision --autogenerate -m "description"
 | `0002` | Signal scoring — `credibility_score` on sources, 6 scoring fields on processed_alerts |
 | `0003` | Fix source URLs — correct SEC/FBI RSS URLs; FTC and FinCEN converted to HTML scrapers |
 | `0004` | AI columns — adds `financial_impact_estimate`, `victim_scale_raw`, `ai_model`; seeds admin user |
+| `0005` | User roles — adds `role`, `full_name`, email preference flags, `last_login_at`; sets existing admin to `role='admin'` |
+| `0006` | Alert publication — adds `is_published`, `published_at`, `published_by_user_id` to processed_alerts; partial index on published rows |
 
 ---
 
@@ -365,8 +377,9 @@ Step 3 — Signal Scoring (signal_scorer.py)
     score_victim_scale        = map(victim_scale)
     score_cross_source        = f(event_source_count)
     score_trend_acceleration  = compare keyword freq last 7d vs prior 7d
-    signal_score_total        = sum(5 factors)
-    risk_level                = low(≤6) / medium(7–12) / high(≥13)
+    signal_score_total        = sum(5 factors)         # internal 5–25 (in DB)
+    # API exposes the same field as 0–100: round(total / 25 * 100)
+    risk_level                = low(<40) / medium(40–69) / high(≥70)  # M3 final bands
 
 Step 4 — Event Grouping (event_grouper.py)
     Match: same primary_category + entity name overlap + within 7 days
@@ -383,12 +396,33 @@ Each processed alert receives five independent scores (1–5 each):
 | Factor | Rule |
 |--------|------|
 | Source Credibility | Inherited from `sources.credibility_score` — SEC/FBI/DOJ=5, FTC/FinCEN/IC3=4, Krebs/Bleeping=3 |
-| Financial Impact | `<$1M`→1, `$1M–$10M`→3, `>$10M`→5; unknown/none→1 |
-| Victim Scale | `single`→1, `multiple`→3, `nationwide`→5 |
+| Financial Impact | `<$1M`→1, `$1M–$10M`→2, `$10M–$100M`→3, `>$100M`→5; unknown/none→1 |
+| Victim Scale | `single`→1, `multiple`→2, `nationwide`→4 |
 | Cross-Source | 1 source→1, 2 sources→3, 3+→5 (updated as events gain more sources) |
 | Trend Acceleration | Compare keyword matches last 7d vs prior 7d — stable→1, 25–99% increase→3, 100%+ surge→5 |
 
-**Risk level:** total ≤ 6 → `low` — total 7–12 → `medium` — total ≥ 13 → `high`
+**Risk bands (M3 final, Ken-approved May 06)** — the DB column
+`signal_score_total` is on the internal 5–25 scale; every API response (public,
+admin, subscriber) normalizes that value to a 0–100 score before exposing it.
+The field name on the response stays `signal_score` / `signal_score_total` /
+`score` so no frontend change is required. `risk_level` is derived from the
+0–100 value:
+
+| Band | API score (0–100) | DB `signal_score_total` (5–25) |
+|------|-------------------|-------------------------------|
+| High | 70–100 | ≥18 |
+| Medium | 40–69 | 10–17 |
+| Low | 1–39 | ≤9 |
+
+**Tier 1 auto-publish rule:** an alert is auto-published only when **all four** conditions hold:
+
+1. `ai_result.is_relevant == True` — AI confirmed the article describes a real fraud / financial-crime mechanism (defensive guard against any code path that lets an irrelevant alert reach scoring).
+2. `signal_score_total ≥ 10` — Medium-and-above under M3 final bands. Ken explicitly approved Medium auto-publish on May 06; Low alerts remain admin-manual-only.
+3. `source.credibility_score ≥ 4` — government / regulator / law-enforcement source.
+4. `primary_category` is in the auto-publish allowlist:
+   `Investment Fraud`, `Cybercrime`, `Consumer Scam`, `Money Laundering`, `Cryptocurrency Fraud`.
+
+`Other` and any unknown / borderline category **never auto-publish** — they go to manual admin review. Manual admin approval remains available for any alert (including `Other` and below-threshold scores) via the dashboard's review workflow.
 
 ---
 
@@ -404,7 +438,7 @@ The dashboard is a Jinja2 HTML interface for reviewing fraud alerts:
 | `/dashboard/alerts/{id}` | Alert detail — summary, score breakdown, entities, review form |
 | `/dashboard/monitoring` | Source health table + last 50 run logs |
 
-**Authentication:** HTTP-only JWT cookie (`access_token`), 30-day expiry.
+**Authentication:** HTTP-only JWT cookie (`access_token`), 30-day expiry. Admin-only — subscribers are redirected to `/login`.
 
 **Review workflow:** On each alert detail page, reviewers can:
 - Approve the alert as accurate
@@ -417,7 +451,11 @@ The dashboard is a Jinja2 HTML interface for reviewing fraud alerts:
 ## API Endpoints
 
 Base URL: `http://localhost:8000`  
-All endpoints under `/api/v1/` require a valid `access_token` cookie except `/api/v1/health`.
+Authenticated endpoints accept either a valid `access_token` cookie **or** an `Authorization: Bearer <token>` header. Cookie takes priority when both are present.
+
+> **Subscriber vs internal endpoints:**  
+> `/api/v1/client/alerts` and `/api/v1/client/alerts/{id}` are the **subscriber-safe** published feed — use these in the frontend.  
+> `/api/v1/alerts` and `/api/v1/alerts/{id}` are **internal/admin** endpoints — they return all alerts regardless of publication state and expose internal review and scoring fields.
 
 ### System
 
@@ -443,6 +481,29 @@ All endpoints under `/api/v1/` require a valid `access_token` cookie except `/ap
 | `GET` | `/api/v1/raw-items` | No | Paginated items (filter: source_id, since, is_duplicate) |
 | `GET` | `/api/v1/raw-items/{id}` | No | Full detail incl. raw_text + raw_html |
 
+### Public Feed — No Auth Required (M3 Slice 4 + Frontend Completion)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/alerts` | No | Paginated published alert feed |
+| `GET` | `/api/alerts/top` | No | Curated top 3 published alerts (`signal_score >= 60` on the 0–100 API scale; equivalent to internal `signal_score_total >= 15`). Ranked by score → signal-strength → credibility → recency, duplicate primary entities suppressed. Returns `{"alerts": []}` when none qualify. |
+| `GET` | `/api/alerts/{id}` | No | Enriched published alert detail (`confidence`, `why_it_matters`, `key_intelligence`, `risk_assessment`, `sources`, `published_date`, `subcategory`, `affected_group`, `timeline`, `related_signals` + backward-compat aliases). Optional sections omitted when empty. 404 if unpublished. |
+| `GET` | `/api/alerts/stats` | No | Published alert aggregate counts + category breakdown |
+| `GET` | `/api/search/alerts` | No | Free-text search across published alerts. Required `q`; optional `min_score` (0–100, default 0), `limit` (default 50, max 100), `group_limit` (default 20, max 50). Matches title, summary, source name, and parsed entities (case-insensitive ILIKE). Returns entity-grouped results plus a unique top-level `alerts` list; non-entity matches collect into a single `keyword` fallback group. See `MVP-API-Contract-V2.md` §0.5. |
+
+> Detail-endpoint conventions: `risk_level` and `confidence` are returned in
+> Title Case (`"High"|"Medium"|"Low"`); `published_date` resolves in priority
+> order `source_published_at` → `published_at` → `processed_at`. See
+> `MVP-API-Contract-V2.md` §0.2 for the full schema.
+
+> Search-endpoint conventions: `q` is trimmed and required (empty/whitespace
+> → 422). `limit > 100` and `group_limit > 50` are clamped (200 OK), values
+> `< 1` are rejected with 422. `min_score` is on the same 0–100 scale used
+> elsewhere; default 0 returns all matching published alerts (low + medium +
+> high). Multi-word queries are matched as a literal phrase — no fuzzy /
+> typo / semantic search. An alert tagged with multiple matching entities
+> appears in multiple entity groups; `total_alerts` counts unique alerts.
+
 ### Alerts (M2)
 
 | Method | Path | Auth | Description |
@@ -458,6 +519,21 @@ All endpoints under `/api/v1/` require a valid `access_token` cookie except `/ap
 |--------|------|------|-------------|
 | `GET` | `/api/v1/events` | Yes | List fraud events with source counts |
 | `GET` | `/api/v1/events/{id}` | Yes | Event detail with linked alerts |
+
+### Auth (M3)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/v1/auth/login` | No | JSON login — returns JWT + sets cookie; works for both roles |
+| `GET` | `/api/v1/auth/me` | Yes | Current user profile (cookie or Bearer) |
+| `POST` | `/api/v1/auth/change-password` | Yes | Update password (validates current first) |
+
+### Client — Subscriber-Safe Feed (M3)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/client/alerts` | Subscriber or Admin | Published alert feed — filters: risk_level, category, source, limit, offset |
+| `GET` | `/api/v1/client/alerts/{id}` | Subscriber or Admin | Published alert detail; 404 if unpublished |
 
 Full interactive docs at `http://localhost:8000/docs`.
 
@@ -489,19 +565,22 @@ Tests use an in-memory SQLite database — no PostgreSQL or OpenAI key required.
 pytest tests/ -v
 ```
 
-**90 tests, 0 failures.** Test breakdown:
+**265 tests, 0 failures.** Test breakdown:
 
 | File | Tests | What it covers |
 |------|-------|---------------|
 | `test_normalizer.py` | 13 | URL normalization, SHA-256 hashing, text extraction, date parsing |
 | `test_keyword_filter.py` | 13 | Word boundary matching, case sensitivity, multi-word phrases, deduplication |
-| `test_signal_scorer.py` | 22 | All 5 scoring factors, dollar parsing edge cases, risk level bucketing |
-| `test_ai_processor.py` | 5 | Mock OpenAI, rate-limit retry, max retries exhaustion, short text skip |
+| `test_ai_processor.py` | 8 | Mock OpenAI, rate-limit retry, max retries exhaustion, short text skip; SYSTEM_PROMPT financial-risk-intelligence scope (OFAC, sanctions, governance, liquidity, network exposure); cybercrime/organized-crime conditional relevance |
+| `test_alert_pipeline.py` | 7 | Tier1 auto-publish guard (allowed category + score + credibility + is_relevant); Other category never auto-publishes; irrelevant alert never auto-publishes; manual admin can publish Other; M3 final tier1 — Medium score auto-publishes from credible source, Medium score from low-credibility source does NOT auto-publish, Low score never auto-publishes |
 | `test_event_grouper.py` | 6 | Event creation, entity overlap matching, 7-day window, cross-source recalculation |
 | `test_health.py` | 5 | API health, sources, raw-items, stats smoke tests |
-| `test_auth.py` | 10 | Password hash/verify, JWT encode/decode, expiry, login endpoint |
-| `test_alerts_api.py` | 8 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation |
-| **Total** | **90** | |
+| `test_auth.py` | 24 | Password/JWT utilities; JSON login (admin + subscriber); Bearer + cookie auth; change-password; role enforcement; inactive user; backwards compat |
+| `test_alerts_api.py` | 21 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation; publication state; approval publish; client feed access control |
+| `test_public_alerts.py` | 87 | Public list (no auth, published-only, field mapping, ordering, filters); enriched detail (Ken's frontend schema — confidence, why_it_matters, key_intelligence, risk_assessment with strong-factor enrichment, sources, timeline, related_signals; safe-fields-only); public stats (counts, breakdown, empty state); top alerts (no auth, published-only, max 3, score ≥15 threshold, score-then-strength-then-credibility-then-recency ranking, duplicate-entity suppression, fallback key for entity-less alerts, empty when none qualify, no internal-field leakage); agency stoplist (FBI/DOJ/SEC/etc. excluded from primary-entity dedup and entity-overlap matching); derived risk_level from score on every public endpoint; related_signals entity-overlap + 2–4 quantity rule; **M3 final score normalization to 0–100** — `signal_score` / `score` exposed as 0–100, Ken's worked examples (17→68, 19→76, 21→84), band-boundary checks at 9/10 and 17/18 |
+| `test_signal_scorer.py` | 42 | All 5 scoring factors; M3 final 0–100-aligned bands (≤9 low, 10–17 medium, ≥18 high); boundary tests including the new band-shift cases (16/17 now Medium, 18 is the new High floor); recalibrated victim/financial buckets; realistic alert scenarios |
+| `test_search_api.py` | 39 | GET /api/search/alerts — auth-free 200/422 envelope, matching across title/summary/source/parsed entities (case-insensitive, partial, multi-word literal phrase), unpublished excluded, entity grouping with multi-entity dedup, mixed-mode entity + keyword fallback, group ordering (entity-first), `alertCount`/`sourceCount` correctness, source-published-at earliest/latest, `group_limit` cap; `signal_score` DESC + recency-tiebreaker ranking; `min_score` 0–100 boundary checks (60 → internal 15, 70 → internal 18); `limit`/`group_limit` clamping above max + 422 below 1; no-leak frontend safety; regression on /api/alerts list/top/stats/detail |
+| **Total** | **265** | |
 
 ---
 
@@ -535,7 +614,7 @@ INFO  app.pipeline.alert_pipeline — Alert pipeline: processing 5 unprocessed i
 INFO  httpx — HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
 INFO  httpx — HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
 INFO  app.pipeline.alert_pipeline — raw_item 8 → alert 9 [MEDIUM score=12]
-INFO  app.pipeline.alert_pipeline — raw_item 11 → alert 11 [HIGH score=14]
+INFO  app.pipeline.alert_pipeline — raw_item 11 → alert 11 [HIGH score=20]
 INFO  app.pipeline.alert_pipeline — Alert pipeline complete: examined=5, processed=2, ...
 
 === Results ===
@@ -545,6 +624,14 @@ INFO  app.pipeline.alert_pipeline — Alert pipeline complete: examined=5, proce
   Skipped (AI said no) : 2
   Failed               : 0
 ```
+
+> **Note on score values in CLI / internal logs:** the `score=` value in
+> pipeline log lines is the raw internal `signal_score_total` on the 5–25
+> scale (12 above maps to risk_score 48 → Medium; 20 maps to 80 → High).
+> Public, admin, and subscriber API responses always normalize to the 0–100
+> frontend scale (Ken-approved M3 final). Logs show internal sums; APIs and
+> UIs show 0–100. Risk band cutoffs on the internal scale: ≤9 Low, 10–17
+> Medium, ≥18 High.
 
 **Understanding the results:**
 
@@ -602,4 +689,137 @@ curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit
 |-----------|-------|--------|
 | **M1** | Source ingestion (10 sources), raw storage, deduplication, run logging, REST API | ✅ Complete |
 | **M2** | Keyword filtering, AI analysis (GPT-4o-mini), 5-factor signal scoring, event grouping, admin dashboard | ✅ Complete |
-| **M3** | Email alerts (HIGH immediate, MEDIUM digest), weekly report generation, VPS deployment handoff | Planned |
+| **M3 — Slice 1** | Role-aware auth foundation (admin/subscriber roles, Bearer token support, JSON auth endpoints) | ✅ Complete |
+| **M3 — Slice 2** | Alert publication workflow — Tier 1 auto-publish, Tier 2 admin review, subscriber-safe client feed | ✅ Complete |
+| **M3 — Slice 3** | Signal score recalibration — stricter HIGH threshold, recalibrated victim/financial buckets, re-scoring script | ✅ Complete |
+| **M3 — Slice 4** | Public read-only alert detail + stats — GET /api/alerts/{id}, GET /api/alerts/stats, category breakdown | ✅ Complete |
+| **M3 — Top Alerts + Inclusion Criteria** | GET /api/alerts/top with score≥15 / strength / credibility / recency ranking + duplicate-entity suppression; AI prompt extended with financial-risk-intelligence scope (OFAC, sanctions, governance, liquidity, network exposure); cybercrime/organized-crime conditional relevance; defensive `is_relevant` guard on auto-publish; agency stoplist excludes FBI/DOJ/SEC/etc. from entity dedup so unrelated alerts no longer collapse together | ✅ Complete |
+| **M3 — Public-feed cleanup** | Off-topic legacy alerts (CSAM / terrorism / weapons / drug-trafficking) reviewed and unpublished manually; `audit_offtopic_alerts.py` reports the live feed as clean; new pipeline guards prevent these from re-publishing | ✅ Complete |
+| **M3 — QA + VPS deployment handoff** | Backend deployed on VPS, smoke tests green, public endpoints verified live, frontend handoff docs updated | ✅ Complete |
+| **M3 — Risk score normalization (0–100)** | API responses now expose `signal_score` / `signal_score_total` / `score` on a 0–100 scale (normalized server-side from the internal 5–25 sum). No frontend change required. `risk_level` derived from the 0–100 value with Ken-approved bands (≥70 high, 40–69 medium, 1–39 low). Tier 1 auto-publish gate moved from ≥16 to ≥10 so Medium-and-above auto-publishes. Admin and client mappers re-derive `risk_level` so legacy stored values stay consistent with the displayed value. Admin Jinja templates updated to show 0–100 too. | ✅ Complete |
+| **M3 — Slice 5** | Full-text search across alerts | ✅ Complete |
+| **Auth/Payment Phase 1 — Slice 1** | DB + config foundation for Supabase Auth + Stripe subscriptions: new `subscriber_profiles`, `subscriptions`, `stripe_webhook_events` tables (migration `0007`); new Supabase / Stripe / billing settings on `app/config.py` (all secrets default to empty); pure `has_active_subscription_access` helper encoding the access matrix; Pydantic schemas for `/subscriber/me` and `/billing/*` ready for later slices. No endpoints exposed yet; no public behavior changed. | ✅ Complete |
+| **Auth/Payment Phase 1 — Slice 2** | Supabase JWT validation (JWKS fetch + 10-minute cache, RS256/ES256) in `app/auth/supabase.py`. `app/auth.py` converted to package — admin auth unchanged. `get_current_subscriber` dependency upserts a `SubscriberProfile` on first sight of a Supabase user (refreshes `last_seen_at` and email on every request). New router `/api/v1/subscriber/*` with `GET /me` (identity + access state) and `GET /access` (lightweight route-guard helper). No content gated yet; existing public endpoints unchanged. | ✅ Complete |
+| **Auth/Payment Phase 1 — Slice 3** | Stripe checkout + customer portal + local billing status. New `app/services/stripe_service.py` wraps the sync Stripe SDK via `anyio.to_thread.run_sync` (customer create-or-reuse, checkout session with subscription mode + metadata, portal session). New router `/api/v1/billing/*` with `POST /checkout` (creates Stripe customer on first call and persists `stripe_customer_id`), `POST /portal`, and read-only `GET /status` (local DB only — webhook sync ships in Slice 4). Checkout/portal URLs fall back to `{FRONTEND_BASE_URL}/billing/success`, `/pricing`, `/account/billing` when the explicit Stripe URLs aren't set. CORS extended to `GET, POST, OPTIONS` and locked to `FRONTEND_BASE_URL` when configured. Supabase validator hardened with an RS256/ES256 algorithm allowlist — HS256 and `alg: "none"` are rejected before signature verification. | ✅ Complete |
+| **Auth/Payment Phase 1 — Slice 4** | Stripe webhook sync — `POST /api/v1/stripe/webhook` (no auth; signature-verified via `STRIPE_WEBHOOK_SECRET`). New `app/services/stripe_webhook_service.py` is the trusted writer for the `subscriptions` table: idempotent on `stripe_event_id` (pre-SELECT + claim-by-insert race handling), dispatches `checkout.session.completed`, `customer.subscription.created/updated/deleted`, `invoice.payment_failed/succeeded`; unknown events stored + ignored. Maps Stripe objects to local profiles via `client_reference_id` / metadata / customer-id fallback; upserts by `stripe_subscription_id`; plan_type derived from configured price IDs. Returns `{status: processed\|duplicate\|ignored}`. Billing status now flips to active automatically once events arrive. | ✅ Complete |
+| **Auth/Payment Phase 1 — Slice 5** | Backend-enforced paid content. New `require_active_subscription` guard (`app/auth/subscriber_access.py`) = valid Supabase token + active subscription (`has_active_subscription_access`, now with optional `subscription_access_grace_seconds`). New subscriber content endpoints `GET /api/v1/subscriber/{alerts, alerts/top, alerts/{id}, alerts/stats, search/alerts}` — all gated, returning **only published** alerts with response shapes identical to the public endpoints (the public handler bodies were extracted into shared `*_impl` functions; public routes now delegate, behavior unchanged). 401 = no/invalid token, 403 `active_subscription_required` = logged-in-but-unpaid, 404 = absent/unpublished. Old public endpoints remain unchanged and unauthenticated. | ✅ Complete |
+| **Auth/Payment Phase 1 — Slice 6** | Webhook hotfix + payment reliability. `process_stripe_event` now normalizes real `stripe.Event` / `StripeObject` via `stripe_object_to_dict` (fixes prod `AttributeError: get`); malformed events get a controlled `400 invalid_stripe_event`; events with `processed_at IS NULL` (prior crashes) are **reprocessed** instead of incorrectly skipped; dispatch failures roll back + log + re-raise so Stripe retries work. New `POST /api/v1/billing/sync` (Supabase-auth) reconciles local state from Stripe with priority `active > trialing > canceled-future > past_due > newest` — an older active row is never overwritten by a newer incomplete. `POST /api/v1/billing/checkout` now reads optional `X-Idempotency-Key`, validates it (no `@`, len ≤ 255), folds header-less double-clicks via a 30-min recent-attempt window, persists every attempt in the new `billing_checkout_attempts` table (migration `0008`), passes operation-scoped `idempotency_key` to Stripe's `Customer.create` and `Checkout.Session.create`, returns 409 `already_subscribed` for active users, 409 `idempotency_key_conflict` for cross-user reuse, 409 `checkout_in_progress` for in-flight retries. | ✅ Complete |
+| **Auth/Payment Phase 1 — Slice 7+** | Lock/deprecate old public content endpoints once frontend migrates; subscriber reports/briefs; frontend integration | 🔄 Next |
+| **Future / Paused** | Email alerts (HIGH immediate + MEDIUM daily digest), weekly fraud intelligence report generation | Paused — revisit after Auth/Payment ships |
+
+---
+
+## VPS Deployment & Testing (Hostinger)
+
+Production runs on a Hostinger VPS at `/opt/hiddenalerts` via Docker Compose.
+The app container is named `hiddenalerts_app`. Public URL:
+`https://hiddenalerts.com`.
+
+### Standard deploy (after pushing code to `main`)
+
+SSH to the VPS, then from `/opt/hiddenalerts`:
+
+```bash
+cd /opt/hiddenalerts
+
+# 1. Pull latest code
+git pull
+
+# 2. Rebuild the app image and restart the container.
+#    Use --no-deps so the postgres container (with live data) is NOT touched.
+docker compose build app
+docker compose up -d --no-deps app
+
+# 3. Confirm the container came up cleanly
+docker compose ps
+docker compose logs --tail=100 app
+
+# 4. Run the test suite inside the container
+docker exec hiddenalerts_app pytest tests/ -q
+
+# 5. Smoke-test the public endpoints from the host
+curl -s https://hiddenalerts.com/api/alerts        | python3 -m json.tool | head -40
+curl -s https://hiddenalerts.com/api/alerts/top    | python3 -m json.tool
+curl -s https://hiddenalerts.com/api/alerts/stats  | python3 -m json.tool
+```
+
+### Code-only changes vs. dependency / Dockerfile changes
+
+- **Code only** (Python files, templates, docs, no `requirements.txt` /
+  `Dockerfile` / `docker-compose.yml` change): step 2's
+  `docker compose build app` is fast (cached layers) and step 3 restarts
+  cleanly. This is the common path.
+- **Dependency or Dockerfile change**: same commands; the `build` step will
+  reinstall packages. Watch the build log for failures before restarting.
+- **`docker-compose.yml` change**: re-run `docker compose up -d` (no
+  `--no-deps`) so the orchestration picks up the new compose config.
+- **Migration** (`alembic` revision added): after step 3, run
+  `docker exec hiddenalerts_app alembic upgrade head`, then re-run step 4.
+
+### Rollback if a deploy goes bad
+
+```bash
+cd /opt/hiddenalerts
+git log --oneline -5                  # find the last good commit
+git checkout <good-sha>
+docker compose build app
+docker compose up -d --no-deps app
+docker exec hiddenalerts_app pytest tests/ -q
+```
+
+### Useful diagnostic commands
+
+```bash
+# Tail live application logs
+docker compose logs -f app
+
+# See the scheduler / pipeline activity
+docker exec hiddenalerts_app tail -f logs/app.log    # if file-logging is on
+
+# Open a Python shell inside the container (DB access, ad-hoc queries)
+docker exec -it hiddenalerts_app python
+
+# Run any maintenance script inside the container
+docker exec hiddenalerts_app python scripts/audit_offtopic_alerts.py
+docker exec hiddenalerts_app python scripts/audit_offtopic_alerts.py --json
+
+# Postgres shell (read-only browsing — be careful with writes)
+docker exec -it hiddenalerts_db psql -U hiddenalerts -d hiddenalerts
+
+# Container resource use
+docker stats --no-stream
+```
+
+### What's safe to run, what isn't
+
+| Command | Safe? | Notes |
+|---------|-------|-------|
+| `docker compose build app` | Always | Builds a new image; doesn't replace the running container yet. |
+| `docker compose up -d --no-deps app` | Yes | Recreates only the app container — Postgres untouched. |
+| `docker compose up -d` (no `--no-deps`) | Cautious | Will recreate Postgres if its image/config changed. Don't use unless you intend that. |
+| `docker compose down` | **No** | Stops everything. Only use if you mean to take the site offline. |
+| `docker compose down -v` | **NEVER** | Deletes volumes — wipes the production database. |
+| `docker exec hiddenalerts_app pytest tests/ -q` | Always | Tests run in isolated session-scoped SQLite, not the prod DB. |
+| `docker exec hiddenalerts_app alembic upgrade head` | Yes | Idempotent; only applies pending migrations. |
+| `docker exec hiddenalerts_app alembic downgrade …` | **No** without backup | Downgrades can drop columns. Take a DB dump first. |
+
+### Quick sanity check that scoring is on the 0–100 scale (M3 final)
+
+```bash
+# Should show signal_score values in the 40–95 range (not 5–25).
+curl -s https://hiddenalerts.com/api/alerts | python3 -c \
+  "import json, sys; \
+   d = json.load(sys.stdin); \
+   for a in d['alerts'][:5]: print(a['signal_score'], a['risk_level'])"
+```
+
+---
+
+## Maintenance Scripts
+
+| Script | Purpose | Default mode |
+|--------|---------|--------------|
+| `scripts/audit_public_alert_quality.py` | List published alerts in non-allowed categories (e.g. `Other`); unpublish by ID with `--apply --ids …` | dry-run |
+| `scripts/audit_offtopic_alerts.py` | Flag published alerts whose title/summary contains off-topic terms (CSAM, terrorism, weapons, etc.) without any positive fraud term; unpublish by ID with `--apply --ids …`. Use `--json` for machine-readable output | report |
+| `scripts/rescore_alerts.py` | Recompute signal scores under current thresholds | dry-run |
+| `scripts/approve_alerts.py` | Bulk-publish reviewed alerts | requires explicit IDs |

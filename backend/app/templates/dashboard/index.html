@@ -147,8 +147,8 @@
 <!-- Pagination -->
 <div class="d-flex justify-content-between align-items-center mt-4">
     <small class="text-muted">
-        Showing {{ offset + 1 }}–{{ offset + (high_alerts|length + medium_alerts|length + low_alerts|length) }}
-        of {{ stats.total_relevant }} relevant alerts
+        Page {{ (offset // limit) + 1 }} 
+        (Showing {{ offset + 1 }}–{{ offset + limit }} alerts per panel)
     </small>
     <div class="btn-group btn-group-sm">
         {% if offset > 0 %}
@@ -157,7 +157,7 @@
             <i class="bi bi-chevron-left"></i> Previous
         </a>
         {% endif %}
-        {% if (offset + limit) < stats.total_relevant %}
+        {% if (offset + limit) < stats.max_count %}
         <a href="/dashboard?offset={{ offset + limit }}&limit={{ limit }}{% if current_filter %}&category={{ current_filter }}{% endif %}"
            class="btn btn-outline-secondary">
             Next <i class="bi bi-chevron-right"></i>
@@ -176,7 +176,7 @@
                     {{ alert.title | truncate(80) if alert.title else "Untitled" }}
                 </small>
                 {% if alert.signal_score_total %}
-                <span class="score-badge ms-2 flex-shrink-0">[{{ alert.signal_score_total }}]</span>
+                <span class="score-badge ms-2 flex-shrink-0">[{{ ((alert.signal_score_total / 25 * 100) | round) | int }}]</span>
                 {% endif %}
             </div>
             <div class="d-flex flex-wrap gap-1 mb-1">
@@ -198,7 +198,13 @@
             </div>
             {% endif %}
             <div class="mt-1">
-                <small class="text-muted">{{ alert.processed_at.strftime('%b %d, %H:%M') if alert.processed_at else '' }}</small>
+                <small class="text-muted">
+                    {% if alert.source_published_at %}
+                        Published: {{ alert.source_published_at.strftime('%b %d, %Y %H:%M UTC') }}
+                    {% elif alert.processed_at %}
+                        Processed: {{ alert.processed_at.strftime('%b %d, %Y %H:%M UTC') }}
+                    {% endif %}
+                </small>
             </div>
         </div>
     </div>

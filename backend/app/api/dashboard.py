@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.alerts import publish_alert
 from app.auth import COOKIE_NAME, authenticate_user, create_access_token, get_current_user
 from app.database import get_db
 from app.models.event import Event, EventSource
@@ -68,6 +69,14 @@ async def login_submit(
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
+    if user.role != "admin":
+        return templates.TemplateResponse(
+            request,
+            "auth/login.html",
+            context={"error": "Admin access only. Use the API for subscriber login."},
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
     token = create_access_token({"sub": str(user.id)})
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
     response.set_cookie(
@@ -107,27 +116,43 @@ async def dashboard_index(
     except HTTPException:
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
-    # Base query for relevant alerts
+    if current_user.role != "admin":
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    # Base query for relevant alerts — unpublished first so review queue surfaces at top
     base_stmt = (
         select(ProcessedAlert)
         .where(ProcessedAlert.is_relevant.is_(True))
         .options(
             selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source)
         )
-        .order_by(ProcessedAlert.signal_score_total.desc().nullsfirst(), ProcessedAlert.processed_at.desc())
+        .order_by(
+            ProcessedAlert.is_published.asc(),  # unpublished (False) before published (True)
+            ProcessedAlert.signal_score_total.desc().nullsfirst(),
+            ProcessedAlert.processed_at.desc(),
+        )
     )
 
     if category:
         base_stmt = base_stmt.where(ProcessedAlert.primary_category == category)
 
-    base_stmt = base_stmt.offset(offset).limit(limit)
-    result = await db.execute(base_stmt)
-    all_alerts = result.scalars().all()
+    # M3 final risk bands (Ken-approved May 06) — match the displayed risk_level
+    # by filtering on signal_score_total ranges rather than the stored risk_level
+    # column (which can be stale on alerts processed before the band shift).
+    _high_filter = ProcessedAlert.signal_score_total >= 18
+    _medium_filter = (ProcessedAlert.signal_score_total >= 10) & (
+        ProcessedAlert.signal_score_total < 18
+    )
+    _low_filter = ProcessedAlert.signal_score_total < 10
 
-    # Separate by risk level
-    high_alerts = [a for a in all_alerts if a.risk_level == "high"]
-    medium_alerts = [a for a in all_alerts if a.risk_level == "medium"]
-    low_alerts = [a for a in all_alerts if a.risk_level == "low"]
+    async def _get_alerts_by_risk(level_filter):
+        stmt = base_stmt.where(level_filter).offset(offset).limit(limit)
+        result = await db.execute(stmt)
+        return result.scalars().all()
+
+    high_alerts = await _get_alerts_by_risk(_high_filter)
+    medium_alerts = await _get_alerts_by_risk(_medium_filter)
+    low_alerts = await _get_alerts_by_risk(_low_filter)
 
     # Stats
     count_result = await db.execute(
@@ -138,21 +163,21 @@ async def dashboard_index(
     high_count_result = await db.execute(
         select(func.count())
         .where(ProcessedAlert.is_relevant.is_(True))
-        .where(ProcessedAlert.risk_level == "high")
+        .where(_high_filter)
     )
     high_count = high_count_result.scalar() or 0
 
     medium_count_result = await db.execute(
         select(func.count())
         .where(ProcessedAlert.is_relevant.is_(True))
-        .where(ProcessedAlert.risk_level == "medium")
+        .where(_medium_filter)
     )
     medium_count = medium_count_result.scalar() or 0
 
     low_count_result = await db.execute(
         select(func.count())
         .where(ProcessedAlert.is_relevant.is_(True))
-        .where(ProcessedAlert.risk_level == "low")
+        .where(_low_filter)
     )
     low_count = low_count_result.scalar() or 0
 
@@ -179,6 +204,7 @@ async def dashboard_index(
             "signal_score_total": alert.signal_score_total,
             "matched_keywords": alert.matched_keywords or [],
             "processed_at": alert.processed_at,
+            "source_published_at": alert.raw_item.published_at if alert.raw_item else None,
             "item_url": alert.raw_item.item_url if alert.raw_item else None,
         }
 
@@ -197,6 +223,7 @@ async def dashboard_index(
                 "high_count": high_count,
                 "medium_count": medium_count,
                 "low_count": low_count,
+                "max_count": max(high_count, medium_count, low_count),
                 "total_events": total_events,
                 "processed_today": processed_today,
             },
@@ -223,6 +250,9 @@ async def dashboard_alert_detail(
     try:
         current_user = await get_current_user(request, db)
     except HTTPException:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    if current_user.role != "admin":
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
     result = await db.execute(
@@ -278,6 +308,7 @@ async def dashboard_alert_detail(
         "event_title": event_title,
         "review_status": review_status,
         "processed_at": alert.processed_at,
+        "source_published_at": alert.raw_item.published_at if alert.raw_item else None,
     }
 
     msg = request.query_params.get("msg")
@@ -308,6 +339,9 @@ async def dashboard_submit_review(
     except HTTPException:
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
+    if current_user.role != "admin":
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
     # Verify alert exists
     alert_result = await db.execute(
         select(ProcessedAlert).where(ProcessedAlert.id == alert_id)
@@ -330,10 +364,156 @@ async def dashboard_submit_review(
     if adjusted_risk_level:
         alert.risk_level = adjusted_risk_level.lower()
 
+    # Publish on approval — only if alert is relevant and not already published
+    if review_status == "approved" and alert.is_relevant and not alert.is_published:
+        publish_alert(alert, user_id=current_user.id)
+
     await db.commit()
     return RedirectResponse(
         url=f"/dashboard/alerts/{alert_id}?msg=Review+saved",
         status_code=status.HTTP_302_FOUND,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Events Hub view
+# ---------------------------------------------------------------------------
+
+
+@router.get("/dashboard/events", response_class=HTMLResponse)
+async def dashboard_events(
+    request: Request,
+    offset: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    try:
+        current_user = await get_current_user(request, db)
+    except HTTPException:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    if current_user.role != "admin":
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    # Base query for active events
+    base_stmt = select(Event).order_by(Event.last_updated_at.desc())
+
+    # Fetch paginated events
+    events_result = await db.execute(base_stmt.offset(offset).limit(limit))
+    events = events_result.scalars().all()
+
+    # Get total count
+    count_result = await db.execute(select(func.count()).select_from(Event))
+    total_events = count_result.scalar() or 0
+
+    # Get source counts for each event
+    # We can do this efficiently with a group by query
+    source_counts = {}
+    if events:
+        event_ids = [e.id for e in events]
+        count_stmt = (
+            select(
+                EventSource.event_id,
+                func.count(func.distinct(EventSource.source_name)).label("source_count")
+            )
+            .where(EventSource.event_id.in_(event_ids))
+            .group_by(EventSource.event_id)
+        )
+        counts_res = await db.execute(count_stmt)
+        for row in counts_res.all():
+            source_counts[row.event_id] = row.source_count
+
+    event_contexts = []
+    for event in events:
+        event_contexts.append({
+            "id": event.id,
+            "title": event.title,
+            "risk_level": event.risk_level,
+            "category": event.category,
+            "primary_entity": event.primary_entity,
+            "last_updated_at": event.last_updated_at,
+            "source_count": source_counts.get(event.id, 0)
+        })
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/events.html",
+        context={
+            "current_user": current_user,
+            "events": event_contexts,
+            "offset": offset,
+            "limit": limit,
+            "total_events": total_events,
+        },
+    )
+
+
+@router.get("/dashboard/events/{event_id}", response_class=HTMLResponse)
+async def dashboard_event_detail(
+    request: Request,
+    event_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    try:
+        current_user = await get_current_user(request, db)
+    except HTTPException:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    if current_user.role != "admin":
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    result = await db.execute(
+        select(Event)
+        .where(Event.id == event_id)
+        .options(
+            selectinload(Event.event_sources)
+            .selectinload(EventSource.alert)
+            .selectinload(ProcessedAlert.raw_item)
+            .selectinload(RawItem.source)
+        )
+    )
+    event = result.scalar_one_or_none()
+    if event is None:
+        return RedirectResponse(url="/dashboard/events", status_code=status.HTTP_302_FOUND)
+
+    # Extract all related alerts
+    alerts = []
+    for es in event.event_sources:
+        if es.alert:
+            alerts.append(es.alert)
+
+    # Sort alerts chronologically (oldest to newest for timeline view)
+    alerts.sort(key=lambda a: a.processed_at)
+
+    alert_contexts = []
+    for alert in alerts:
+        alert_contexts.append({
+            "id": alert.id,
+            "title": alert.raw_item.title if alert.raw_item else "Untitled",
+            "source_name": alert.raw_item.source.name if alert.raw_item and alert.raw_item.source else None,
+            "item_url": alert.raw_item.item_url if alert.raw_item else None,
+            "risk_level": alert.risk_level,
+            "processed_at": alert.processed_at,
+            "source_published_at": alert.raw_item.published_at if alert.raw_item else None,
+            "matched_keywords": alert.matched_keywords or [],
+        })
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/event_detail.html",
+        context={
+            "current_user": current_user,
+            "event": {
+                "id": event.id,
+                "title": event.title,
+                "risk_level": event.risk_level,
+                "category": event.category,
+                "primary_entity": event.primary_entity,
+                "first_detected_at": event.first_detected_at,
+                "last_updated_at": event.last_updated_at,
+            },
+            "alerts": alert_contexts,
+        },
     )
 
 
@@ -350,6 +530,9 @@ async def dashboard_monitoring(
     try:
         current_user = await get_current_user(request, db)
     except HTTPException:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    if current_user.role != "admin":
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
 
     # Get all sources

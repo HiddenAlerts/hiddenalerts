@@ -59,16 +59,21 @@ class AIArticleAnalysis(BaseModel):
     )
     victim_scale: Literal["single", "multiple", "nationwide"] = Field(
         description=(
-            "single = one company or individual targeted; "
-            "multiple = several victims or organizations; "
-            "nationwide = broad public, entire sector, or national-scale impact."
+            "single = one company or individual is the primary target; "
+            "multiple = a defined group of specific victims (e.g. dozens of investors, "
+            "a specific set of affected companies or individuals); "
+            "nationwide = explicitly described as affecting large numbers of consumers "
+            "nationwide, an entire industry sector, or millions of people. "
+            "Do NOT use nationwide for routine enforcement actions even from federal agencies. "
+            "When in doubt, prefer single or multiple over nationwide."
         )
     )
     is_relevant: bool = Field(
         description=(
-            "True if this article describes a specific fraud, scam, cybercrime, or "
-            "financial crime case. False if only tangentially related (e.g. pure policy "
-            "announcement with no specific fraud case described)."
+            "True if this article describes a specific financial fraud, scam, cybercrime, "
+            "identity theft, or money laundering case. False if it is a violent crime, terrorism, "
+            "national security, drug enforcement, or general law enforcement article with no clear "
+            "fraud or financial crime mechanism. False if it is a pure policy announcement."
         )
     )
 
@@ -103,6 +108,31 @@ SYSTEM_PROMPT = (
     "monitoring service. Your task is to analyze news articles and press releases from "
     "government agencies (SEC, FTC, FBI, DOJ, FinCEN, IC3) and cybersecurity publications "
     "(KrebsOnSecurity, BleepingComputer).\n\n"
+    "CRITICAL RELEVANCE RULES:\n"
+    "- HiddenAlerts is STRICTLY for fraud intelligence, not general crime monitoring.\n"
+    "- A relevant article MUST contain a clear fraud mechanism, financial abuse, scam, "
+    "money laundering, identity theft, or cyber fraud component.\n"
+    "- DO NOT mark an article relevant just because it contains words like 'charged', 'arrested', "
+    "'conspiracy', 'indictment', 'sentenced', 'scheme', or 'law enforcement'.\n"
+    "- Articles about violent crime, terrorism, national security, coup attempts, assassinations, "
+    "weapons, or murder MUST be marked is_relevant=False unless there is a clear and primary "
+    "financial fraud component.\n"
+    "- Use the 'Other' category sparingly.\n\n"
+    "FINANCIAL RISK INTELLIGENCE SCOPE:\n"
+    "- Regulatory / enforcement actions (SEC, DOJ, FinCEN, OFAC, FTC, IC3, FBI) ARE relevant when "
+    "tied to fraud, sanctions, financial misconduct, investor harm, market abuse, governance failure, "
+    "transparency failure, liquidity risk, money laundering, illicit finance, blocked entities, or "
+    "network exposure to known high-risk entities.\n"
+    "- Cybercrime IS relevant only when tied to fraud, extortion, identity theft, payment abuse, "
+    "data theft with financial risk, ransomware, phishing, account takeover, or direct business / "
+    "financial risk.\n"
+    "- Organized crime IS relevant only when tied to money laundering, fraud, illicit finance, "
+    "cyber fraud, or financial network exposure.\n"
+    "- General arrests, fugitives, violent crime, weapons, terrorism, national security, murder, "
+    "and routine law-enforcement news are NOT relevant without a clear financial risk or fraud "
+    "mechanism.\n"
+    "- When the financial / fraud connection is unclear or speculative, prefer is_relevant=False "
+    "so an admin can review.\n\n"
     "For each article:\n"
     "1. Provide a factual 3-5 sentence summary focused on: what fraud occurred, who was "
     "involved, financial and victim impact, and what action was taken.\n"
@@ -110,7 +140,7 @@ SYSTEM_PROMPT = (
     "3. Extract all named entities (persons, companies, domains, organizations).\n"
     "4. Estimate financial impact from dollar amounts, victim counts, or loss figures.\n"
     "5. Assess victim scale based on the described impact.\n"
-    "6. Confirm fraud relevance — some articles discuss policy without a specific case.\n\n"
+    "6. Confirm fraud relevance based on the critical relevance rules above.\n\n"
     "Be precise and factual. Do not infer information not present in the article."
 )
 

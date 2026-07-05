@@ -30,6 +30,7 @@ env/
 
 # IDE
 .idea/
+backend/.idea/
 .vscode/
 *.iml
 
@@ -57,4 +58,15 @@ mastery44u-attachments/
 # Alembic — only ignore cache, NOT the migration files themselves
 alembic/__pycache__/
 
-local/
+.local/
+data/
+
+# V1 candidate-backfill dry-run reports (contain alert ids / review decisions)
+reports/
+
+# Production DB backups / dumps — NEVER commit (M4 guardrail). data/ and reports/
+# above already cover review inputs and reports; these add backups + dump exts.
+backups/
+*.sql
+*.dump
+*.backup

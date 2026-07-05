@@ -1,0 +1,205 @@
+"""Subscriber-safe published alert endpoints — client surface.
+
+Only returns alerts where is_published = true. Authorization requires
+subscriber or admin role. Intentionally separate from the internal admin
+alert routes in alerts.py.
+
+Routes (registered under /api/v1 prefix):
+  GET /client/alerts          — paginated published alert feed
+  GET /client/alerts/{id}     — published alert detail (404 if unpublished)
+"""
+from __future__ import annotations
+
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.api._alert_enrichment import build_risk_explanation, risk_band_for
+from app.api._risk import risk_level_from_score, risk_score_100
+from app.auth import require_subscriber_or_admin
+from app.database import get_db
+from app.models.processed_alert import ProcessedAlert
+from app.models.raw_item import RawItem
+from app.models.source import Source
+from app.models.user import User
+from app.pipeline.publishing.constants import RISK_BANDS
+from app.schemas.alert import ClientAlertDetail, ClientAlertRead
+
+log = logging.getLogger(__name__)
+router = APIRouter(prefix="/client", tags=["client"])
+
+
+# Internal-score equivalents of Ken's M3 final 0–100 bands.
+_RISK_HIGH_INTERNAL = 18
+_RISK_MEDIUM_INTERNAL = 10
+
+# Internal-score equivalents of the V1 risk bands (risk_bands.py: 20/18/15).
+_BAND_CRITICAL_INTERNAL = 20
+_BAND_HIGH_INTERNAL = 18
+_BAND_MEDIUM_INTERNAL = 15
+
+
+def _score_filter_for_risk_level(risk_level: str):
+    """Return a SQLAlchemy filter that matches alerts whose *displayed* risk
+    level (derived from signal_score_total) equals the requested value. Mirrors
+    the helper in app/api/alerts.py to keep client and admin filtering aligned."""
+    norm = risk_level.lower().strip()
+    if norm == "high":
+        return ProcessedAlert.signal_score_total >= _RISK_HIGH_INTERNAL
+    if norm == "medium":
+        return (ProcessedAlert.signal_score_total >= _RISK_MEDIUM_INTERNAL) & (
+            ProcessedAlert.signal_score_total < _RISK_HIGH_INTERNAL
+        )
+    if norm == "low":
+        return ProcessedAlert.signal_score_total < _RISK_MEDIUM_INTERNAL
+    return ProcessedAlert.risk_level == norm
+
+
+def _score_filter_for_risk_band(risk_band: str):
+    """Filter by V1 risk band (OPEN-6) via the score range, so it works for both
+    post-V1 (stored band) and legacy (computed) alerts consistently."""
+    norm = risk_band.lower().strip()
+    if norm == "critical":
+        return ProcessedAlert.signal_score_total >= _BAND_CRITICAL_INTERNAL
+    if norm == "high":
+        return (ProcessedAlert.signal_score_total >= _BAND_HIGH_INTERNAL) & (
+            ProcessedAlert.signal_score_total < _BAND_CRITICAL_INTERNAL
+        )
+    if norm == "medium":
+        return (ProcessedAlert.signal_score_total >= _BAND_MEDIUM_INTERNAL) & (
+            ProcessedAlert.signal_score_total < _BAND_HIGH_INTERNAL
+        )
+    return ProcessedAlert.signal_score_total < _BAND_MEDIUM_INTERNAL  # below_60
+
+
+# ---------------------------------------------------------------------------
+# Helper: build subscriber-safe response objects from ORM
+# ---------------------------------------------------------------------------
+
+
+def _to_client_read(alert: ProcessedAlert) -> ClientAlertRead:
+    """Map ORM ProcessedAlert to ClientAlertRead (same join pattern as _alert_to_read)."""
+    title = source_name = item_url = None
+    source_published_at = None
+    if alert.raw_item:
+        title = alert.raw_item.title
+        item_url = alert.raw_item.item_url
+        source_published_at = alert.raw_item.published_at
+        if alert.raw_item.source:
+            source_name = alert.raw_item.source.name
+
+    # Re-derive risk_level from signal_score_total so subscriber views always
+    # reflect the M3 final 0–100 bands, even for alerts processed before the
+    # band shift. Falls back to stored value when score is missing.
+    derived_risk_level = (
+        risk_level_from_score(alert.signal_score_total) or alert.risk_level
+    )
+
+    return ClientAlertRead(
+        id=alert.id,
+        title=title,
+        source_name=source_name,
+        item_url=item_url,
+        risk_level=derived_risk_level,
+        # V1 band for the Critical/High/Medium badge (stored, computed fallback).
+        risk_band=risk_band_for(alert),
+        primary_category=alert.primary_category,
+        # `signal_score_total` is exposed on the 0–100 frontend scale.
+        signal_score_total=risk_score_100(alert.signal_score_total),
+        summary=alert.summary,
+        processed_at=alert.processed_at,
+        source_published_at=source_published_at,
+        published_at=alert.published_at,
+        matched_keywords=alert.matched_keywords,
+    )
+
+
+def _to_client_detail(alert: ProcessedAlert) -> ClientAlertDetail:
+    """Map ORM ProcessedAlert to ClientAlertDetail."""
+    base = _to_client_read(alert)
+    # Unwrap internal {"names": [...]} structure to a stable flat list
+    entities: list[str] = []
+    if isinstance(alert.entities_json, dict):
+        raw = alert.entities_json.get("names", [])
+        entities = [str(e) for e in raw if e] if isinstance(raw, list) else []
+
+    return ClientAlertDetail(
+        **base.model_dump(),
+        secondary_category=alert.secondary_category,
+        entities=entities,
+        risk_explanation=build_risk_explanation(alert),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/alerts", response_model=list[ClientAlertRead])
+async def list_client_alerts(
+    risk_level: str | None = Query(None, description="Filter by risk level: low, medium, high"),
+    risk_band: str | None = Query(None, description="Filter by V1 band: critical, high, medium, below_60"),
+    category: str | None = Query(None, description="Filter by primary_category"),
+    source: str | None = Query(None, description="Filter by source name (partial match, case-insensitive)"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_subscriber_or_admin),
+) -> list[ClientAlertRead]:
+    """Return published alerts visible to subscriber and admin users."""
+    if risk_band is not None and risk_band not in RISK_BANDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Invalid risk_band '{risk_band}'. Allowed: {sorted(RISK_BANDS)}",
+        )
+    stmt = (
+        select(ProcessedAlert)
+        .where(ProcessedAlert.is_published.is_(True))
+        .options(selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source))
+        .order_by(ProcessedAlert.published_at.desc().nullslast(), ProcessedAlert.processed_at.desc())
+    )
+
+    if source is not None:
+        stmt = (
+            stmt
+            .join(RawItem, RawItem.id == ProcessedAlert.raw_item_id)
+            .join(Source, Source.id == RawItem.source_id)
+            .where(Source.name.ilike(f"%{source}%"))
+        )
+
+    if risk_level is not None:
+        stmt = stmt.where(_score_filter_for_risk_level(risk_level))
+    if risk_band is not None:
+        stmt = stmt.where(_score_filter_for_risk_band(risk_band))
+    if category is not None:
+        stmt = stmt.where(ProcessedAlert.primary_category == category)
+
+    stmt = stmt.offset(offset).limit(limit)
+    result = await db.execute(stmt)
+    return [_to_client_read(a) for a in result.scalars().all()]
+
+
+@router.get("/alerts/{alert_id}", response_model=ClientAlertDetail)
+async def get_client_alert(
+    alert_id: int,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_subscriber_or_admin),
+) -> ClientAlertDetail:
+    """Return a single published alert. Returns 404 if unpublished or not found."""
+    result = await db.execute(
+        select(ProcessedAlert)
+        .where(ProcessedAlert.id == alert_id)
+        .where(ProcessedAlert.is_published.is_(True))
+        .options(selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source))
+    )
+    alert = result.scalar_one_or_none()
+    if alert is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Alert not found",
+        )
+    return _to_client_detail(alert)
