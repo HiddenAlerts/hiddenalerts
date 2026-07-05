@@ -247,6 +247,7 @@ async def test_update_cannot_set_status_or_featured(client, db_session):
 # ---------------------------------------------------------------------------
 
 _PUBLISHABLE = {
+    "category": "Fraud Intelligence",
     "risk_score": 90,
     "risk_level": "critical",
     "executive_summary": "<p>Executive summary</p>",

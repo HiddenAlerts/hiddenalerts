@@ -88,6 +88,15 @@ def _strip_html(value: str | None) -> str:
     return " ".join(text.split())
 
 
+def has_text_content(value: str | None) -> bool:
+    """Return True if there is real text once HTML tags are stripped.
+
+    Empty editor markup such as ``"<p><br></p>"`` or ``"<p></p>"`` reduces to no
+    text and is treated as empty, so it cannot satisfy a "field required" check.
+    """
+    return bool(_strip_html(value))
+
+
 def calculate_read_time(
     *text_fields: str | None,
     words_per_minute: int = DEFAULT_WORDS_PER_MINUTE,

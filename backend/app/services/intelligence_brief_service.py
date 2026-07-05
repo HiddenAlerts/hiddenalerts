@@ -34,6 +34,7 @@ from app.services.intelligence_brief_helpers import (
     calculate_read_time,
     count_supporting_alerts,
     generate_brief_code,
+    has_text_content,
     normalize_slug,
 )
 
@@ -426,13 +427,14 @@ def _validate_publishable(brief: IntelligenceBrief) -> None:
     """Check a brief carries the minimum content required to publish.
 
     Raises ``BriefPublishValidationError`` listing every missing/invalid field.
-    Category, confidence_level and key_signals are deliberately not required here
-    so lifecycle testing is not blocked; tighten this set if the content contract
-    changes.
+    Rich-text fields must contain real text once HTML is stripped, so empty
+    editor markup (e.g. ``"<p><br></p>"``) does not satisfy the requirement.
+    confidence_level and key_signals are deliberately not required here; tighten
+    this set if the content contract changes.
     """
     missing: list[str] = []
 
-    for field in ("title", "slug", "brief_code"):
+    for field in ("title", "slug", "brief_code", "category"):
         if not (getattr(brief, field) or "").strip():
             missing.append(field)
 
@@ -442,8 +444,7 @@ def _validate_publishable(brief: IntelligenceBrief) -> None:
         missing.append("risk_level")
 
     for field in _PUBLISH_REQUIRED_TEXT:
-        value = getattr(brief, field)
-        if not value or not value.strip():
+        if not has_text_content(getattr(brief, field)):
             missing.append(field)
 
     if missing:

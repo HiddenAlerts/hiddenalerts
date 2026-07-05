@@ -424,6 +424,7 @@ def _publishable(title: str = "Publishable brief", **overrides) -> IntelligenceB
     """A create payload carrying every field required to publish."""
     fields = dict(
         title=title,
+        category="Fraud Intelligence",
         risk_score=90,
         risk_level="critical",
         executive_summary="<p>Executive summary</p>",
@@ -482,13 +483,33 @@ async def test_publish_sets_updated_by(db_session):
     assert published.updated_by_user_id == user.id
 
 
-@pytest.mark.parametrize("missing_field", ["risk_score", "risk_level", "executive_summary", "main_intelligence_brief"])
+@pytest.mark.parametrize(
+    "missing_field",
+    ["category", "risk_score", "risk_level", "executive_summary", "main_intelligence_brief"],
+)
 @pytest.mark.asyncio
 async def test_publish_rejects_missing_required_field(db_session, missing_field):
     brief = await _make(db_session, **{missing_field: None})
     with pytest.raises(service.BriefPublishValidationError) as excinfo:
         await service.publish_brief(db_session, brief.id, user_id=None)
     assert missing_field in excinfo.value.fields
+
+
+@pytest.mark.parametrize("field", ["executive_summary", "main_intelligence_brief"])
+@pytest.mark.asyncio
+async def test_publish_rejects_empty_html_content(db_session, field):
+    # Empty editor markup carries no real text and must not satisfy the requirement.
+    brief = await _make(db_session, **{field: "<p><br></p>"})
+    with pytest.raises(service.BriefPublishValidationError) as excinfo:
+        await service.publish_brief(db_session, brief.id, user_id=None)
+    assert field in excinfo.value.fields
+
+
+@pytest.mark.asyncio
+async def test_publish_with_all_required_fields_succeeds(db_session):
+    brief = await _make(db_session)
+    published = await service.publish_brief(db_session, brief.id, user_id=None)
+    assert published.status == "published"
 
 
 @pytest.mark.asyncio
