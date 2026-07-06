@@ -837,7 +837,7 @@ The app container is named `hiddenalerts_app`. Public URL:
 SSH to the VPS, then from `/opt/hiddenalerts`:
 
 ```bash
-cd /opt/hiddenalerts
+docker compose build app
 
 # 1. Pull latest code
 git pull
