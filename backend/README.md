@@ -313,6 +313,123 @@ alembic revision --autogenerate -m "description"
 | `0004` | AI columns — adds `financial_impact_estimate`, `victim_scale_raw`, `ai_model`; seeds admin user |
 | `0005` | User roles — adds `role`, `full_name`, email preference flags, `last_login_at`; sets existing admin to `role='admin'` |
 | `0006` | Alert publication — adds `is_published`, `published_at`, `published_by_user_id` to processed_alerts; partial index on published rows |
+| `0007`–`0010` | Subscriber billing/subscriptions (Auth/Payment Phase 1) + V1 alert-publishing state |
+| `0011` | `intelligence_briefs` table — Intelligence Brief module (admin CMS + subscriber library); unique `slug`/`brief_code`, btree + GIN indexes |
+
+Current head: **`0011`**.
+
+---
+
+## Intelligence Brief — Production Deployment
+
+The Intelligence Brief module adds one dependency (`nh3`), migration `0011`, an
+admin-uploaded featured-image feature served from `/uploads`, and the
+`UPLOAD_DIR` setting. Deploying it on the VPS (`/opt/hiddenalerts`) requires a
+rebuild (new dependency), the migration, and a persistent uploads directory.
+
+**Persistent uploads:** `docker-compose.yml` bind-mounts
+`/opt/hiddenalerts/uploads` → `/app/uploads`, and production `.env` sets
+`UPLOAD_DIR=/app/uploads`. Featured images therefore live on the host and
+survive `--build` rebuilds. Keep the two in sync — the container path in the
+mount must equal `UPLOAD_DIR`.
+
+### Deploy steps
+
+```bash
+# 1. Pull latest code (git repo root)
+cd /opt/hiddenalerts
+git pull
+
+# Remaining commands run from the Compose project directory, where
+# docker-compose.yml and .env live.
+cd /opt/hiddenalerts/backend
+
+# 2. Ensure production .env has the uploads dir
+grep -q '^UPLOAD_DIR=' .env || echo 'UPLOAD_DIR=/app/uploads' >> .env
+#    UPLOAD_DIR must equal the container side of the bind mount (/app/uploads).
+
+# 3. Create the host uploads directory (parent of the module subdir)
+mkdir -p /opt/hiddenalerts/uploads/intelligence-briefs
+
+# 4. Safe permissions (do NOT use 777)
+chmod -R 755 /opt/hiddenalerts/uploads
+
+# 5. Rebuild (picks up the nh3 dependency and the /uploads mount)
+docker compose up -d --build
+
+# 6. Apply migrations
+docker compose exec app alembic upgrade head
+
+# 7. Confirm the head is 0011
+docker compose exec app alembic current      # -> 0011 (head)
+
+# 8. Health check
+curl -s https://api.hiddenalerts.com/api/v1/health
+```
+
+**Nginx:** featured-image uploads are capped at **5 MB** in the app. Ensure the
+API server block allows a slightly larger body so uploads aren't rejected before
+reaching FastAPI:
+
+```nginx
+client_max_body_size 6M;   # api.hiddenalerts.com server block
+```
+
+There is no Nginx config tracked in this repo, so apply this manually on the VPS.
+The `/uploads` path is a normal proxied GET (no special Nginx rules needed).
+
+### Production verification
+
+Use placeholders `<ADMIN_TOKEN>`, `<SUBSCRIBER_TOKEN>`, `<BRIEF_ID>`,
+`<FILENAME>`. These are read-only or non-destructive checks.
+
+```bash
+# Health + migration
+curl -s https://api.hiddenalerts.com/api/v1/health
+docker compose exec app alembic current            # 0011 (head)
+
+# Admin + subscriber lists reachable
+curl -s "https://api.hiddenalerts.com/api/v1/admin/intelligence-briefs?limit=5" \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+curl -s "https://api.hiddenalerts.com/api/v1/subscriber/intelligence-briefs?limit=5" \
+  -H "Authorization: Bearer <SUBSCRIBER_TOKEN>"
+
+# Upload a featured image, then open the returned URL against the API host
+curl -sX POST "https://api.hiddenalerts.com/api/v1/admin/intelligence-briefs/<BRIEF_ID>/featured-image" \
+  -H "Authorization: Bearer <ADMIN_TOKEN>" -F "file=@cover.jpg;type=image/jpeg"
+#   -> open https://api.hiddenalerts.com/uploads/intelligence-briefs/<FILENAME>.jpg
+
+# Persistence: rebuild, then re-open the same image URL (must still load)
+docker compose up -d --build
+```
+
+Read-only database checks:
+
+```bash
+docker compose exec db psql -U hiddenalerts -d hiddenalerts -c "\dt intelligence_briefs"
+
+docker compose exec db psql -U hiddenalerts -d hiddenalerts -c "
+SELECT status, risk_level, COUNT(*)
+FROM intelligence_briefs
+GROUP BY status, risk_level
+ORDER BY status, risk_level;"
+
+docker compose exec db psql -U hiddenalerts -d hiddenalerts -c "
+SELECT id, title, status, risk_level, is_featured, featured_image_url
+FROM intelligence_briefs
+ORDER BY id DESC
+LIMIT 10;"
+```
+
+Subscriber visibility spot-check: a published Critical/High brief appears in the
+subscriber list and by slug; draft/archived/Medium/Low briefs return 404 by slug
+and never appear in the list. OpenAPI at `/docs` lists both the admin and
+subscriber Intelligence Brief routes.
+
+> **Docs note:** `backend/docs/` (including `INTELLIGENCE_BRIEF_API_CONTRACT.md`)
+> is gitignored, so the API contract is not version-controlled by default. To
+> track it, `git add -f backend/docs/INTELLIGENCE_BRIEF_API_CONTRACT.md`, or keep
+> it as a shared file alongside the other V1 docs.
 
 ---
 

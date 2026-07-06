@@ -78,3 +78,6 @@ backups/
 
 backend/docs/
 backend/data/
+
+# Admin-uploaded featured images (bind-mounted into the app container in production)
+/uploads/

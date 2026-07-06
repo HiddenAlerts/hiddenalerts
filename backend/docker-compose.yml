@@ -22,6 +22,10 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
+    volumes:
+      # Persist admin-uploaded featured images across image rebuilds. The host
+      # path is easy to inspect and back up. Must match UPLOAD_DIR=/app/uploads.
+      - /opt/hiddenalerts/uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
