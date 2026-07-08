@@ -5,20 +5,28 @@ export const ADMIN_STATUS_OPTIONS = [
 ] as const;
 
 /** Form-only options (no "all" sentinel). */
+export const ADMIN_STATUS_FORM_OPTIONS = [
+  { value: 'draft', label: 'Draft' },
+  { value: 'published', label: 'Published' },
+] as const;
+
+/** Form-only options (no "all" sentinel). */
 export const ADMIN_RISK_LEVEL_FORM_OPTIONS = [
+  { value: 'critical', label: 'Critical' },
   { value: 'high', label: 'High' },
   { value: 'medium', label: 'Medium' },
   { value: 'low', label: 'Low' },
 ] as const;
 
-export const ADMIN_TIME_HORIZON_OPTIONS = [
-  { value: 'short-term', label: 'Short-term' },
-  { value: 'medium-term', label: 'Medium-term' },
-  { value: 'long-term', label: 'Long-term' },
+export const ADMIN_CONFIDENCE_LEVEL_OPTIONS = [
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
 ] as const;
 
 /** Category options without the "all" sentinel, for create/edit forms. */
 export const ADMIN_CATEGORY_FORM_OPTIONS = [
+  { value: 'Emerging Threat', label: 'Emerging Threat' },
   { value: 'Fraud', label: 'Fraud' },
   { value: 'Phishing', label: 'Phishing' },
   { value: 'Cybercrime', label: 'Cybercrime' },
@@ -31,6 +39,7 @@ export const ADMIN_CATEGORY_FORM_OPTIONS = [
 
 export const ADMIN_RISK_LEVEL_OPTIONS = [
   { value: 'all', label: 'All Risk Levels' },
+  { value: 'critical', label: 'Critical' },
   { value: 'high', label: 'High' },
   { value: 'medium', label: 'Medium' },
   { value: 'low', label: 'Low' },
@@ -38,6 +47,7 @@ export const ADMIN_RISK_LEVEL_OPTIONS = [
 
 export const ADMIN_CATEGORY_OPTIONS = [
   { value: 'all', label: 'All Categories' },
+  { value: 'Emerging Threat', label: 'Emerging Threat' },
   { value: 'Fraud', label: 'Fraud' },
   { value: 'Phishing', label: 'Phishing' },
   { value: 'Cybercrime', label: 'Cybercrime' },
@@ -60,7 +70,10 @@ export type AdminCategoryFilter =
 /**
  * Maps a numeric risk score to a coarse risk level used by the risk filter.
  */
-export function riskScoreToLevel(score: number): 'high' | 'medium' | 'low' {
+export function riskScoreToLevel(
+  score: number,
+): 'critical' | 'high' | 'medium' | 'low' {
+  if (score >= 90) return 'critical';
   if (score >= 80) return 'high';
   if (score >= 60) return 'medium';
   return 'low';

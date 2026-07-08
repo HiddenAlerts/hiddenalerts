@@ -1,14 +1,7 @@
+import { slugify } from '@/lib/utils';
 import type { AdminBrief } from '@/types/admin';
 
 import { riskScoreToLevel } from './adminFilterOptions';
-
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
-}
 
 type Seed = Pick<
   AdminBrief,
@@ -18,11 +11,10 @@ type Seed = Pick<
     Pick<
       AdminBrief,
       | 'slug'
-      | 'timeHorizon'
       | 'primaryEntities'
       | 'tags'
       | 'executiveSummary'
-      | 'keyIntelligence'
+      | 'keySignals'
       | 'riskAssessment'
     >
   >;
@@ -39,7 +31,7 @@ const SEED: Seed[] = [
     tags: ['Phishing', 'Social Engineering', 'Telecom Fraud'],
     executiveSummary:
       'Caller-as-a-Service (CaaS) platforms are being weaponized by fraudsters to launch large-scale scam campaigns. These operations are evading traditional telecom controls and enabling cross-border financial crime, identity theft, and social engineering at scale.',
-    keyIntelligence:
+    keySignals:
       'CaaS marketplaces resell pre-warmed numbers, voice cloning kits, and call center seats by the hour. Operators rotate carriers within minutes to avoid takedowns.',
     riskAssessment:
       'Banks and telcos with weak STIR/SHAKEN enforcement face the highest exposure. Expect a 2-3x growth in vishing-driven losses over the next two quarters.',
@@ -142,12 +134,18 @@ export const ADMIN_MOCK_BRIEFS: AdminBrief[] = SEED.map(s => ({
   riskLevel: riskScoreToLevel(s.riskScore),
   category: s.category,
   date: s.date,
-  timeHorizon: s.timeHorizon ?? 'short-term',
   primaryEntities: s.primaryEntities ?? [],
   tags: s.tags ?? [],
   executiveSummary: s.executiveSummary ?? '',
-  keyIntelligence: s.keyIntelligence ?? '',
+  whyThisMatters: '',
+  keySignals: s.keySignals ?? '',
   riskAssessment: s.riskAssessment ?? '',
+  whatOthersMiss: '',
+  implications: '',
+  mainBrief: '',
+  confidenceLevel: 'medium',
+  sources: [],
+  featured: false,
   status: s.status,
 }));
 

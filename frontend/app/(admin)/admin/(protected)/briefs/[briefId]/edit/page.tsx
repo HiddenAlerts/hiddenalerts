@@ -21,8 +21,8 @@ export default async function AdminBriefEditPage({
   return (
     <AdminBriefForm
       initial={brief}
-      title="Edit Brief"
-      subtitle="Update intelligence brief"
+      title="Edit Intelligence Brief"
+      subtitle="All fields marked with * are required."
       returnHref={`/admin/briefs/${brief.id}`}
     />
   );

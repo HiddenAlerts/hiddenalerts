@@ -1,24 +1,36 @@
 export type AdminPublishStatus = 'published' | 'draft';
 
-export type AdminRiskLevel = 'high' | 'medium' | 'low';
+export type AdminRiskLevel = 'critical' | 'high' | 'medium' | 'low';
 
-export type AdminTimeHorizon = 'short-term' | 'medium-term' | 'long-term';
+export type AdminConfidenceLevel = 'high' | 'medium' | 'low';
 
 export type AdminBrief = {
   id: string;
   title: string;
+  /** Derived from the title; not directly editable in the form. */
   slug: string;
+  category: string;
   riskScore: number;
   riskLevel: AdminRiskLevel;
-  category: string;
-  date: string;
-  timeHorizon: AdminTimeHorizon;
   primaryEntities: string[];
   tags: string[];
+  /** Local preview URL for the selected image (no upload backend yet). */
+  featuredImage?: string;
   executiveSummary: string;
-  keyIntelligence: string;
+  whyThisMatters: string;
+  keySignals: string;
   riskAssessment: string;
+  whatOthersMiss: string;
+  implications: string;
+  mainBrief: string;
+  confidenceLevel: AdminConfidenceLevel;
+  sources: string[];
+  featured: boolean;
   status: AdminPublishStatus;
+  /** Internal record date; not directly editable in the form. */
+  date: string;
+  /** Set automatically once the brief is published. */
+  publishedDate?: string;
 };
 
 export type AdminAlert = {
