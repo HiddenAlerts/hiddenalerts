@@ -16,6 +16,7 @@ import type {
   UpdateBriefPayload,
 } from '@/types/adminBriefsApi';
 
+import { resolveAssetUrl } from './assetUrl';
 import { apiDelete, apiGet, apiPost, apiPut, apiRequest } from './client';
 
 /**
@@ -61,7 +62,7 @@ export function mapApiBriefToAdminBrief(record: AdminBriefApiRecord): AdminBrief
     timeHorizon: (record.time_horizon as AdminTimeHorizon | null) ?? undefined,
     primaryEntities: record.primary_entities ?? [],
     tags: record.tags ?? [],
-    featuredImage: record.featured_image_url ?? undefined,
+    featuredImage: resolveAssetUrl(record.featured_image_url),
     executiveSummary: record.executive_summary ?? '',
     whyThisMatters: record.why_this_matters ?? '',
     keySignals: keySignalsArrayToHtml(record.key_signals ?? []),
@@ -100,7 +101,7 @@ export function mapApiBriefListItemToAdminBriefListItem(
     status: record.status as AdminPublishStatus,
     featured: record.is_featured,
     isPremium: record.is_premium,
-    featuredImage: record.featured_image_url ?? undefined,
+    featuredImage: resolveAssetUrl(record.featured_image_url),
     alertsCount: record.alerts_count,
     readTimeMinutes: record.read_time_minutes,
     publishedDate: record.published_at ?? undefined,

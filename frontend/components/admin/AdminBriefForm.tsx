@@ -42,6 +42,8 @@ import {
 } from 'react';
 import { toast } from 'sonner';
 
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+
 const EMPTY_BRIEF: AdminBrief = {
   id: '',
   briefCode: '',
@@ -148,6 +150,10 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
   }
 
   function handleImageSelect(file: File) {
+    if (file.size > MAX_IMAGE_BYTES) {
+      toast.error('That image is too large — please choose a file under 2MB.');
+      return;
+    }
     if (localPreviewUrlRef.current) URL.revokeObjectURL(localPreviewUrlRef.current);
     const url = URL.createObjectURL(file);
     localPreviewUrlRef.current = url;
@@ -391,6 +397,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
           value={imagePreview}
           onFileSelect={handleImageSelect}
           onRemove={handleImageRemove}
+          hint="Recommended size: 1200x675px. Max file size: 2MB."
         />
       </div>
 
