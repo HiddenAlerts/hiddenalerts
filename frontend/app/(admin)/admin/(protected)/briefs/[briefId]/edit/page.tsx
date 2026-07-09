@@ -1,7 +1,7 @@
-import { AdminBriefForm } from '@/components/admin';
-import { findAdminBrief } from '@/data/adminMockBriefs';
+import { AdminBriefEditScreen } from '@/components/admin';
+import { LoadingState } from '@/components/ui/LoadingState';
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import { Suspense } from 'react';
 
 type RouteParams = { briefId: string };
 
@@ -15,15 +15,9 @@ export default async function AdminBriefEditPage({
   params: Promise<RouteParams>;
 }) {
   const { briefId } = await params;
-  const brief = findAdminBrief(briefId);
-  if (!brief) notFound();
-
   return (
-    <AdminBriefForm
-      initial={brief}
-      title="Edit Intelligence Brief"
-      subtitle="All fields marked with * are required."
-      returnHref={`/admin/briefs/${brief.id}`}
-    />
+    <Suspense fallback={<LoadingState label="Loading brief…" />}>
+      <AdminBriefEditScreen briefId={briefId} />
+    </Suspense>
   );
 }

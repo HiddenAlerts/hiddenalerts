@@ -2,12 +2,7 @@ export const ADMIN_STATUS_OPTIONS = [
   { value: 'all', label: 'All Status' },
   { value: 'published', label: 'Published' },
   { value: 'draft', label: 'Draft' },
-] as const;
-
-/** Form-only options (no "all" sentinel). */
-export const ADMIN_STATUS_FORM_OPTIONS = [
-  { value: 'draft', label: 'Draft' },
-  { value: 'published', label: 'Published' },
+  { value: 'archived', label: 'Archived' },
 ] as const;
 
 /** Form-only options (no "all" sentinel). */
@@ -22,6 +17,13 @@ export const ADMIN_CONFIDENCE_LEVEL_OPTIONS = [
   { value: 'high', label: 'High' },
   { value: 'medium', label: 'Medium' },
   { value: 'low', label: 'Low' },
+] as const;
+
+export const ADMIN_TIME_HORIZON_OPTIONS = [
+  { value: 'immediate', label: 'Immediate' },
+  { value: 'near_term', label: 'Near-term' },
+  { value: 'medium_term', label: 'Medium-term' },
+  { value: 'long_term', label: 'Long-term' },
 ] as const;
 
 /** Category options without the "all" sentinel, for create/edit forms. */

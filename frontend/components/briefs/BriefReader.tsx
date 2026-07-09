@@ -3,6 +3,7 @@
 import { StatusTag } from '@/components';
 import { CONFIDENCE_LEVEL_LABEL, RISK_LEVEL_LABEL } from '@/lib/briefDetail';
 import { formatBriefDate } from '@/lib/briefs';
+import { TIPTAP_CONTENT_CLASSNAME } from '@/lib/tiptapContentStyles';
 import { cn } from '@/lib/utils';
 import type { BriefDetail } from '@/types/briefs';
 import { ArrowLeft, Eye, FileText, Share2, X } from 'lucide-react';
@@ -36,24 +37,9 @@ const RichSection: FC<{ title: string; html: string }> = ({ title, html }) => (
     </h2>
     {html ? (
       <div
-        className="text-body max-w-none text-sm leading-relaxed [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
+        className={cn('text-body max-w-none text-sm leading-relaxed', TIPTAP_CONTENT_CLASSNAME)}
         dangerouslySetInnerHTML={{ __html: html }}
       />
-    ) : (
-      <p className="text-muted text-sm italic">No content provided.</p>
-    )}
-  </div>
-);
-
-const PlainSection: FC<{ title: string; text: string }> = ({ title, text }) => (
-  <div>
-    <h2 className="font-heading text-foreground mb-2 text-lg font-semibold">
-      {title}
-    </h2>
-    {text ? (
-      <p className="text-body text-sm leading-relaxed whitespace-pre-line">
-        {text}
-      </p>
     ) : (
       <p className="text-muted text-sm italic">No content provided.</p>
     )}
@@ -158,6 +144,9 @@ export const BriefReader: FC<BriefReaderProps> = ({
               {brief.status === 'draft' ? (
                 <StatusTag tone="neutral">Draft</StatusTag>
               ) : null}
+              {brief.status === 'archived' ? (
+                <StatusTag tone="warning">Archived</StatusTag>
+              ) : null}
             </div>
 
             <h1 className="font-heading text-foreground text-2xl font-bold tracking-tight sm:text-3xl">
@@ -169,7 +158,7 @@ export const BriefReader: FC<BriefReaderProps> = ({
                 ? `Published: ${formatBriefDate(brief.publishedDate)}`
                 : 'Not yet published'}
               {' · '}
-              {brief.sources.length} Sources
+              {brief.supportingAlerts.length} Sources
             </p>
 
             {brief.primaryEntities.length > 0 ? (
@@ -208,8 +197,8 @@ export const BriefReader: FC<BriefReaderProps> = ({
             <RichSection title="Why This Matters" html={brief.whyThisMatters} />
             <RichSection title="Key Signals" html={brief.keySignals} />
             <RichSection title="Risk Assessment" html={brief.riskAssessment} />
-            <PlainSection title="What Others Miss" text={brief.whatOthersMiss} />
-            <PlainSection title="Implications" text={brief.implications} />
+            <RichSection title="What Others Miss" html={brief.whatOthersMiss} />
+            <RichSection title="Implications" html={brief.implications} />
             <RichSection title="Main Intelligence Brief" html={brief.mainBrief} />
           </div>
 
@@ -225,7 +214,7 @@ export const BriefReader: FC<BriefReaderProps> = ({
                 label="Confidence Level"
                 value={CONFIDENCE_LEVEL_LABEL[brief.confidenceLevel]}
               />
-              <MetaRow label="Sources" value={String(brief.sources.length)} />
+              <MetaRow label="Sources" value={String(brief.supportingAlerts.length)} />
             </div>
 
             {brief.tags.length > 0 ? (
@@ -247,15 +236,24 @@ export const BriefReader: FC<BriefReaderProps> = ({
               </div>
             ) : null}
 
-            {brief.sources.length > 0 ? (
+            {brief.supportingAlerts.length > 0 ? (
               <div>
                 <p className="text-foreground mb-2 flex items-center gap-1.5 text-sm font-semibold">
                   <FileText className="size-4" aria-hidden />
                   Sources
                 </p>
                 <ol className="text-body list-decimal space-y-1 pl-4 text-sm">
-                  {brief.sources.map((source, index) => (
-                    <li key={index}>{source}</li>
+                  {brief.supportingAlerts.map((alert, index) => (
+                    <li key={index}>
+                      <a
+                        href={alert.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:text-primary-400 underline"
+                      >
+                        {alert.title || alert.url}
+                      </a>
+                    </li>
                   ))}
                 </ol>
               </div>

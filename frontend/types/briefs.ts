@@ -59,6 +59,11 @@ export type BriefDetailRiskLevel = 'critical' | 'high' | 'medium' | 'low';
 
 export type BriefDetailConfidenceLevel = 'high' | 'medium' | 'low';
 
+export type BriefSupportingAlert = {
+  url: string;
+  title?: string;
+};
+
 /**
  * Full content for a single brief's reading view — the shape `BriefReader`
  * renders, regardless of whether the data came from the admin form or
@@ -84,7 +89,7 @@ export type BriefDetail = {
   whatOthersMiss: string;
   implications: string;
   mainBrief: string;
-  sources: string[];
-  status: 'draft' | 'published';
+  supportingAlerts: BriefSupportingAlert[];
+  status: 'draft' | 'published' | 'archived';
   publishedDate?: string;
 };

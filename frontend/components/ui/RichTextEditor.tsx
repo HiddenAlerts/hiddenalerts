@@ -1,16 +1,20 @@
 'use client';
 
+import { TIPTAP_CONTENT_CLASSNAME } from '@/lib/tiptapContentStyles';
 import { cn } from '@/lib/utils';
 import CharacterCount from '@tiptap/extension-character-count';
 import Placeholder from '@tiptap/extension-placeholder';
 import { EditorContent, type Editor, useEditor } from '@tiptap/react';
+import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import {
   Bold,
+  ExternalLink,
   Italic,
   Link as LinkIcon,
   List,
   ListOrdered,
+  Pencil,
   Quote,
   Underline as UnderlineIcon,
   Unlink,
@@ -192,6 +196,109 @@ function Toolbar({ editor }: { editor: Editor | null }) {
   );
 }
 
+const bubbleButtonClass =
+  'text-muted hover:bg-surface-muted hover:text-foreground inline-flex size-7 items-center justify-center rounded transition-colors';
+
+/**
+ * Floating menu shown when the cursor is inside a link: preview (open in a
+ * new tab), edit the URL inline, or remove the link.
+ */
+function LinkBubbleMenu({ editor, pluginKey }: { editor: Editor; pluginKey: string }) {
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [draftUrl, setDraftUrl] = React.useState('');
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  function openLink() {
+    const href = editor.getAttributes('link').href as string | undefined;
+    if (href) window.open(href, '_blank', 'noopener,noreferrer');
+  }
+
+  function startEditing() {
+    setDraftUrl((editor.getAttributes('link').href as string | undefined) ?? '');
+    setIsEditing(true);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  function saveEditing() {
+    const url = draftUrl.trim();
+    if (url) {
+      editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+    } else {
+      editor.chain().focus().extendMarkRange('link').unsetLink().run();
+    }
+    setIsEditing(false);
+  }
+
+  function removeLink() {
+    editor.chain().focus().extendMarkRange('link').unsetLink().run();
+    setIsEditing(false);
+  }
+
+  return (
+    <BubbleMenu
+      editor={editor}
+      pluginKey={pluginKey}
+      shouldShow={({ editor }) => editor.isActive('link')}
+      options={{ placement: 'bottom', offset: 8, onHide: () => setIsEditing(false) }}
+      className="border-border bg-surface flex items-center gap-0.5 rounded-md border p-1 shadow-lg"
+    >
+      {isEditing ? (
+        <form
+          onSubmit={e => {
+            e.preventDefault();
+            saveEditing();
+          }}
+          className="flex items-center gap-1"
+        >
+          <input
+            ref={inputRef}
+            value={draftUrl}
+            onChange={e => setDraftUrl(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Escape') setIsEditing(false);
+            }}
+            placeholder="https://…"
+            className="text-body bg-transparent w-52 px-1.5 py-1 text-xs focus:outline-none"
+          />
+          <button
+            type="submit"
+            className="text-primary-400 hover:text-primary-300 px-1.5 text-xs font-semibold"
+          >
+            Save
+          </button>
+        </form>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={openLink}
+            aria-label="Open link in new tab"
+            className={bubbleButtonClass}
+          >
+            <ExternalLink className="size-3.5" aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={startEditing}
+            aria-label="Edit link"
+            className={bubbleButtonClass}
+          >
+            <Pencil className="size-3.5" aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={removeLink}
+            aria-label="Remove link"
+            className={cn(bubbleButtonClass, 'hover:text-danger')}
+          >
+            <Unlink className="size-3.5" aria-hidden />
+          </button>
+        </>
+      )}
+    </BubbleMenu>
+  );
+}
+
 /**
  * Tiptap-based rich text field styled to match `Input`/`Textarea`. Stores
  * content as an HTML string via `onChange`.
@@ -235,15 +342,7 @@ export function RichTextEditor({
           'font-manrope text-body max-w-none px-3 py-2.5 text-sm focus:outline-none',
           '[&_p]:my-1 [&_p.is-editor-empty:first-child::before]:text-muted',
           "[&_p.is-editor-empty:first-child::before]:pointer-events-none [&_p.is-editor-empty:first-child::before]:float-left [&_p.is-editor-empty:first-child::before]:h-0 [&_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)]",
-          '[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5',
-          '[&_blockquote]:border-border [&_blockquote]:text-muted [&_blockquote]:border-l-2 [&_blockquote]:pl-3',
-          '[&_a]:text-primary-400 [&_a]:underline',
-          '[&_h1]:text-foreground [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h1]:text-2xl [&_h1]:font-semibold',
-          '[&_h2]:text-foreground [&_h2]:mt-3 [&_h2]:mb-1.5 [&_h2]:text-xl [&_h2]:font-semibold',
-          '[&_h3]:text-foreground [&_h3]:mt-2.5 [&_h3]:mb-1 [&_h3]:text-lg [&_h3]:font-semibold',
-          '[&_h4]:text-foreground [&_h4]:mt-2 [&_h4]:mb-1 [&_h4]:text-base [&_h4]:font-semibold',
-          '[&_h5]:text-foreground [&_h5]:mt-2 [&_h5]:mb-1 [&_h5]:text-sm [&_h5]:font-semibold',
-          '[&_h6]:text-foreground [&_h6]:mt-2 [&_h6]:mb-1 [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:tracking-wide [&_h6]:uppercase',
+          TIPTAP_CONTENT_CLASSNAME,
           minHeightClassName,
         ),
       },
@@ -293,6 +392,9 @@ export function RichTextEditor({
       >
         <Toolbar editor={editor} />
         <EditorContent editor={editor} />
+        {editor ? (
+          <LinkBubbleMenu editor={editor} pluginKey={`link-bubble-${fieldId}`} />
+        ) : null}
         {showWordCount ? (
           <div className="border-border text-muted flex justify-end border-t px-3 py-1.5 text-xs">
             {wordCount} words

@@ -8,10 +8,12 @@ import { labelSize } from './input';
 
 export type ImageUploadProps = {
   label?: string;
-  /** Preview URL for the currently selected image, if any. */
+  /** Preview URL for the currently selected image, if any (server URL or local preview). */
   value?: string;
-  /** Called with a local object URL when a new file is chosen. */
-  onChange: (url: string | undefined) => void;
+  /** Called with the raw file the user picked — the parent owns upload/preview. */
+  onFileSelect: (file: File) => void;
+  /** Called when the user removes the current image. */
+  onRemove: () => void;
   hint?: string;
   id?: string;
   parentStyles?: string;
@@ -20,13 +22,15 @@ export type ImageUploadProps = {
 
 /**
  * Featured image picker: shows a preview with "Change Image"/remove
- * controls. Selecting a file only creates a local object URL preview —
- * there is no upload backend wired up yet.
+ * controls. Purely controlled — the parent decides what `value` to show and
+ * what happens with the selected `File`/removal (e.g. uploading it, or just
+ * previewing until the brief is saved).
  */
 export function ImageUpload({
   label = 'Featured Image',
   value,
-  onChange,
+  onFileSelect,
+  onRemove,
   hint = 'Recommended size: 1200x675px',
   id,
   parentStyles,
@@ -35,30 +39,11 @@ export function ImageUpload({
   const uid = React.useId();
   const fieldId = id ?? `image-upload-${uid}`;
   const inputRef = React.useRef<HTMLInputElement>(null);
-  const objectUrlRef = React.useRef<string | undefined>(undefined);
-
-  React.useEffect(
-    () => () => {
-      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-    },
-    [],
-  );
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
-
-    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-    const url = URL.createObjectURL(file);
-    objectUrlRef.current = url;
-    onChange(url);
-  }
-
-  function handleRemove() {
-    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-    objectUrlRef.current = undefined;
-    onChange(undefined);
+    if (file) onFileSelect(file);
   }
 
   return (
@@ -76,7 +61,7 @@ export function ImageUpload({
           )}
         >
           {value ? (
-            // Local preview only (object URL / data URL); no remote host to optimize via next/image.
+            // Local preview or server-hosted URL; no fixed remote host to optimize via next/image.
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={value}
@@ -101,7 +86,7 @@ export function ImageUpload({
             <button
               type="button"
               disabled={disabled}
-              onClick={handleRemove}
+              onClick={onRemove}
               aria-label="Remove featured image"
               className="border-border bg-surface text-muted hover:text-danger hover:border-danger/40 inline-flex size-9 items-center justify-center rounded-md border transition-colors disabled:pointer-events-none disabled:opacity-40"
             >

@@ -58,7 +58,7 @@ export function adminBriefToDetail(brief: AdminBrief): BriefDetail {
     whatOthersMiss: brief.whatOthersMiss,
     implications: brief.implications,
     mainBrief: brief.mainBrief,
-    sources: brief.sources,
+    supportingAlerts: brief.supportingAlerts,
     status: brief.status,
     publishedDate: brief.publishedDate,
   };

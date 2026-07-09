@@ -8,33 +8,49 @@ import {
   PageHeader,
   RichTextEditor,
   Select,
-  SourcesInput,
+  StatusTag,
+  SupportingAlertsInput,
   Switch,
   TagsInput,
-  Textarea,
 } from '@/components';
 import { BriefReader } from '@/components/briefs';
 import {
   ADMIN_CATEGORY_FORM_OPTIONS,
   ADMIN_CONFIDENCE_LEVEL_OPTIONS,
   ADMIN_RISK_LEVEL_FORM_OPTIONS,
-  ADMIN_STATUS_FORM_OPTIONS,
+  ADMIN_TIME_HORIZON_OPTIONS,
 } from '@/data/adminFilterOptions';
+import {
+  useArchiveAdminBriefMutation,
+  usePublishAdminBriefMutation,
+  useSaveAdminBriefMutation,
+  useSetAdminBriefFeaturedMutation,
+} from '@/hooks';
+import { getApiErrorMessage } from '@/lib/api/queryError';
 import { adminBriefToDetail } from '@/lib/briefDetail';
 import { slugify } from '@/lib/utils';
-import type { AdminBrief } from '@/types/admin';
-import { Eye, Feather, FileEdit } from 'lucide-react';
+import type { AdminBrief, AdminPublishStatus } from '@/types/admin';
+import { Archive, Eye, Feather, FileEdit } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { type FC, type FormEvent, useState } from 'react';
+import {
+  type FC,
+  type FormEvent,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import { toast } from 'sonner';
 
 const EMPTY_BRIEF: AdminBrief = {
   id: '',
+  briefCode: '',
   title: '',
   slug: '',
   category: ADMIN_CATEGORY_FORM_OPTIONS[0].value,
   riskScore: 0,
   riskLevel: 'low',
+  timeHorizon: 'immediate',
   primaryEntities: [],
   tags: [],
   featuredImage: undefined,
@@ -45,11 +61,16 @@ const EMPTY_BRIEF: AdminBrief = {
   whatOthersMiss: '',
   implications: '',
   mainBrief: '',
+  analystNotes: '',
   confidenceLevel: 'medium',
-  sources: [],
+  supportingAlerts: [],
   featured: false,
+  isPremium: false,
   status: 'draft',
-  date: new Date().toISOString().slice(0, 10),
+  alertsCount: 0,
+  readTimeMinutes: 0,
+  createdAt: '',
+  updatedAt: '',
 };
 
 export type AdminBriefFormProps = {
@@ -59,7 +80,7 @@ export type AdminBriefFormProps = {
   title?: string;
   /** Header subtitle. */
   subtitle?: string;
-  /** Where to navigate when the user saves/publishes/cancels. */
+  /** Where to navigate when the user saves/publishes/archives/cancels. */
   returnHref?: string;
 };
 
@@ -69,9 +90,23 @@ const SECTION_CLASSNAME =
 const SECTION_HEADING_CLASSNAME =
   'font-heading text-foreground text-sm font-semibold tracking-wide uppercase';
 
+const STATUS_TONE: Record<AdminPublishStatus, 'success' | 'neutral' | 'warning'> = {
+  published: 'success',
+  draft: 'neutral',
+  archived: 'warning',
+};
+
+const STATUS_LABEL: Record<AdminPublishStatus, string> = {
+  published: 'Published',
+  draft: 'Draft',
+  archived: 'Archived',
+};
+
 /**
- * Shared form for both creating and editing a brief. State is local — saving
- * is a no-op for now (UI only) and just navigates back to the briefs list.
+ * Shared form for both creating and editing a brief, wired to the real
+ * admin API. Status only changes via the dedicated Publish/Archive actions
+ * (the backend has no editable `status` field), and Featured only changes
+ * via its own feature/unfeature call once the brief has been saved.
  */
 export const AdminBriefForm: FC<AdminBriefFormProps> = ({
   initial,
@@ -82,6 +117,28 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
   const router = useRouter();
   const [brief, setBrief] = useState<AdminBrief>(initial ?? EMPTY_BRIEF);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<
+    'draft' | 'publish' | 'archive' | null
+  >(null);
+
+  const [imageFile, setImageFile] = useState<File | undefined>();
+  const [imagePreview, setImagePreview] = useState<string | undefined>(
+    initial?.featuredImage,
+  );
+  const [removeImage, setRemoveImage] = useState(false);
+  const localPreviewUrlRef = useRef<string | undefined>(undefined);
+
+  useEffect(
+    () => () => {
+      if (localPreviewUrlRef.current) URL.revokeObjectURL(localPreviewUrlRef.current);
+    },
+    [],
+  );
+
+  const saveMutation = useSaveAdminBriefMutation();
+  const publishMutation = usePublishAdminBriefMutation();
+  const archiveMutation = useArchiveAdminBriefMutation();
+  const featureMutation = useSetAdminBriefFeaturedMutation();
 
   const update = <K extends keyof AdminBrief>(key: K, value: AdminBrief[K]) =>
     setBrief(prev => ({ ...prev, [key]: value }));
@@ -90,25 +147,99 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
     setBrief(prev => ({ ...prev, title: nextTitle, slug: slugify(nextTitle) }));
   }
 
-  function handleStatusChange(nextStatus: AdminBrief['status']) {
-    setBrief(prev => ({
-      ...prev,
-      status: nextStatus,
-      publishedDate:
-        nextStatus === 'published'
-          ? (prev.publishedDate ?? new Date().toISOString().slice(0, 10))
-          : prev.publishedDate,
-    }));
+  function handleImageSelect(file: File) {
+    if (localPreviewUrlRef.current) URL.revokeObjectURL(localPreviewUrlRef.current);
+    const url = URL.createObjectURL(file);
+    localPreviewUrlRef.current = url;
+    setImageFile(file);
+    setImagePreview(url);
+    setRemoveImage(false);
   }
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  function handleImageRemove() {
+    if (localPreviewUrlRef.current) URL.revokeObjectURL(localPreviewUrlRef.current);
+    localPreviewUrlRef.current = undefined;
+    setImageFile(undefined);
+    setImagePreview(undefined);
+    setRemoveImage(true);
+  }
+
+  /** Create-or-update, then upload/remove the image if it changed. Returns the saved brief on success. */
+  async function persist(): Promise<AdminBrief | undefined> {
+    try {
+      const saved = await saveMutation.mutateAsync({
+        brief,
+        imageFile,
+        removeImage,
+      });
+      setBrief(saved);
+      setImagePreview(saved.featuredImage);
+      setImageFile(undefined);
+      setRemoveImage(false);
+      return saved;
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Could not save the brief.'));
+      return undefined;
+    }
+  }
+
+  async function handleSave() {
+    setPendingAction('draft');
+    const saved = await persist();
+    setPendingAction(null);
+    if (saved) {
+      toast.success(saved.status === 'published' ? 'Changes saved.' : 'Draft saved.');
+      router.push(returnHref);
+    }
+  }
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    router.push(returnHref);
+    setPendingAction('publish');
+    const saved = await persist();
+    if (saved) {
+      try {
+        await publishMutation.mutateAsync(saved.id);
+        toast.success('Brief published.');
+        router.push(returnHref);
+      } catch (err) {
+        toast.error(getApiErrorMessage(err, 'Could not publish the brief.'));
+      }
+    }
+    setPendingAction(null);
   }
 
-  function handleSaveDraft() {
-    router.push(returnHref);
+  async function handleArchive() {
+    if (!brief.id) return;
+    setPendingAction('archive');
+    try {
+      await archiveMutation.mutateAsync(brief.id);
+      toast.success('Brief archived.');
+      router.push(returnHref);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Could not archive the brief.'));
+    }
+    setPendingAction(null);
   }
+
+  function handleFeaturedToggle(next: boolean) {
+    if (!brief.id) return;
+    featureMutation.mutate(
+      { briefId: brief.id, featured: next },
+      {
+        onSuccess: saved => {
+          setBrief(prev => ({ ...prev, featured: saved.featured }));
+          toast.success(next ? 'Marked as featured.' : 'Removed from featured.');
+        },
+        onError: err =>
+          toast.error(getApiErrorMessage(err, 'Could not update featured state.')),
+      },
+    );
+  }
+
+  const canArchive = Boolean(brief.id) && brief.status !== 'archived';
+  const canPublish = brief.status !== 'published';
+  const saveLabel = brief.status === 'published' ? 'Save Changes' : 'Save Draft';
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -120,47 +251,61 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
           <>
             <div className="flex items-center gap-2">
               <span className="text-muted text-sm font-medium">Status</span>
-              <Select
-                aria-label="Status"
-                options={ADMIN_STATUS_FORM_OPTIONS}
-                value={brief.status}
-                onChange={e =>
-                  handleStatusChange(e.target.value as AdminBrief['status'])
-                }
-                parentStyles="w-32"
-              />
+              <StatusTag tone={STATUS_TONE[brief.status]}>
+                {STATUS_LABEL[brief.status]}
+              </StatusTag>
             </div>
             <Button
               type="button"
               size="sm"
               variant="outline"
-              onClick={handleSaveDraft}
+              loading={pendingAction === 'draft'}
+              disabled={pendingAction !== null}
+              onClick={handleSave}
             >
-              Save Draft
+              {saveLabel}
             </Button>
             <Button
               type="button"
               size="sm"
               variant="outline"
+              disabled={pendingAction !== null}
               onClick={() => setPreviewOpen(true)}
               leftIcon={<Eye className="size-4" aria-hidden />}
             >
               Preview
             </Button>
-            <Button
-              type="submit"
-              size="sm"
-              leftIcon={<Feather className="size-4" aria-hidden />}
-            >
-              Publish Brief
-            </Button>
+            {canArchive ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                loading={pendingAction === 'archive'}
+                disabled={pendingAction !== null}
+                onClick={handleArchive}
+                leftIcon={<Archive className="size-4" aria-hidden />}
+              >
+                Archive
+              </Button>
+            ) : null}
+            {canPublish ? (
+              <Button
+                type="submit"
+                size="sm"
+                loading={pendingAction === 'publish'}
+                disabled={pendingAction !== null}
+                leftIcon={<Feather className="size-4" aria-hidden />}
+              >
+                Publish Brief
+              </Button>
+            ) : null}
           </>
         }
       />
 
       <Modal open={previewOpen} onClose={() => setPreviewOpen(false)}>
         <BriefReader
-          brief={adminBriefToDetail(brief)}
+          brief={adminBriefToDetail({ ...brief, featuredImage: imagePreview })}
           topBar="preview"
           onClose={() => setPreviewOpen(false)}
         />
@@ -215,6 +360,16 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
           />
         </div>
 
+        <Select
+          label="Time Horizon"
+          options={ADMIN_TIME_HORIZON_OPTIONS}
+          value={brief.timeHorizon ?? 'immediate'}
+          onChange={e =>
+            update('timeHorizon', e.target.value as AdminBrief['timeHorizon'])
+          }
+          parentStyles="sm:max-w-xs"
+        />
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <TagsInput
             label="Primary Entities"
@@ -233,8 +388,9 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         </div>
 
         <ImageUpload
-          value={brief.featuredImage}
-          onChange={url => update('featuredImage', url)}
+          value={imagePreview}
+          onFileSelect={handleImageSelect}
+          onRemove={handleImageRemove}
         />
       </div>
 
@@ -275,19 +431,17 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
             onChange={html => update('riskAssessment', html)}
             placeholder="Assess the risk, potential impact and likelihood…"
           />
-          <Textarea
+          <RichTextEditor
             label="What Others Miss"
             value={brief.whatOthersMiss}
-            onChange={e => update('whatOthersMiss', e.target.value)}
+            onChange={html => update('whatOthersMiss', html)}
             placeholder="Key angles, behaviors or implications overlooked…"
-            rows={3}
           />
-          <Textarea
+          <RichTextEditor
             label="Implications"
             value={brief.implications}
-            onChange={e => update('implications', e.target.value)}
+            onChange={html => update('implications', html)}
             placeholder="Potential impact and consequences…"
-            rows={3}
           />
         </div>
 
@@ -322,9 +476,15 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
                 )
               }
             />
-            <SourcesInput
-              value={brief.sources}
-              onChange={next => update('sources', next)}
+            <SupportingAlertsInput
+              value={brief.supportingAlerts}
+              onChange={next => update('supportingAlerts', next)}
+            />
+            <RichTextEditor
+              label="Analyst Notes"
+              value={brief.analystNotes}
+              onChange={html => update('analystNotes', html)}
+              placeholder="Internal notes — never shown to subscribers…"
             />
           </div>
 
@@ -335,24 +495,27 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
               </span>
               <Switch
                 checked={brief.featured}
-                onChange={next => update('featured', next)}
+                onChange={handleFeaturedToggle}
+                disabled={!brief.id || featureMutation.isPending}
                 label="Display as the featured brief on the subscriber library"
               />
               <p className="text-muted mt-1.5 text-xs">
-                Only one brief can be featured at a time.
+                {brief.id
+                  ? 'Only one brief can be featured at a time.'
+                  : 'Save the brief first to feature it.'}
               </p>
             </div>
 
-            <Select
-              label="Status"
-              required
-              addAsterisk
-              options={ADMIN_STATUS_FORM_OPTIONS}
-              value={brief.status}
-              onChange={e =>
-                handleStatusChange(e.target.value as AdminBrief['status'])
-              }
-            />
+            <div>
+              <span className="text-body mb-2 block text-sm font-medium">
+                Premium Content
+              </span>
+              <Switch
+                checked={brief.isPremium}
+                onChange={next => update('isPremium', next)}
+                label="Gate this brief behind a premium subscription"
+              />
+            </div>
           </div>
         </div>
 

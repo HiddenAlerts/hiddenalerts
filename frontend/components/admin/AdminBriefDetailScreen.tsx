@@ -1,12 +1,12 @@
 'use client';
 
-import { Button, PageHeader } from '@/components';
+import { Button, EmptyState, ErrorState, LoadingState, PageHeader } from '@/components';
 import { BriefReader } from '@/components/briefs';
-import { findAdminBrief } from '@/data/adminMockBriefs';
+import { useAdminBriefDetailQuery } from '@/hooks';
+import { getApiErrorMessage } from '@/lib/api/queryError';
 import { adminBriefToDetail } from '@/lib/briefDetail';
 import { ArrowLeft, Pencil } from 'lucide-react';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import type { FC } from 'react';
 
 export type AdminBriefDetailScreenProps = {
@@ -21,16 +21,36 @@ export type AdminBriefDetailScreenProps = {
 export const AdminBriefDetailScreen: FC<AdminBriefDetailScreenProps> = ({
   briefId,
 }) => {
-  const brief = findAdminBrief(briefId);
+  const { data: brief, isPending, isError, error, refetch } =
+    useAdminBriefDetailQuery(briefId);
+
+  if (isPending) {
+    return <LoadingState label="Loading brief…" />;
+  }
+
+  if (isError) {
+    return (
+      <ErrorState
+        message={getApiErrorMessage(error, 'Unable to load this brief. Please try again.')}
+        onRetry={() => void refetch()}
+      />
+    );
+  }
+
   if (!brief) {
-    notFound();
+    return (
+      <EmptyState
+        title="Brief not found"
+        description="This brief is not available right now."
+      />
+    );
   }
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={brief.title}
-        subtitle={`/${brief.slug}`}
+        subtitle={`${brief.briefCode} · /${brief.slug}`}
         actions={
           <>
             <Link

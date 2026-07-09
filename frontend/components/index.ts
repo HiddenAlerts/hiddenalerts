@@ -19,12 +19,16 @@ export {
 } from './ui/RichTextEditor';
 export { ScoreBadge, type ScoreBadgeProps } from './ui/ScoreBadge';
 export { Select, type SelectOption, type SelectProps } from './ui/Select';
-export { SourcesInput, type SourcesInputProps } from './ui/SourcesInput';
 export {
   StatusTag,
   type StatusTagProps,
   type StatusTone,
 } from './ui/StatusTag';
+export {
+  SupportingAlertsInput,
+  type SupportingAlertsInputProps,
+  type SupportingAlertValue,
+} from './ui/SupportingAlertsInput';
 export { Switch, type SwitchProps } from './ui/Switch';
 export { default as Tag } from './ui/Tag/Tag';
 export { TagsInput, type TagsInputProps } from './ui/TagsInput';

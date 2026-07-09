@@ -1,20 +1,34 @@
-export type AdminPublishStatus = 'published' | 'draft';
+export type AdminPublishStatus = 'draft' | 'published' | 'archived';
 
 export type AdminRiskLevel = 'critical' | 'high' | 'medium' | 'low';
 
 export type AdminConfidenceLevel = 'high' | 'medium' | 'low';
 
+export type AdminTimeHorizon =
+  | 'immediate'
+  | 'near_term'
+  | 'medium_term'
+  | 'long_term';
+
+export type AdminSupportingAlert = {
+  url: string;
+  title?: string;
+};
+
 export type AdminBrief = {
   id: string;
+  /** Human-readable identifier assigned by the backend, e.g. "IB-2026-0042". */
+  briefCode: string;
   title: string;
   /** Derived from the title; not directly editable in the form. */
   slug: string;
   category: string;
   riskScore: number;
   riskLevel: AdminRiskLevel;
+  timeHorizon?: AdminTimeHorizon;
   primaryEntities: string[];
   tags: string[];
-  /** Local preview URL for the selected image (no upload backend yet). */
+  /** Server-hosted URL once uploaded via the dedicated image endpoint. */
   featuredImage?: string;
   executiveSummary: string;
   whyThisMatters: string;
@@ -23,14 +37,40 @@ export type AdminBrief = {
   whatOthersMiss: string;
   implications: string;
   mainBrief: string;
+  /** Internal, admin-only notes — never shown to subscribers. */
+  analystNotes: string;
   confidenceLevel: AdminConfidenceLevel;
-  sources: string[];
+  supportingAlerts: AdminSupportingAlert[];
   featured: boolean;
+  /** Gates the brief behind a premium subscription tier. */
+  isPremium: boolean;
   status: AdminPublishStatus;
-  /** Internal record date; not directly editable in the form. */
-  date: string;
+  alertsCount: number;
+  readTimeMinutes: number;
+  createdAt: string;
+  updatedAt: string;
   /** Set automatically once the brief is published. */
   publishedDate?: string;
+};
+
+/** Lightweight row shape for the admin briefs table (list endpoint only). */
+export type AdminBriefListItem = {
+  id: string;
+  briefCode: string;
+  title: string;
+  slug: string;
+  category: string;
+  riskScore: number;
+  riskLevel: AdminRiskLevel;
+  status: AdminPublishStatus;
+  featured: boolean;
+  isPremium: boolean;
+  featuredImage?: string;
+  alertsCount: number;
+  readTimeMinutes: number;
+  publishedDate?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AdminAlert = {
@@ -43,7 +83,7 @@ export type AdminAlert = {
   /** ID of a related brief, if any. */
   briefId?: string;
   tags: string[];
-  status: AdminPublishStatus;
+  status: 'published' | 'draft';
 };
 
 export type AdminSubscriber = {

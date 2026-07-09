@@ -2,6 +2,10 @@ export { AdminAlertDetailScreen } from './AdminAlertDetailScreen';
 export { AdminAlertForm, type AdminAlertFormProps } from './AdminAlertForm';
 export { AdminAlertsScreen } from './AdminAlertsScreen';
 export { AdminBriefDetailScreen } from './AdminBriefDetailScreen';
+export {
+  AdminBriefEditScreen,
+  type AdminBriefEditScreenProps,
+} from './AdminBriefEditScreen';
 export { AdminBriefForm, type AdminBriefFormProps } from './AdminBriefForm';
 export { AdminBriefsScreen } from './AdminBriefsScreen';
 export {

@@ -36,12 +36,12 @@ const SUBSCRIBER_BRIEF_DETAILS: Record<string, BriefDetail> = {
       'Organizations should extend insider-threat monitoring to include public prediction-market activity correlated with employee access levels, and update NDAs/codes of conduct to explicitly cover market participation on covered topics.',
     mainBrief:
       '<p>Prediction markets have moved from niche curiosities to platforms with meaningful daily liquidity across political, corporate, and regulatory outcomes. This shift changes the incentive calculus for anyone with early access to material information.</p><p>Unlike traditional insider trading, which requires a security with a identifiable issuer and regulator, prediction market contracts on arbitrary events fall into a much greyer enforcement zone. Several recent cases have shown coordinated positioning shortly before public disclosures, with position sizes and timing that are difficult to explain as coincidence.</p><p>Security and compliance teams should treat this as a new insider-threat surface, not merely a market-integrity issue for the platforms themselves.</p>',
-    sources: [
-      'Public Report — FinCEN — Emerging Payment Risk Advisory 2026',
-      'News Article — Reuters — Prediction Market Trading Surge',
-      'Regulatory Filing — CFTC Enforcement Notice',
-      'Academic Study — Market Microstructure and Information Leakage',
-      'Company Filing — Platform Transparency Report Q1 2026',
+    supportingAlerts: [
+      { url: '#', title: 'Public Report — FinCEN — Emerging Payment Risk Advisory 2026' },
+      { url: '#', title: 'News Article — Reuters — Prediction Market Trading Surge' },
+      { url: '#', title: 'Regulatory Filing — CFTC Enforcement Notice' },
+      { url: '#', title: 'Academic Study — Market Microstructure and Information Leakage' },
+      { url: '#', title: 'Company Filing — Platform Transparency Report Q1 2026' },
     ],
     featuredImage: undefined,
     status: 'published',
@@ -74,12 +74,12 @@ const SUBSCRIBER_BRIEF_DETAILS: Record<string, BriefDetail> = {
       'Financial institutions should treat scam-compound typologies as a distinct AML category with dedicated transaction-monitoring rules, and coordinate with law enforcement on victim-fund recovery windows.',
     mainBrief:
       '<p>What began as isolated scam operations in Southeast Asia has matured into a networked criminal industry with standardized playbooks, shared infrastructure, and cross-border logistics for both money and trafficked labor.</p><p>Compounds now specialize by scam type — romance fraud, crypto investment fraud, task-based scams — and share victim lead lists between operations. Payment flows are structured to minimize any single point of failure, with funds moving through multiple exchanges and shell entities before settling.</p><p>Enforcement actions against individual compounds have had limited lasting effect, as the underlying network reconstitutes quickly under new corporate shells.</p>',
-    sources: [
-      'Public Report — UNODC — Cyber Scam Report 2024',
-      'News Article — Reuters — Transnational Scam Networks',
-      'Company Filing — FinCEN SAR — 2026-1883',
-      'NGO Report — Trafficking Recovery Coalition',
-      'News Article — AP — Scam Compound Raids',
+    supportingAlerts: [
+      { url: '#', title: 'Public Report — UNODC — Cyber Scam Report 2024' },
+      { url: '#', title: 'News Article — Reuters — Transnational Scam Networks' },
+      { url: '#', title: 'Company Filing — FinCEN SAR — 2026-1883' },
+      { url: '#', title: 'NGO Report — Trafficking Recovery Coalition' },
+      { url: '#', title: 'News Article — AP — Scam Compound Raids' },
     ],
     featuredImage: undefined,
     status: 'published',
@@ -112,12 +112,12 @@ const SUBSCRIBER_BRIEF_DETAILS: Record<string, BriefDetail> = {
       'Threat-intel teams should track infrastructure and tooling overlap across nominally separate campaigns rather than relying solely on attribution labels to drive response prioritization.',
     mainBrief:
       '<p>The traditional separation between nation-state espionage, cybercrime, and influence operations is eroding. Several recent campaigns show the same infrastructure supporting financially-motivated ransomware, politically-timed leaks, and coordinated social media narratives.</p><p>This blending is likely deliberate: it provides plausible deniability and lets state sponsors outsource operational risk to criminal proxies while retaining strategic control over targeting and timing.</p><p>Defenders should prioritize infrastructure-level correlation over attribution-first triage, since the same toolset may serve multiple objectives simultaneously.</p>',
-    sources: [
-      'Government Advisory — CISA Joint Advisory',
-      'Public Report — Mandiant Threat Intelligence',
-      'News Article — Reuters — State-Aligned Cyber Campaign',
-      'Academic Study — Hybrid Threats Research Center',
-      'Company Filing — Incident Disclosure Report',
+    supportingAlerts: [
+      { url: '#', title: 'Government Advisory — CISA Joint Advisory' },
+      { url: '#', title: 'Public Report — Mandiant Threat Intelligence' },
+      { url: '#', title: 'News Article — Reuters — State-Aligned Cyber Campaign' },
+      { url: '#', title: 'Academic Study — Hybrid Threats Research Center' },
+      { url: '#', title: 'Company Filing — Incident Disclosure Report' },
     ],
     featuredImage: undefined,
     status: 'published',
@@ -150,11 +150,11 @@ const SUBSCRIBER_BRIEF_DETAILS: Record<string, BriefDetail> = {
       'Help-desk verification procedures should require an out-of-band callback to a known-good number rather than caller-provided context, and internal org-chart data should be treated as sensitive.',
     mainBrief:
       '<p>A wave of intrusions has traced back not to malware or exploited software, but to phone calls: attackers impersonating IT staff convince employees or help-desk agents to reset credentials or approve MFA prompts.</p><p>What distinguishes recent campaigns is the depth of pre-attack research — callers reference real employee names, recent projects, and internal terminology, likely sourced from previous breaches, LinkedIn, and leaked internal documents.</p><p>Because the attack targets a human process rather than a technical control, conventional security tooling has limited visibility until after credentials are already reset.</p>',
-    sources: [
-      'Government Advisory — FBI IC3 Alert',
-      'Public Report — CrowdStrike Threat Report',
-      'News Article — Bleeping Computer — Help Desk Social Engineering',
-      'Company Filing — Breach Disclosure',
+    supportingAlerts: [
+      { url: '#', title: 'Government Advisory — FBI IC3 Alert' },
+      { url: '#', title: 'Public Report — CrowdStrike Threat Report' },
+      { url: '#', title: 'News Article — Bleeping Computer — Help Desk Social Engineering' },
+      { url: '#', title: 'Company Filing — Breach Disclosure' },
     ],
     featuredImage: undefined,
     status: 'published',
@@ -187,12 +187,12 @@ const SUBSCRIBER_BRIEF_DETAILS: Record<string, BriefDetail> = {
       'Program administrators should weight vendor operating history and conflict-of-interest disclosures more heavily in award scoring, and require independent delivery verification before milestone payments.',
     mainBrief:
       '<p>Government innovation programs, designed to move quickly and take on early-stage risk, have become a recurring target for procurement fraud. The same features that make these programs attractive to legitimate innovators — reduced red tape, fast award cycles — also reduce the friction fraud schemes must overcome.</p><p>Recent cases show patterns of collusion between reviewers and applicant entities, shell vendors with no verifiable operating history, and subcontracting arrangements designed to obscure where funds ultimately land.</p><p>Strengthening vendor vetting without materially slowing award timelines is the central policy challenge going forward.</p>',
-    sources: [
-      'Government Advisory — Inspector General Report',
-      'News Article — Reuters — Grant Fraud Investigation',
-      'Public Report — GAO Procurement Risk Assessment',
-      'Company Filing — Vendor Debarment Notice',
-      'Academic Study — Public Procurement Integrity Review',
+    supportingAlerts: [
+      { url: '#', title: 'Government Advisory — Inspector General Report' },
+      { url: '#', title: 'News Article — Reuters — Grant Fraud Investigation' },
+      { url: '#', title: 'Public Report — GAO Procurement Risk Assessment' },
+      { url: '#', title: 'Company Filing — Vendor Debarment Notice' },
+      { url: '#', title: 'Academic Study — Public Procurement Integrity Review' },
     ],
     featuredImage: undefined,
     status: 'published',
@@ -225,11 +225,11 @@ const SUBSCRIBER_BRIEF_DETAILS: Record<string, BriefDetail> = {
       'Cross-state data-sharing consortia and shared device/IP risk signals would materially reduce the window these networks currently exploit.',
     mainBrief:
       '<p>Benefit program fraud has shifted from opportunistic individual claims to organized, multi-state enrollment operations using synthetic and stolen identities at scale.</p><p>These networks exploit the fact that most program integrity controls operate within a single state or agency, with limited real-time visibility into enrollment patterns elsewhere. By rotating across jurisdictions, they stay ahead of any single administrator\'s fraud detection capacity.</p><p>Improved cross-jurisdiction data sharing, rather than stronger controls within any one program, is likely the highest-leverage intervention.</p>',
-    sources: [
-      'Government Advisory — OIG Fraud Alert',
-      'News Article — AP — Benefit Fraud Ring',
-      'Public Report — State Auditor Findings',
-      'Company Filing — Program Integrity Report',
+    supportingAlerts: [
+      { url: '#', title: 'Government Advisory — OIG Fraud Alert' },
+      { url: '#', title: 'News Article — AP — Benefit Fraud Ring' },
+      { url: '#', title: 'Public Report — State Auditor Findings' },
+      { url: '#', title: 'Company Filing — Program Integrity Report' },
     ],
     featuredImage: undefined,
     status: 'published',
@@ -262,12 +262,12 @@ const SUBSCRIBER_BRIEF_DETAILS: Record<string, BriefDetail> = {
       'Compliance and fraud teams should track emerging federal reporting standards now, ahead of mandatory adoption timelines, to avoid rushed integration work later.',
     mainBrief:
       '<p>As fraud losses continue to scale faster than individual institutions can counter alone, federal authorities are investing in shared infrastructure — centralized detection platforms, expanded data-sharing agreements, and faster interagency coordination.</p><p>This represents a structural shift from institution-by-institution fraud defense toward a networked model, similar to how anti-money-laundering information sharing evolved over the past two decades.</p><p>Early movers who align their internal fraud-data practices with the emerging standards will face a smoother transition than those who wait for mandatory compliance deadlines.</p>',
-    sources: [
-      'Government Advisory — Treasury Fraud Infrastructure Announcement',
-      'News Article — Reuters — Federal Fraud Task Force Expansion',
-      'Public Report — GAO Fraud Risk Assessment',
-      'Company Filing — Industry Comment Letter',
-      'Academic Study — Interagency Data Sharing Review',
+    supportingAlerts: [
+      { url: '#', title: 'Government Advisory — Treasury Fraud Infrastructure Announcement' },
+      { url: '#', title: 'News Article — Reuters — Federal Fraud Task Force Expansion' },
+      { url: '#', title: 'Public Report — GAO Fraud Risk Assessment' },
+      { url: '#', title: 'Company Filing — Industry Comment Letter' },
+      { url: '#', title: 'Academic Study — Interagency Data Sharing Review' },
     ],
     featuredImage: undefined,
     status: 'published',
@@ -300,11 +300,11 @@ const SUBSCRIBER_BRIEF_DETAILS: Record<string, BriefDetail> = {
       'Institutions should supplement document verification with behavioral and device-based signals rather than relying on document authenticity checks alone.',
     mainBrief:
       '<p>Identity theft has moved well beyond opportunistic individual fraud into an industrialized operation with specialized roles: document forgers, account creators, and cash-out operators working in coordinated sequence across state lines.</p><p>The quality of forged identity documents has improved to the point that many pass standard automated verification, forcing a rethink of identity proofing as a single point of control.</p><p>Layering behavioral and device signals on top of document checks is increasingly necessary to catch what document verification alone now misses.</p>',
-    sources: [
-      'Government Advisory — FTC Identity Theft Report',
-      'News Article — Reuters — Identity Fraud Ring Takedown',
-      'Public Report — Identity Theft Resource Center',
-      'Company Filing — Fraud Loss Disclosure',
+    supportingAlerts: [
+      { url: '#', title: 'Government Advisory — FTC Identity Theft Report' },
+      { url: '#', title: 'News Article — Reuters — Identity Fraud Ring Takedown' },
+      { url: '#', title: 'Public Report — Identity Theft Resource Center' },
+      { url: '#', title: 'Company Filing — Fraud Loss Disclosure' },
     ],
     featuredImage: undefined,
     status: 'published',
@@ -337,11 +337,11 @@ const SUBSCRIBER_BRIEF_DETAILS: Record<string, BriefDetail> = {
       'Financial institutions should train staff to recognize the behavioral signs of an active romance-fraud relationship, not just transaction anomalies, and design intervention scripts that account for victim resistance.',
     mainBrief:
       '<p>Romance fraud operations have refined their approach into a scripted, multi-month process: initial contact, relationship building, a fabricated crisis, and a request for funds — repeated with variations across thousands of victims simultaneously.</p><p>Because trust is built gradually and reinforced continuously, victims often actively defend the fraudster against warnings from banks or family members, having already invested significant emotional commitment.</p><p>Effective intervention requires recognizing the relationship-building phase itself, well before any request for money is made.</p>',
-    sources: [
-      'Government Advisory — FBI IC3 Elder Fraud Report',
-      'News Article — AP — Romance Scam Network',
-      'NGO Report — Elder Fraud Prevention Alliance',
-      'Company Filing — Suspicious Activity Report Summary',
+    supportingAlerts: [
+      { url: '#', title: 'Government Advisory — FBI IC3 Elder Fraud Report' },
+      { url: '#', title: 'News Article — AP — Romance Scam Network' },
+      { url: '#', title: 'NGO Report — Elder Fraud Prevention Alliance' },
+      { url: '#', title: 'Company Filing — Suspicious Activity Report Summary' },
     ],
     featuredImage: undefined,
     status: 'published',
@@ -374,11 +374,11 @@ const SUBSCRIBER_BRIEF_DETAILS: Record<string, BriefDetail> = {
       'Telecom providers and financial institutions should prioritize disrupting the platform layer (number pools, voice-cloning tooling) over chasing individual campaigns.',
     mainBrief:
       '<p>Caller-as-a-Service (CaaS) platforms have industrialized vishing fraud by offering pre-warmed phone numbers, voice-cloning kits, and rented call-center seats as an on-demand service, billed by the hour or per campaign.</p><p>This model means the underlying infrastructure survives even when individual fraud campaigns are disrupted — operators simply rotate carriers and numbers within minutes, and the platform continues serving other customers.</p><p>Institutions with weak STIR/SHAKEN enforcement or limited caller-authentication controls face the highest exposure as this model continues to scale.</p>',
-    sources: [
-      'Public Report — UNODC — Cyber Scam Report 2024',
-      'News Article — Reuters — Transnational Scam Networks',
-      'Company Filing — FinCEN SAR — 2026-1883',
-      'News Article — Bleeping Computer — Vishing-as-a-Service',
+    supportingAlerts: [
+      { url: '#', title: 'Public Report — UNODC — Cyber Scam Report 2024' },
+      { url: '#', title: 'News Article — Reuters — Transnational Scam Networks' },
+      { url: '#', title: 'Company Filing — FinCEN SAR — 2026-1883' },
+      { url: '#', title: 'News Article — Bleeping Computer — Vishing-as-a-Service' },
     ],
     featuredImage: undefined,
     status: 'published',
@@ -411,11 +411,11 @@ const SUBSCRIBER_BRIEF_DETAILS: Record<string, BriefDetail> = {
       'Victim support organizations and institutions should proactively warn prior crypto-fraud victims about recovery scams rather than waiting for new complaints.',
     mainBrief:
       '<p>Years after the peak of several major cryptocurrency fraud schemes, victims continue to face limited and inconsistent paths to financial recovery, complicated by cross-border jurisdiction issues and the difficulty of tracing laundered crypto assets.</p><p>A secondary fraud wave has emerged targeting this same victim population: operators posing as asset-recovery specialists who charge upfront fees for recovery services that never materialize.</p><p>Because victims are often reluctant to report being defrauded twice, this secondary wave remains significantly underreported relative to its actual scale.</p>',
-    sources: [
-      'Government Advisory — SEC Investor Alert',
-      'News Article — Reuters — Crypto Recovery Scams',
-      'NGO Report — Fraud Victim Support Network',
-      'Public Report — Chainalysis Crime Report',
+    supportingAlerts: [
+      { url: '#', title: 'Government Advisory — SEC Investor Alert' },
+      { url: '#', title: 'News Article — Reuters — Crypto Recovery Scams' },
+      { url: '#', title: 'NGO Report — Fraud Victim Support Network' },
+      { url: '#', title: 'Public Report — Chainalysis Crime Report' },
     ],
     featuredImage: undefined,
     status: 'published',

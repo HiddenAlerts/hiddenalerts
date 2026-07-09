@@ -4,40 +4,42 @@ import {
   Button,
   DataTable,
   type DataTableColumn,
+  ErrorState,
+  LoadingState,
   PageHeader,
   ScoreBadge,
   StatusTag,
 } from '@/components';
-import { ADMIN_MOCK_BRIEFS } from '@/data/adminMockBriefs';
 import {
   ADMIN_CATEGORY_OPTIONS,
   ADMIN_RISK_LEVEL_OPTIONS,
   ADMIN_STATUS_OPTIONS,
-  riskScoreToLevel,
 } from '@/data/adminFilterOptions';
+import { ADMIN_BRIEFS_PAGE_SIZE, useAdminBriefsListQuery } from '@/hooks';
+import { getApiErrorMessage } from '@/lib/api/queryError';
 import { formatAdminDate } from '@/lib/formatAdminDate';
-import type { AdminBrief } from '@/types/admin';
+import type { AdminBriefListItem, AdminPublishStatus } from '@/types/admin';
 import { Plus } from 'lucide-react';
 import Link from 'next/link';
-import { type FC, useMemo, useState } from 'react';
+import { type FC, useState } from 'react';
 
 import { AdminPagination } from './AdminPagination';
 import { AdminRowActions } from './AdminRowActions';
 import { AdminTableToolbar } from './AdminTableToolbar';
 
-const PAGE_SIZE = 5;
-
-const STATUS_TONE = {
+const STATUS_TONE: Record<AdminPublishStatus, 'success' | 'neutral' | 'warning'> = {
   published: 'success',
   draft: 'neutral',
-} as const;
+  archived: 'warning',
+};
 
-const STATUS_LABEL = {
+const STATUS_LABEL: Record<AdminPublishStatus, string> = {
   published: 'Published',
   draft: 'Draft',
-} as const;
+  archived: 'Archived',
+};
 
-const columns: DataTableColumn<AdminBrief>[] = [
+const columns: DataTableColumn<AdminBriefListItem>[] = [
   {
     id: 'title',
     header: 'Title',
@@ -67,7 +69,9 @@ const columns: DataTableColumn<AdminBrief>[] = [
     id: 'date',
     header: 'Date',
     cell: row => (
-      <span className="text-muted tabular-nums">{formatAdminDate(row.date)}</span>
+      <span className="text-muted tabular-nums">
+        {formatAdminDate(row.publishedDate ?? row.createdAt)}
+      </span>
     ),
     className: 'w-[140px]',
   },
@@ -96,27 +100,15 @@ export const AdminBriefsScreen: FC = () => {
   const [category, setCategory] = useState<string>('all');
   const [page, setPage] = useState(1);
 
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return ADMIN_MOCK_BRIEFS.filter(brief => {
-      if (term && !brief.title.toLowerCase().includes(term)) return false;
-      if (status !== 'all' && brief.status !== status) return false;
-      if (risk !== 'all' && riskScoreToLevel(brief.riskScore) !== risk)
-        return false;
-      if (category !== 'all' && brief.category !== category) return false;
-      return true;
-    });
-  }, [search, status, risk, category]);
-
-  const total = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const rows = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return filtered.slice(start, start + PAGE_SIZE);
-  }, [filtered, currentPage]);
-
   const resetPage = () => setPage(1);
+
+  const { data, isPending, isError, error, refetch } = useAdminBriefsListQuery({
+    page,
+    status,
+    risk,
+    category,
+    search,
+  });
 
   return (
     <div className="space-y-6">
@@ -177,20 +169,31 @@ export const AdminBriefsScreen: FC = () => {
         ]}
       />
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        rowKey={row => row.id}
-        emptyMessage="No briefs match your filters."
-      />
+      {isError ? (
+        <ErrorState
+          message={getApiErrorMessage(error, 'Unable to load briefs. Please try again.')}
+          onRetry={() => void refetch()}
+        />
+      ) : isPending ? (
+        <LoadingState label="Loading briefs…" />
+      ) : (
+        <>
+          <DataTable
+            columns={columns}
+            rows={data?.items ?? []}
+            rowKey={row => row.id}
+            emptyMessage="No briefs match your filters."
+          />
 
-      <AdminPagination
-        page={currentPage}
-        pageSize={PAGE_SIZE}
-        totalItems={total}
-        itemLabel="briefs"
-        onPageChange={setPage}
-      />
+          <AdminPagination
+            page={page}
+            pageSize={ADMIN_BRIEFS_PAGE_SIZE}
+            totalItems={data?.total ?? 0}
+            itemLabel="briefs"
+            onPageChange={setPage}
+          />
+        </>
+      )}
     </div>
   );
 };
