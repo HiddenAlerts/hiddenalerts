@@ -10,6 +10,7 @@ export { EmptyState, type EmptyStateProps } from './ui/EmptyState';
 export { ErrorState, type ErrorStateProps } from './ui/ErrorState';
 export { ImageUpload, type ImageUploadProps } from './ui/ImageUpload';
 export { LoadingState, type LoadingStateProps } from './ui/LoadingState';
+export { Modal, type ModalProps } from './ui/Modal';
 export { Input, inputVariants, labelSize, type InputProps } from './ui/input';
 export { PageHeader, type PageHeaderProps } from './ui/PageHeader';
 export {

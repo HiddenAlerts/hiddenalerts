@@ -4,6 +4,7 @@ import {
   Button,
   ImageUpload,
   Input,
+  Modal,
   PageHeader,
   RichTextEditor,
   Select,
@@ -12,15 +13,17 @@ import {
   TagsInput,
   Textarea,
 } from '@/components';
+import { BriefReader } from '@/components/briefs';
 import {
   ADMIN_CATEGORY_FORM_OPTIONS,
   ADMIN_CONFIDENCE_LEVEL_OPTIONS,
   ADMIN_RISK_LEVEL_FORM_OPTIONS,
   ADMIN_STATUS_FORM_OPTIONS,
 } from '@/data/adminFilterOptions';
+import { adminBriefToDetail } from '@/lib/briefDetail';
 import { slugify } from '@/lib/utils';
 import type { AdminBrief } from '@/types/admin';
-import { Feather, FileEdit } from 'lucide-react';
+import { Eye, Feather, FileEdit } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { type FC, type FormEvent, useState } from 'react';
@@ -78,6 +81,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
 }) => {
   const router = useRouter();
   const [brief, setBrief] = useState<AdminBrief>(initial ?? EMPTY_BRIEF);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const update = <K extends keyof AdminBrief>(key: K, value: AdminBrief[K]) =>
     setBrief(prev => ({ ...prev, [key]: value }));
@@ -135,15 +139,32 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
               Save Draft
             </Button>
             <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setPreviewOpen(true)}
+              leftIcon={<Eye className="size-4" aria-hidden />}
+            >
+              Preview
+            </Button>
+            <Button
               type="submit"
               size="sm"
               leftIcon={<Feather className="size-4" aria-hidden />}
             >
-              Publish
+              Publish Brief
             </Button>
           </>
         }
       />
+
+      <Modal open={previewOpen} onClose={() => setPreviewOpen(false)}>
+        <BriefReader
+          brief={adminBriefToDetail(brief)}
+          topBar="preview"
+          onClose={() => setPreviewOpen(false)}
+        />
+      </Modal>
 
       {/* 1. Basic Information */}
       <div className={SECTION_CLASSNAME}>

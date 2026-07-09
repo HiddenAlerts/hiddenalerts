@@ -4,14 +4,12 @@ import type {
   SubscriberBrief,
 } from '@/types/briefs';
 
-/** Detail route is not built yet; link back to the library for now. */
-const BRIEF_HREF = '/briefs';
-
 /**
  * Curated mock briefs powering the subscriber Intelligence Brief Library.
  * Ordered newest-first. Risk labels are derived from the score in `lib/briefs`.
+ * `href` is derived from `slug` below, once the full object (with `slug`) exists.
  */
-export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = [
+const SUBSCRIBER_MOCK_BRIEFS_SEED: Omit<SubscriberBrief, 'href'>[] = [
   {
     id: 'brief-prediction-markets',
     slug: 'prediction-markets-insider-threat',
@@ -29,7 +27,6 @@ export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = [
     featured: true,
     summary:
       'Rapidly growing prediction markets are creating financial incentives for insiders to leak sensitive information, introducing novel national security and insider-threat exposure.',
-    href: BRIEF_HREF,
   },
   {
     id: 'brief-industrial-scam-centers',
@@ -46,7 +43,6 @@ export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = [
     isNew: true,
     summary:
       'Scam compounds are professionalizing into transnational enterprises with corporate structures, recruitment pipelines, and layered money-laundering operations.',
-    href: BRIEF_HREF,
   },
   {
     id: 'brief-nation-state-blend',
@@ -63,7 +59,6 @@ export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = [
     isNew: true,
     summary:
       'State-aligned actors are fusing cyber intrusions, influence operations, and criminal proxies, blurring the line between espionage and organized crime.',
-    href: BRIEF_HREF,
   },
   {
     id: 'brief-it-impersonation',
@@ -79,7 +74,6 @@ export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = [
     sourceCount: 4,
     summary:
       'Attackers are posing as internal IT and help-desk staff to socially engineer employees, reset credentials, and bypass MFA at scale.',
-    href: BRIEF_HREF,
   },
   {
     id: 'brief-government-innovation',
@@ -95,7 +89,6 @@ export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = [
     sourceCount: 5,
     summary:
       'Large government innovation and grant programs are being exploited through collusion, shell vendors, and procurement fraud.',
-    href: BRIEF_HREF,
   },
   {
     id: 'brief-enrollment-fraud',
@@ -111,7 +104,6 @@ export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = [
     sourceCount: 4,
     summary:
       'Coordinated networks are mass-enrolling synthetic and stolen identities into benefit programs across multiple states.',
-    href: BRIEF_HREF,
   },
   {
     id: 'brief-antifraud-infrastructure',
@@ -127,7 +119,6 @@ export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = [
     sourceCount: 5,
     summary:
       'Agencies are standing up new data-sharing and detection infrastructure as fraud losses outpace legacy controls.',
-    href: BRIEF_HREF,
   },
   {
     id: 'brief-identity-theft-networks',
@@ -143,7 +134,6 @@ export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = [
     sourceCount: 4,
     summary:
       'Identity-theft rings are industrializing document forgery and account takeover to run multi-state fraud campaigns.',
-    href: BRIEF_HREF,
   },
   {
     id: 'brief-romance-fraud',
@@ -159,7 +149,6 @@ export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = [
     sourceCount: 4,
     summary:
       'Romance and trust-based fraud operations continue to target elderly victims with scripted, long-horizon social engineering.',
-    href: BRIEF_HREF,
   },
   {
     id: 'brief-caller-as-a-service',
@@ -175,7 +164,6 @@ export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = [
     sourceCount: 4,
     summary:
       'Caller-as-a-Service platforms let fraud crews rent call-center capacity, spoofed numbers, and voice tooling on demand.',
-    href: BRIEF_HREF,
   },
   {
     id: 'brief-legacy-crypto-fraud',
@@ -191,9 +179,12 @@ export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = [
     sourceCount: 4,
     summary:
       'Victims of legacy crypto schemes continue to face long, complex financial recovery and limited restitution pathways.',
-    href: BRIEF_HREF,
   },
 ];
+
+export const SUBSCRIBER_MOCK_BRIEFS: SubscriberBrief[] = SUBSCRIBER_MOCK_BRIEFS_SEED.map(
+  brief => ({ ...brief, href: `/briefs/${brief.slug}` }),
+);
 
 export const BRIEF_CATEGORY_FILTER_ALL = 'all';
 

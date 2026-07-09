@@ -54,3 +54,37 @@ export type BriefCountItem = {
   label: string;
   count: number;
 };
+
+export type BriefDetailRiskLevel = 'critical' | 'high' | 'medium' | 'low';
+
+export type BriefDetailConfidenceLevel = 'high' | 'medium' | 'low';
+
+/**
+ * Full content for a single brief's reading view — the shape `BriefReader`
+ * renders, regardless of whether the data came from the admin form or
+ * subscriber mock data.
+ */
+export type BriefDetail = {
+  id: string;
+  slug: string;
+  title: string;
+  category: string;
+  /** Fallback banner visual used when there's no `featuredImage`. */
+  coverTheme: BriefCoverTheme;
+  riskScore: number;
+  riskLevel: BriefDetailRiskLevel;
+  confidenceLevel: BriefDetailConfidenceLevel;
+  primaryEntities: string[];
+  tags: string[];
+  featuredImage?: string;
+  executiveSummary: string;
+  whyThisMatters: string;
+  keySignals: string;
+  riskAssessment: string;
+  whatOthersMiss: string;
+  implications: string;
+  mainBrief: string;
+  sources: string[];
+  status: 'draft' | 'published';
+  publishedDate?: string;
+};
