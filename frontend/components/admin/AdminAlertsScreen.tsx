@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  Button,
   DataTable,
   type DataTableColumn,
   ErrorState,
@@ -23,12 +22,10 @@ import {
 import { getApiErrorMessage } from '@/lib/api/queryError';
 import { formatAdminDate } from '@/lib/formatAdminDate';
 import type { AdminAlert } from '@/types/admin';
-import { Plus } from 'lucide-react';
 import Link from 'next/link';
 import { type FC, useState } from 'react';
 
 import { AdminPagination } from './AdminPagination';
-import { AdminRowActions } from './AdminRowActions';
 import { AdminTableToolbar } from './AdminTableToolbar';
 
 const STATUS_TONE = {
@@ -85,12 +82,6 @@ const columns: DataTableColumn<AdminAlert>[] = [
     ),
     className: 'w-[120px]',
   },
-  {
-    id: 'actions',
-    header: 'Actions',
-    cell: row => <AdminRowActions editHref={`/admin/alerts/${row.id}/edit`} />,
-    className: 'w-[100px]',
-  },
 ];
 
 const SEARCH_DEBOUNCE_MS = 400;
@@ -121,17 +112,6 @@ export const AdminAlertsScreen: FC = () => {
       <PageHeader
         title="Alerts"
         subtitle="Manage real-time alerts"
-        actions={
-          <Link href="/admin/alerts/new">
-            <Button
-              type="button"
-              size="sm"
-              leftIcon={<Plus className="size-4" aria-hidden />}
-            >
-              New Alert
-            </Button>
-          </Link>
-        }
       />
 
       <AdminTableToolbar

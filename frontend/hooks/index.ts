@@ -11,6 +11,11 @@ export {
   usePublishAdminBriefMutation,
 } from './useAdminBriefMutations';
 export {
+  adminAlertDetailQueryKey,
+  useAdminAlertDetailQuery,
+} from './useAdminAlertDetailQuery';
+export { useAdminAlertReviewMutation } from './useAdminAlertReviewMutation';
+export {
   ADMIN_ALERTS_PAGE_SIZE,
   adminAlertsListQueryKey,
   useAdminAlertsListQuery,

@@ -1,5 +1,6 @@
 export { AdminAlertDetailScreen } from './AdminAlertDetailScreen';
 export { AdminAlertForm, type AdminAlertFormProps } from './AdminAlertForm';
+export { AdminAlertReviewActions } from './AdminAlertReviewActions';
 export { AdminAlertsScreen } from './AdminAlertsScreen';
 export { AdminBriefDetailScreen } from './AdminBriefDetailScreen';
 export {

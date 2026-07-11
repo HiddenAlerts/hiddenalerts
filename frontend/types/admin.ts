@@ -86,6 +86,67 @@ export type AdminAlert = {
   status: 'published' | 'draft';
 };
 
+export type AdminAlertRiskExplanation = {
+  scoreTotal: number;
+  score100: number;
+  riskLevel: string;
+  riskBand: string;
+  factors: {
+    sourceCredibility?: number;
+    financialImpact?: number;
+    victimScale?: number;
+    crossSource?: number;
+    trendAcceleration?: number;
+  };
+  publicationDecision: string;
+  publicationReason?: string;
+  pendingReviewReason?: string;
+  source: string;
+  sourceCredibility: number;
+};
+
+/** Full admin alert detail from `GET /v1/alerts/{id}`. */
+export type AdminAlertDetail = {
+  id: string;
+  title: string;
+  sourceName: string;
+  itemUrl: string;
+  riskScore: number;
+  riskLevel: string;
+  riskBand: string;
+  category: string;
+  secondaryCategory?: string;
+  date: string;
+  processedAt: string;
+  publishedAt?: string;
+  summary: string;
+  tags: string[];
+  status: 'published' | 'draft';
+  publishDecision: string;
+  publishDecisionReason?: string;
+  pendingReviewReason?: string;
+  isExcluded: boolean;
+  excludedReason?: string;
+  isManualHold: boolean;
+  publishedByRule: boolean;
+  publicationStateSource?: string;
+  publicationStateUpdatedAt?: string;
+  publishingPolicyVersion?: string;
+  reviewStatus?: string;
+  eventId?: number;
+  eventTitle?: string;
+  financialImpactEstimate?: string;
+  victimScaleRaw?: string;
+  scoreBreakdown: {
+    sourceCredibility?: number;
+    financialImpact?: number;
+    victimScale?: number;
+    crossSource?: number;
+    trendAcceleration?: number;
+  };
+  riskExplanation?: AdminAlertRiskExplanation;
+};
+
 export type AdminSubscriber = {
   id: string;
   email: string;
