@@ -27,6 +27,8 @@ export type SubscriberBrief = {
   riskScore: number;
   riskLabel: BriefRiskLabel;
   coverTheme: BriefCoverTheme;
+  /** Real uploaded photo, if set — falls back to the themed cover when absent. */
+  featuredImage?: string;
   /** Number of supporting/verified sources cited in the brief. */
   sourceCount: number;
   /** Added or updated within the current week. */
