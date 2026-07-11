@@ -15,11 +15,15 @@ import {
   ADMIN_RISK_LEVEL_OPTIONS,
   ADMIN_STATUS_OPTIONS,
 } from '@/data/adminFilterOptions';
-import { ADMIN_BRIEFS_PAGE_SIZE, useAdminBriefsListQuery } from '@/hooks';
+import {
+  ADMIN_BRIEFS_PAGE_SIZE,
+  useAdminBriefsListQuery,
+  useDebouncedValue,
+} from '@/hooks';
 import { getApiErrorMessage } from '@/lib/api/queryError';
 import { formatAdminDate } from '@/lib/formatAdminDate';
 import type { AdminBriefListItem, AdminPublishStatus } from '@/types/admin';
-import { Plus } from 'lucide-react';
+import { Loader2, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { type FC, useState } from 'react';
 
@@ -45,7 +49,7 @@ const columns: DataTableColumn<AdminBriefListItem>[] = [
     header: 'Title',
     cell: row => (
       <Link
-        href={`/admin/briefs/${row.id}`}
+        href={`/admin/briefs/${row.slug}`}
         className="text-foreground hover:text-primary-400 line-clamp-2 font-medium"
       >
         {row.title}
@@ -88,10 +92,12 @@ const columns: DataTableColumn<AdminBriefListItem>[] = [
   {
     id: 'actions',
     header: 'Actions',
-    cell: row => <AdminRowActions editHref={`/admin/briefs/${row.id}/edit`} />,
+    cell: row => <AdminRowActions editHref={`/admin/briefs/${row.slug}/edit`} />,
     className: 'w-[100px]',
   },
 ];
+
+const SEARCH_DEBOUNCE_MS = 400;
 
 export const AdminBriefsScreen: FC = () => {
   const [search, setSearch] = useState('');
@@ -99,16 +105,20 @@ export const AdminBriefsScreen: FC = () => {
   const [risk, setRisk] = useState<string>('all');
   const [category, setCategory] = useState<string>('all');
   const [page, setPage] = useState(1);
+  const debouncedSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS);
 
   const resetPage = () => setPage(1);
 
-  const { data, isPending, isError, error, refetch } = useAdminBriefsListQuery({
+  const { data, isPending, isFetching, isError, error, refetch } = useAdminBriefsListQuery({
     page,
     status,
     risk,
     category,
-    search,
+    search: debouncedSearch,
   });
+
+  const isInitialLoading = isPending && !data;
+  const showFetchingIndicator = isFetching && !isInitialLoading;
 
   return (
     <div className="space-y-6">
@@ -174,10 +184,26 @@ export const AdminBriefsScreen: FC = () => {
           message={getApiErrorMessage(error, 'Unable to load briefs. Please try again.')}
           onRetry={() => void refetch()}
         />
-      ) : isPending ? (
+      ) : isInitialLoading ? (
         <LoadingState label="Loading briefs…" />
       ) : (
         <>
+          {showFetchingIndicator ? (
+            <div
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+              className="border-border bg-surface/40 text-muted flex items-center gap-2 rounded-sm border px-3 py-2 text-sm font-medium"
+            >
+              <Loader2
+                className="text-primary-400 size-4 shrink-0 animate-spin"
+                strokeWidth={2}
+                aria-hidden
+              />
+              <span>Updating briefs…</span>
+            </div>
+          ) : null}
+
           <DataTable
             columns={columns}
             rows={data?.items ?? []}

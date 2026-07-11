@@ -2,7 +2,7 @@
 
 import { Button, EmptyState, ErrorState, LoadingState, PageHeader } from '@/components';
 import { BriefReader } from '@/components/briefs';
-import { useAdminBriefDetailQuery } from '@/hooks';
+import { useAdminBriefBySlugQuery } from '@/hooks';
 import { getApiErrorMessage } from '@/lib/api/queryError';
 import { adminBriefToDetail } from '@/lib/briefDetail';
 import { ArrowLeft, Pencil } from 'lucide-react';
@@ -10,7 +10,7 @@ import Link from 'next/link';
 import type { FC } from 'react';
 
 export type AdminBriefDetailScreenProps = {
-  briefId: string;
+  slug: string;
 };
 
 /**
@@ -19,10 +19,10 @@ export type AdminBriefDetailScreenProps = {
  * content exactly as it will appear.
  */
 export const AdminBriefDetailScreen: FC<AdminBriefDetailScreenProps> = ({
-  briefId,
+  slug,
 }) => {
   const { data: brief, isPending, isError, error, refetch } =
-    useAdminBriefDetailQuery(briefId);
+    useAdminBriefBySlugQuery(slug);
 
   if (isPending) {
     return <LoadingState label="Loading brief…" />;
@@ -60,7 +60,7 @@ export const AdminBriefDetailScreen: FC<AdminBriefDetailScreenProps> = ({
               <ArrowLeft className="size-4" aria-hidden />
               Back
             </Link>
-            <Link href={`/admin/briefs/${brief.id}/edit`}>
+            <Link href={`/admin/briefs/${brief.slug}/edit`}>
               <Button
                 type="button"
                 size="sm"

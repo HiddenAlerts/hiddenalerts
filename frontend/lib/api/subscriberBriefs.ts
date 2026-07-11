@@ -136,7 +136,23 @@ export async function fetchSubscriberBriefsPage(
   return { ...res, items: res.items.map(mapApiListItemToSubscriberBrief) };
 }
 
-/** Returns `undefined` (not an error) when no brief is currently featured. */
+/**
+ * The list endpoint's `total` is exact regardless of `limit` — so an exact
+ * count for any filter combination is just a `limit=1` fetch that discards
+ * `items` and reads `total`. Used to build accurate stats/category counts
+ * without needing a dedicated aggregates endpoint.
+ */
+export async function fetchSubscriberBriefsCount(
+  params: Omit<FetchSubscriberBriefsParams, 'limit' | 'offset'>,
+  token: string,
+): Promise<number> {
+  const res = await apiGet<SubscriberBriefListResponse>(
+    buildSubscriberBriefsListPath({ ...params, limit: 1, offset: 0 }),
+    { token },
+  );
+  return res.total;
+}
+
 /**
  * Returns `null` (not `undefined` — React Query rejects `undefined` query
  * results) when no brief is currently featured.

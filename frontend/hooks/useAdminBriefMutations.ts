@@ -14,7 +14,7 @@ import { getAdminToken } from '@/lib/auth/adminSession';
 import type { AdminBrief } from '@/types/admin';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { adminBriefDetailQueryKey } from './useAdminBriefDetailQuery';
+import { adminBriefBySlugQueryKey } from './useAdminBriefBySlugQuery';
 
 function requireAdminToken(): string {
   const token = getAdminToken();
@@ -25,10 +25,10 @@ function requireAdminToken(): string {
 /** Invalidates both the list and the (now-stale) detail entry for a brief. */
 function useInvalidateAdminBriefQueries() {
   const queryClient = useQueryClient();
-  return (briefId: string) => {
+  return (brief: AdminBrief) => {
     void queryClient.invalidateQueries({ queryKey: ['admin-briefs', 'list'] });
     void queryClient.invalidateQueries({
-      queryKey: adminBriefDetailQueryKey(briefId),
+      queryKey: adminBriefBySlugQueryKey(brief.slug),
     });
   };
 }
@@ -64,7 +64,7 @@ export function useSaveAdminBriefMutation() {
 
       return saved;
     },
-    onSuccess: saved => invalidate(saved.id),
+    onSuccess: saved => invalidate(saved),
   });
 }
 
@@ -72,7 +72,7 @@ export function usePublishAdminBriefMutation() {
   const invalidate = useInvalidateAdminBriefQueries();
   return useMutation({
     mutationFn: (briefId: string) => publishAdminBrief(briefId, requireAdminToken()),
-    onSuccess: saved => invalidate(saved.id),
+    onSuccess: saved => invalidate(saved),
   });
 }
 
@@ -80,7 +80,7 @@ export function useArchiveAdminBriefMutation() {
   const invalidate = useInvalidateAdminBriefQueries();
   return useMutation({
     mutationFn: (briefId: string) => archiveAdminBrief(briefId, requireAdminToken()),
-    onSuccess: saved => invalidate(saved.id),
+    onSuccess: saved => invalidate(saved),
   });
 }
 
@@ -96,6 +96,6 @@ export function useSetAdminBriefFeaturedMutation() {
         ? featureAdminBrief(briefId, token)
         : unfeatureAdminBrief(briefId, token);
     },
-    onSuccess: saved => invalidate(saved.id),
+    onSuccess: saved => invalidate(saved),
   });
 }

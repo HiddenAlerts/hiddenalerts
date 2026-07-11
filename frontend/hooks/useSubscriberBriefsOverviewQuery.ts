@@ -1,7 +1,9 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthProvider';
+import { BRIEF_CATEGORY_OPTIONS } from '@/data/briefCategories';
 import {
+  fetchSubscriberBriefsCount,
   fetchSubscriberBriefsPage,
   SUBSCRIBER_BRIEFS_OVERVIEW_LIMIT,
 } from '@/lib/api/subscriberBriefs';
@@ -37,11 +39,12 @@ export type SubscriberBriefsOverview = {
 };
 
 /**
- * One bulk, unfiltered fetch (capped at the API's max page size) used to
- * derive category/coverage facet counts, risk stats, and the "recent
- * additions" strip — there's no dedicated stats/facets endpoint. Accurate as
- * long as the library stays under `SUBSCRIBER_BRIEFS_OVERVIEW_LIMIT` items;
- * the "Total" stat itself still comes from the endpoint's own `total` field.
+ * Stats and category counts are exact — the list endpoint's `total` is
+ * accurate for any filter regardless of page size, so each is a cheap
+ * `limit=1` count fetch run in parallel (one per known category, plus
+ * critical/high/overall). "Coverage" (tags) and "recent additions" are
+ * softer/exploratory, so those still come from one bulk sample (capped at
+ * `SUBSCRIBER_BRIEFS_OVERVIEW_LIMIT`) rather than N more count queries.
  */
 export function useSubscriberBriefsOverviewQuery() {
   const { getAccessToken } = useAuth();
@@ -50,19 +53,31 @@ export function useSubscriberBriefsOverviewQuery() {
   return useQuery({
     queryKey: subscriberBriefsOverviewQueryKey(),
     queryFn: async (): Promise<SubscriberBriefsOverview> => {
-      const { items, total } = await fetchSubscriberBriefsPage(
-        { limit: SUBSCRIBER_BRIEFS_OVERVIEW_LIMIT, offset: 0 },
-        token!,
-      );
+      const t = token!;
+
+      const [total, critical, high, categoryCounts, sample] = await Promise.all([
+        fetchSubscriberBriefsCount({}, t),
+        fetchSubscriberBriefsCount({ risk_level: 'critical' }, t),
+        fetchSubscriberBriefsCount({ risk_level: 'high' }, t),
+        Promise.all(
+          BRIEF_CATEGORY_OPTIONS.map(async option => ({
+            label: option.label,
+            count: await fetchSubscriberBriefsCount({ category: option.value }, t),
+          })),
+        ),
+        fetchSubscriberBriefsPage(
+          { limit: SUBSCRIBER_BRIEFS_OVERVIEW_LIMIT, offset: 0 },
+          t,
+        ),
+      ]);
+
       return {
-        stats: {
-          total,
-          critical: items.filter(b => b.riskLabel === 'Critical').length,
-          high: items.filter(b => b.riskLabel === 'High').length,
-        },
-        categories: countBy(items, b => [b.category]),
-        coverage: countBy(items, b => b.coverageAreas),
-        recent: items.slice(0, 3),
+        stats: { total, critical, high },
+        categories: categoryCounts
+          .filter(c => c.count > 0)
+          .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+        coverage: countBy(sample.items, b => b.coverageAreas),
+        recent: sample.items.slice(0, 3),
       };
     },
     enabled: Boolean(token),

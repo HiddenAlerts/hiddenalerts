@@ -12,6 +12,7 @@ import {
 import { getApiErrorMessage } from '@/lib/api/queryError';
 import { SUBSCRIBER_BRIEFS_PAGE_SIZE } from '@/lib/api/subscriberBriefs';
 import type { BriefFilters, BriefSortValue, SubscriberBrief } from '@/types/briefs';
+import { Loader2 } from 'lucide-react';
 import { type FC, useMemo, useState } from 'react';
 
 import { BriefsGrid } from './BriefsGrid';
@@ -95,7 +96,11 @@ export const BriefsLibraryScreen: FC = () => {
     [pageQuery.data?.items, filters.sort],
   );
 
-  if (pageQuery.isPending || overviewQuery.isPending) {
+  const isInitialLoading =
+    (pageQuery.isPending && !pageQuery.data) || overviewQuery.isPending;
+  const showFetchingIndicator = pageQuery.isFetching && !isInitialLoading;
+
+  if (isInitialLoading) {
     return <LoadingState label="Loading intelligence briefs…" />;
   }
 
@@ -153,6 +158,22 @@ export const BriefsLibraryScreen: FC = () => {
           ) : null}
 
           <div className="space-y-3">
+            {showFetchingIndicator ? (
+              <div
+                role="status"
+                aria-live="polite"
+                aria-busy="true"
+                className="border-border bg-surface/40 text-muted flex items-center gap-2 rounded-sm border px-3 py-2 text-sm font-medium"
+              >
+                <Loader2
+                  className="text-primary-400 size-4 shrink-0 animate-spin"
+                  strokeWidth={2}
+                  aria-hidden
+                />
+                <span>Updating briefs…</span>
+              </div>
+            ) : null}
+
             <p className="text-muted text-sm" role="status" aria-live="polite">
               Showing{' '}
               <span className="text-foreground font-semibold tabular-nums">

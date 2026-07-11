@@ -1,3 +1,5 @@
+import { BRIEF_CATEGORY_OPTIONS } from './briefCategories';
+
 export const ADMIN_STATUS_OPTIONS = [
   { value: 'all', label: 'All Status' },
   { value: 'published', label: 'Published' },
@@ -27,17 +29,7 @@ export const ADMIN_TIME_HORIZON_OPTIONS = [
 ] as const;
 
 /** Category options without the "all" sentinel, for create/edit forms. */
-export const ADMIN_CATEGORY_FORM_OPTIONS = [
-  { value: 'Emerging Threat', label: 'Emerging Threat' },
-  { value: 'Fraud', label: 'Fraud' },
-  { value: 'Phishing', label: 'Phishing' },
-  { value: 'Cybercrime', label: 'Cybercrime' },
-  { value: 'Financial Crime', label: 'Financial Crime' },
-  { value: 'Regulatory', label: 'Regulatory' },
-  { value: 'Data Breach', label: 'Data Breach' },
-  { value: 'AML', label: 'AML' },
-  { value: 'Sanctions', label: 'Sanctions' },
-] as const;
+export const ADMIN_CATEGORY_FORM_OPTIONS = BRIEF_CATEGORY_OPTIONS;
 
 export const ADMIN_RISK_LEVEL_OPTIONS = [
   { value: 'all', label: 'All Risk Levels' },
@@ -49,25 +41,14 @@ export const ADMIN_RISK_LEVEL_OPTIONS = [
 
 export const ADMIN_CATEGORY_OPTIONS = [
   { value: 'all', label: 'All Categories' },
-  { value: 'Emerging Threat', label: 'Emerging Threat' },
-  { value: 'Fraud', label: 'Fraud' },
-  { value: 'Phishing', label: 'Phishing' },
-  { value: 'Cybercrime', label: 'Cybercrime' },
-  { value: 'Financial Crime', label: 'Financial Crime' },
-  { value: 'Regulatory', label: 'Regulatory' },
-  { value: 'Data Breach', label: 'Data Breach' },
-  { value: 'AML', label: 'AML' },
-  { value: 'Sanctions', label: 'Sanctions' },
-] as const;
+  ...BRIEF_CATEGORY_OPTIONS,
+];
 
 export type AdminStatusFilter =
   (typeof ADMIN_STATUS_OPTIONS)[number]['value'];
 
 export type AdminRiskLevelFilter =
   (typeof ADMIN_RISK_LEVEL_OPTIONS)[number]['value'];
-
-export type AdminCategoryFilter =
-  (typeof ADMIN_CATEGORY_OPTIONS)[number]['value'];
 
 /**
  * Maps a numeric risk score to a coarse risk level used by the risk filter.

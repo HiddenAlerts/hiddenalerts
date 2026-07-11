@@ -17,7 +17,14 @@ import type {
 } from '@/types/adminBriefsApi';
 
 import { resolveAssetUrl } from './assetUrl';
-import { apiDelete, apiGet, apiPost, apiPut, apiRequest } from './client';
+import {
+  apiDelete,
+  apiGet,
+  apiPost,
+  apiPut,
+  apiRequest,
+  type HttpRequestError,
+} from './client';
 
 /**
  * All endpoints below go through the authenticated admin API. The backend
@@ -163,6 +170,28 @@ export async function fetchAdminBriefDetail(
 ): Promise<AdminBrief> {
   const record = await apiGet<AdminBriefApiRecord>(buildAdminBriefPath(id), { token });
   return mapApiBriefToAdminBrief(record);
+}
+
+/**
+ * There's no admin "get by slug" endpoint — URLs use the slug for a cleaner,
+ * shareable link, so this resolves it via a list scan (accurate as long as
+ * the library stays under the list endpoint's 200-item max) then fetches the
+ * full detail by id.
+ */
+export async function fetchAdminBriefBySlug(
+  slug: string,
+  token: string,
+): Promise<AdminBrief> {
+  const { items } = await fetchAdminBriefsPage({ limit: 200 }, token);
+  const match = items.find(item => item.slug === slug);
+  if (!match) {
+    const notFound = new Error('Brief not found') as HttpRequestError;
+    notFound.name = 'HttpRequestError';
+    notFound.status = 404;
+    notFound.body = null;
+    throw notFound;
+  }
+  return fetchAdminBriefDetail(match.id, token);
 }
 
 export async function createAdminBrief(

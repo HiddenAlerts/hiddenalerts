@@ -3,7 +3,7 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 
-type RouteParams = { briefId: string };
+type RouteParams = { slug: string };
 
 export const metadata: Metadata = {
   title: 'Edit Brief — HiddenAlerts CMS',
@@ -14,10 +14,10 @@ export default async function AdminBriefEditPage({
 }: {
   params: Promise<RouteParams>;
 }) {
-  const { briefId } = await params;
+  const { slug } = await params;
   return (
     <Suspense fallback={<LoadingState label="Loading brief…" />}>
-      <AdminBriefEditScreen briefId={briefId} />
+      <AdminBriefEditScreen slug={slug} />
     </Suspense>
   );
 }

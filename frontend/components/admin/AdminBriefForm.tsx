@@ -28,6 +28,7 @@ import {
 } from '@/hooks';
 import { getApiErrorMessage } from '@/lib/api/queryError';
 import { adminBriefToDetail } from '@/lib/briefDetail';
+import { stripHtmlToText } from '@/lib/htmlText';
 import { slugify } from '@/lib/utils';
 import type { AdminBrief, AdminPublishStatus } from '@/types/admin';
 import { Archive, Eye, Feather, FileEdit } from 'lucide-react';
@@ -103,6 +104,26 @@ const STATUS_LABEL: Record<AdminPublishStatus, string> = {
   draft: 'Draft',
   archived: 'Archived',
 };
+
+/**
+ * Backend rejects publish when required fields are missing/invalid — this
+ * mirrors that check client-side (against the same fields the form itself
+ * marks `required`) so the error surfaces immediately instead of after a
+ * round-trip. Draft saves skip this entirely; only publish requires it.
+ */
+function getMissingPublishFields(brief: AdminBrief): string[] {
+  const missing: string[] = [];
+  if (!brief.title.trim()) missing.push('Title');
+  if (!brief.category.trim()) missing.push('Category');
+  if (!brief.riskScore || brief.riskScore <= 0) missing.push('Risk Score');
+  if (brief.primaryEntities.length === 0) missing.push('Primary Entities');
+  if (!stripHtmlToText(brief.executiveSummary)) missing.push('Executive Summary');
+  if (!stripHtmlToText(brief.whyThisMatters)) missing.push('Why This Matters');
+  if (!stripHtmlToText(brief.keySignals)) missing.push('Key Signals');
+  if (!stripHtmlToText(brief.riskAssessment)) missing.push('Risk Assessment');
+  if (!stripHtmlToText(brief.mainBrief)) missing.push('Main Intelligence Brief');
+  return missing;
+}
 
 /**
  * Shared form for both creating and editing a brief, wired to the real
@@ -201,6 +222,15 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
+    const missingFields = getMissingPublishFields(brief);
+    if (missingFields.length > 0) {
+      toast.error(
+        `Complete these fields before publishing: ${missingFields.join(', ')}.`,
+      );
+      return;
+    }
+
     setPendingAction('publish');
     const saved = await persist();
     if (saved) {

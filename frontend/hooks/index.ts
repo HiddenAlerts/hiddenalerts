@@ -1,9 +1,9 @@
 export { useAlertDetailQuery } from './useAlertDetailQuery';
 export { useAlertsPageQuery } from './useAlertsPageQuery';
 export {
-  adminBriefDetailQueryKey,
-  useAdminBriefDetailQuery,
-} from './useAdminBriefDetailQuery';
+  adminBriefBySlugQueryKey,
+  useAdminBriefBySlugQuery,
+} from './useAdminBriefBySlugQuery';
 export {
   useArchiveAdminBriefMutation,
   useSaveAdminBriefMutation,

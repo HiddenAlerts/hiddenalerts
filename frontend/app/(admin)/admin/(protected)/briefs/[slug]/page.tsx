@@ -1,7 +1,7 @@
 import { AdminBriefDetailScreen } from '@/components/admin';
 import type { Metadata } from 'next';
 
-type RouteParams = { briefId: string };
+type RouteParams = { slug: string };
 
 export const metadata: Metadata = {
   title: 'Brief — HiddenAlerts CMS',
@@ -12,6 +12,6 @@ export default async function AdminBriefDetailPage({
 }: {
   params: Promise<RouteParams>;
 }) {
-  const { briefId } = await params;
-  return <AdminBriefDetailScreen briefId={briefId} />;
+  const { slug } = await params;
+  return <AdminBriefDetailScreen slug={slug} />;
 }

@@ -1,22 +1,22 @@
 'use client';
 
 import { EmptyState, ErrorState, LoadingState } from '@/components';
-import { useAdminBriefDetailQuery } from '@/hooks';
+import { useAdminBriefBySlugQuery } from '@/hooks';
 import { getApiErrorMessage } from '@/lib/api/queryError';
 import type { FC } from 'react';
 
 import { AdminBriefForm } from './AdminBriefForm';
 
 export type AdminBriefEditScreenProps = {
-  briefId: string;
+  slug: string;
 };
 
 /** Fetches an existing brief client-side (the admin token lives in the browser) and hands it to `AdminBriefForm`. */
 export const AdminBriefEditScreen: FC<AdminBriefEditScreenProps> = ({
-  briefId,
+  slug,
 }) => {
   const { data: brief, isPending, isError, error, refetch } =
-    useAdminBriefDetailQuery(briefId);
+    useAdminBriefBySlugQuery(slug);
 
   if (isPending) {
     return <LoadingState label="Loading brief…" />;
@@ -45,7 +45,7 @@ export const AdminBriefEditScreen: FC<AdminBriefEditScreenProps> = ({
       initial={brief}
       title="Edit Intelligence Brief"
       subtitle="All fields marked with * are required."
-      returnHref={`/admin/briefs/${brief.id}`}
+      returnHref={`/admin/briefs/${brief.slug}`}
     />
   );
 };
