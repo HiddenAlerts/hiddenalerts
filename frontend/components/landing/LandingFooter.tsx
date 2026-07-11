@@ -1,104 +1,140 @@
-import { dashboardFooterContent as c } from '@/content/legal/dashboard-footer';
 import { cn } from '@/lib/utils';
+import { Mail, Shield } from 'lucide-react';
 import Link from 'next/link';
 
+import { FOOTER_CONTENT } from '@/data/landing';
+
+import { LandingEmailForm } from './LandingEmailForm';
 import { LandingLogo } from './LandingLogo';
 import { LinkedInIcon, XIcon } from './SocialIcons';
 
-const legalLinkClass =
+const linkClass =
   'text-muted-foreground hover:text-body text-sm transition-colors focus-visible:ring-primary-500 rounded-sm focus-visible:ring-2 focus-visible:outline-none';
 
-const primaryLinks = [
-  { href: c.linkDisclaimerHref, label: c.linkDisclaimerLabel },
-  { href: c.linkPrivacyHref, label: c.linkPrivacyLabel },
-  { href: c.linkContactHref, label: c.linkContactLabel },
-] as const;
-
-const secondaryLinks = [
-  { href: c.linkTermsHref, label: c.linkTermsLabel },
-  { href: c.linkSupportHref, label: c.linkSupportLabel },
-] as const;
-
-const socialLinks = [
-  {
-    href: 'https://www.linkedin.com/company/covertlytics',
-    label: 'LinkedIn',
-    icon: LinkedInIcon,
-  },
-  {
-    href: 'https://x.com/covertlytics',
-    label: 'X (Twitter)',
-    icon: XIcon,
-  },
-] as const;
+const columnTitleClass =
+  'text-muted-foreground text-xs font-semibold tracking-[0.14em] uppercase';
 
 export function LandingFooter() {
+  const c = FOOTER_CONTENT;
+
   return (
     <footer
       className="border-border-subtle bg-background-alt/95 mt-auto border-t"
       aria-label="Site footer"
     >
-      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12 md:py-14">
-        <div className="grid gap-10 md:grid-cols-[1.4fr_1fr_1fr] md:gap-12">
-          {/* Brand + disclaimer */}
-          <div className="flex flex-col gap-3">
+      <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 md:py-16">
+        <div className="grid gap-10 lg:grid-cols-[1.5fr_1fr_1fr_1fr_1fr] lg:gap-8">
+          {/* Brand */}
+          <div className="flex flex-col gap-4 lg:col-span-1">
             <Link
               href="/"
               className="focus-visible:ring-primary-500 inline-flex w-fit rounded-md focus-visible:ring-2 focus-visible:outline-none"
             >
               <LandingLogo trademark />
             </Link>
-            <p className="text-muted-foreground text-xs leading-relaxed sm:text-sm">
-              {c.descriptionLine1}
+            <p className="text-muted-foreground max-w-xs text-sm leading-relaxed">
+              {c.tagline}
             </p>
-            <p className="text-muted-foreground text-xs leading-relaxed sm:text-sm">
-              {c.descriptionLine2}
-            </p>
-            <p className="text-muted-foreground text-xs leading-relaxed sm:text-sm">
-              {c.productAttributionBefore}
-              <span className="text-body">{c.productAttributionCompany}</span>
-            </p>
+            <div className="flex items-center gap-3">
+              <a
+                href={c.socialLinks[0].href}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={c.socialLinks[0].label}
+                className={cn(
+                  'text-muted hover:text-foreground border-border bg-surface/50 flex size-9 items-center justify-center rounded-full border transition-colors',
+                )}
+              >
+                <LinkedInIcon />
+              </a>
+              <a
+                href={c.socialLinks[1].href}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={c.socialLinks[1].label}
+                className={cn(
+                  'text-muted hover:text-foreground border-border bg-surface/50 flex size-9 items-center justify-center rounded-full border transition-colors',
+                )}
+              >
+                <XIcon />
+              </a>
+              <a
+                href={c.socialLinks[2].href}
+                aria-label={c.socialLinks[2].label}
+                className={cn(
+                  'text-muted hover:text-foreground border-border bg-surface/50 flex size-9 items-center justify-center rounded-full border transition-colors',
+                )}
+              >
+                <Mail className="size-4" />
+              </a>
+            </div>
           </div>
 
-          {/* Legal links */}
-          <nav aria-label="Legal links" className="flex flex-col gap-2">
-            {primaryLinks.map(link => (
-              <Link key={link.href} href={link.href} className={legalLinkClass}>
+          {/* Product */}
+          <nav aria-label="Product links" className="flex flex-col gap-3">
+            <p className={columnTitleClass}>Product</p>
+            {c.productLinks.map(link => (
+              <Link key={link.href} href={link.href} className={linkClass}>
                 {link.label}
               </Link>
             ))}
           </nav>
 
-          <nav aria-label="Support links" className="flex flex-col gap-2">
-            {secondaryLinks.map(link => (
-              <Link key={link.href} href={link.href} className={legalLinkClass}>
+          {/* Resources */}
+          <nav aria-label="Resource links" className="flex flex-col gap-3">
+            <p className={columnTitleClass}>Resources</p>
+            {c.resourceLinks.map(link => (
+              <Link key={link.href} href={link.href} className={linkClass}>
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+
+          {/* Legal */}
+          <nav aria-label="Legal links" className="flex flex-col gap-3">
+            <p className={columnTitleClass}>Legal</p>
+            {c.legalLinks.map(link => (
+              <Link key={link.href} href={link.href} className={linkClass}>
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+
+          {/* Contact */}
+          <nav aria-label="Contact links" className="flex flex-col gap-3">
+            <p className={columnTitleClass}>Contact</p>
+            {c.contactLinks.map(link => (
+              <Link key={link.href} href={link.href} className={linkClass}>
                 {link.label}
               </Link>
             ))}
           </nav>
         </div>
 
-        {/* Social + copyright */}
-        <div className="border-border-subtle mt-10 flex flex-col items-center justify-between gap-4 border-t pt-6 sm:flex-row">
-          <div className="flex items-center gap-3">
-            {socialLinks.map(({ href, label, icon: Icon }) => (
-              <a
-                key={href}
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={label}
-                className={cn(
-                  'text-muted hover:text-foreground border-border bg-surface/50 flex size-9 items-center justify-center rounded-full border transition-colors',
-                )}
-              >
-                <Icon />
-              </a>
-            ))}
+        {/* Newsletter row */}
+        <div className="border-border-subtle mt-10 grid gap-6 border-t pt-10 lg:grid-cols-[1fr_auto] lg:items-center">
+          <div>
+            <p className="text-foreground text-sm font-semibold tracking-wide uppercase">
+              {c.newsletterTitle}
+            </p>
+            <p className="text-muted-foreground mt-1 text-sm">
+              {c.newsletterDescription}
+            </p>
           </div>
-          <p className="text-muted-foreground text-xs sm:text-sm">
-            {c.copyrightPrefix}
-            {c.copyrightCompany}. All rights reserved.
+          <LandingEmailForm
+            actionUrl={c.newsletterActionUrl}
+            placeholder={c.newsletterPlaceholder}
+            buttonLabel={c.newsletterButtonLabel}
+            className="w-full lg:max-w-md"
+          />
+        </div>
+
+        {/* Bottom bar */}
+        <div className="border-border-subtle mt-8 flex flex-col items-center justify-between gap-4 border-t pt-6 sm:flex-row">
+          <p className="text-muted-foreground text-xs sm:text-sm">{c.copyright}</p>
+          <p className="text-muted-foreground flex items-center gap-2 text-xs sm:text-sm">
+            <Shield className="text-muted size-4 shrink-0" aria-hidden />
+            {c.securityNote}
           </p>
         </div>
       </div>

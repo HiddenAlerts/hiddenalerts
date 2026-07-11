@@ -1,6 +1,6 @@
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Check, Lock } from 'lucide-react';
+import { Check } from 'lucide-react';
 import Link from 'next/link';
 
 import {
@@ -19,56 +19,56 @@ export function LandingIntelligencePreview() {
     <LandingSection
       id="sample-brief"
       ariaLabelledby="sample-brief-heading"
-      className="border-border-subtle border-t"
+      className="border-border-subtle border-t py-12 md:py-16"
     >
       <div className="grid gap-6 lg:grid-cols-2 lg:gap-8">
         {/* Live alerts panel */}
-        <div className="border-border bg-background-alt rounded-xl border p-5 sm:p-6">
+        <div className="border-border bg-background-alt/80 rounded-2xl border p-5 sm:p-6">
           <div className="flex items-start justify-between gap-3">
             <h2
               id="sample-brief-heading"
-              className="font-heading text-foreground text-lg font-semibold tracking-tight sm:text-xl"
+              className="text-primary-400 text-xs font-semibold tracking-[0.14em] uppercase"
             >
               {LIVE_ALERTS_PANEL.title}
             </h2>
             <Link
               href={LIVE_ALERTS_PANEL.viewAllHref}
-              className="text-primary-400 hover:text-primary-300 shrink-0 text-sm font-medium transition-colors"
+              className="text-primary-400 hover:text-primary-300 shrink-0 text-xs font-medium transition-colors"
             >
               {LIVE_ALERTS_PANEL.viewAllLabel} →
             </Link>
           </div>
 
-          <div className="mt-2">
-            {LIVE_ALERTS.map(alert => (
-              <LandingLiveAlertRow key={alert.rank} alert={alert} />
+          <div className="mt-1">
+            {LIVE_ALERTS.map((alert, i) => (
+              <LandingLiveAlertRow key={i} alert={alert} />
             ))}
           </div>
 
-          <p className="text-muted-foreground mt-4 text-xs">
+          <p className="text-muted-foreground mt-3 text-xs">
             {LIVE_ALERTS_PANEL.footnote}
           </p>
         </div>
 
         {/* Intelligence brief preview */}
-        <div className="border-border bg-background-alt rounded-xl border p-5 sm:p-6">
+        <div className="border-border bg-background-alt/80 rounded-2xl border p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="text-primary-400 text-xs font-semibold tracking-[0.14em] uppercase">
               {brief.eyebrow}
             </span>
-            <span className="border-danger/40 bg-danger-muted text-danger rounded-md border px-2.5 py-1 text-xs font-semibold">
+            <span className="border-danger/40 bg-danger-muted text-danger rounded-full border px-3 py-1 text-xs font-semibold">
               Risk Score: {brief.score}/100
             </span>
           </div>
 
-          <h3 className="text-foreground mt-4 text-lg leading-snug font-semibold sm:text-xl">
+          <h3 className="text-foreground mt-4 text-base leading-snug font-semibold sm:text-lg">
             {brief.title}
           </h3>
           <p className="text-muted-foreground mt-2 text-xs">{brief.date}</p>
 
           <p className="text-body mt-4 text-sm leading-relaxed">{brief.summary}</p>
 
-          <div className="mt-6">
+          <div className="mt-5">
             <p className="text-foreground text-sm font-semibold">
               {brief.includesTitle}
             </p>
@@ -88,18 +88,13 @@ export function LandingIntelligencePreview() {
             </ul>
           </div>
 
-          <p className="text-muted mt-5 text-xs leading-relaxed">
-            <span className="text-primary-400 font-semibold">*</span> {brief.note}
-          </p>
-
           <Link
             href={brief.cta.href}
             className={cn(
-              buttonVariants({ variant: 'default', size: 'md' }),
-              'mt-5 h-12 w-full gap-2 text-sm font-semibold sm:text-base',
+              buttonVariants({ variant: 'outline', size: 'md' }),
+              'border-border bg-surface/40 text-foreground hover:bg-surface/70 hover:border-border mt-6 h-11 w-full text-sm font-semibold',
             )}
           >
-            <Lock className="size-4" aria-hidden />
             {brief.cta.label}
           </Link>
           <p className="text-muted-foreground mt-2 text-center text-xs">
