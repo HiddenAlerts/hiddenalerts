@@ -4,6 +4,8 @@ import {
   Button,
   DataTable,
   type DataTableColumn,
+  ErrorState,
+  LoadingState,
   PageHeader,
   ScoreBadge,
   StatusTag,
@@ -12,20 +14,22 @@ import {
   ADMIN_CATEGORY_OPTIONS,
   ADMIN_RISK_LEVEL_OPTIONS,
   ADMIN_STATUS_OPTIONS,
-  riskScoreToLevel,
 } from '@/data/adminFilterOptions';
-import { ADMIN_MOCK_ALERTS } from '@/data/adminMockAlerts';
+import {
+  ADMIN_ALERTS_PAGE_SIZE,
+  useAdminAlertsListQuery,
+  useDebouncedValue,
+} from '@/hooks';
+import { getApiErrorMessage } from '@/lib/api/queryError';
 import { formatAdminDate } from '@/lib/formatAdminDate';
 import type { AdminAlert } from '@/types/admin';
-import { Plus } from 'lucide-react';
+import { Loader2, Plus } from 'lucide-react';
 import Link from 'next/link';
-import { type FC, useMemo, useState } from 'react';
+import { type FC, useState } from 'react';
 
 import { AdminPagination } from './AdminPagination';
 import { AdminRowActions } from './AdminRowActions';
 import { AdminTableToolbar } from './AdminTableToolbar';
-
-const PAGE_SIZE = 5;
 
 const STATUS_TONE = {
   published: 'success',
@@ -89,34 +93,28 @@ const columns: DataTableColumn<AdminAlert>[] = [
   },
 ];
 
+const SEARCH_DEBOUNCE_MS = 400;
+
 export const AdminAlertsScreen: FC = () => {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<string>('all');
   const [risk, setRisk] = useState<string>('all');
   const [status, setStatus] = useState<string>('all');
   const [page, setPage] = useState(1);
-
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return ADMIN_MOCK_ALERTS.filter(alert => {
-      if (term && !alert.title.toLowerCase().includes(term)) return false;
-      if (category !== 'all' && alert.category !== category) return false;
-      if (risk !== 'all' && riskScoreToLevel(alert.riskScore) !== risk)
-        return false;
-      if (status !== 'all' && alert.status !== status) return false;
-      return true;
-    });
-  }, [search, category, risk, status]);
-
-  const total = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const rows = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return filtered.slice(start, start + PAGE_SIZE);
-  }, [filtered, currentPage]);
+  const debouncedSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS);
 
   const resetPage = () => setPage(1);
+
+  const { data, isPending, isFetching, isError, error, refetch } = useAdminAlertsListQuery({
+    page,
+    status,
+    risk,
+    category,
+    search: debouncedSearch,
+  });
+
+  const isInitialLoading = isPending && !data;
+  const showFetchingIndicator = isFetching && !isInitialLoading;
 
   return (
     <div className="space-y-6">
@@ -177,20 +175,47 @@ export const AdminAlertsScreen: FC = () => {
         ]}
       />
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        rowKey={row => row.id}
-        emptyMessage="No alerts match your filters."
-      />
+      {isError ? (
+        <ErrorState
+          message={getApiErrorMessage(error, 'Unable to load alerts. Please try again.')}
+          onRetry={() => void refetch()}
+        />
+      ) : isInitialLoading ? (
+        <LoadingState label="Loading alerts…" />
+      ) : (
+        <>
+          {showFetchingIndicator ? (
+            <div
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+              className="border-border bg-surface/40 text-muted flex items-center gap-2 rounded-sm border px-3 py-2 text-sm font-medium"
+            >
+              <Loader2
+                className="text-primary-400 size-4 shrink-0 animate-spin"
+                strokeWidth={2}
+                aria-hidden
+              />
+              <span>Updating alerts…</span>
+            </div>
+          ) : null}
 
-      <AdminPagination
-        page={currentPage}
-        pageSize={PAGE_SIZE}
-        totalItems={total}
-        itemLabel="alerts"
-        onPageChange={setPage}
-      />
+          <DataTable
+            columns={columns}
+            rows={data?.items ?? []}
+            rowKey={row => row.id}
+            emptyMessage="No alerts match your filters."
+          />
+
+          <AdminPagination
+            page={page}
+            pageSize={ADMIN_ALERTS_PAGE_SIZE}
+            totalItems={data?.total ?? 0}
+            itemLabel="alerts"
+            onPageChange={setPage}
+          />
+        </>
+      )}
     </div>
   );
 };
