@@ -16,7 +16,7 @@ export {
 export { AdminPagination, type AdminPaginationProps } from './AdminPagination';
 export { AdminRowActions, type AdminRowActionsProps } from './AdminRowActions';
 export { AdminShell, type AdminShellProps } from './AdminShell';
-export { AdminSubscribersScreen } from './AdminSubscribersScreen';
+// export { AdminSubscribersScreen } from './AdminSubscribersScreen';
 export {
   AdminTableToolbar,
   type AdminTableToolbarProps,
