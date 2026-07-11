@@ -11,9 +11,9 @@ import {
   StatusTag,
 } from '@/components';
 import {
+  ADMIN_ALERT_STATUS_OPTIONS,
   ADMIN_CATEGORY_OPTIONS,
   ADMIN_RISK_LEVEL_OPTIONS,
-  ADMIN_STATUS_OPTIONS,
 } from '@/data/adminFilterOptions';
 import {
   ADMIN_ALERTS_PAGE_SIZE,
@@ -23,7 +23,7 @@ import {
 import { getApiErrorMessage } from '@/lib/api/queryError';
 import { formatAdminDate } from '@/lib/formatAdminDate';
 import type { AdminAlert } from '@/types/admin';
-import { Loader2, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import Link from 'next/link';
 import { type FC, useState } from 'react';
 
@@ -166,7 +166,7 @@ export const AdminAlertsScreen: FC = () => {
             id: 'alerts-status',
             value: status,
             ariaLabel: 'Filter by status',
-            options: ADMIN_STATUS_OPTIONS,
+            options: ADMIN_ALERT_STATUS_OPTIONS,
             onChange: value => {
               setStatus(value);
               resetPage();
@@ -184,27 +184,13 @@ export const AdminAlertsScreen: FC = () => {
         <LoadingState label="Loading alerts…" />
       ) : (
         <>
-          {showFetchingIndicator ? (
-            <div
-              role="status"
-              aria-live="polite"
-              aria-busy="true"
-              className="border-border bg-surface/40 text-muted flex items-center gap-2 rounded-sm border px-3 py-2 text-sm font-medium"
-            >
-              <Loader2
-                className="text-primary-400 size-4 shrink-0 animate-spin"
-                strokeWidth={2}
-                aria-hidden
-              />
-              <span>Updating alerts…</span>
-            </div>
-          ) : null}
-
           <DataTable
             columns={columns}
             rows={data?.items ?? []}
             rowKey={row => row.id}
             emptyMessage="No alerts match your filters."
+            isLoading={showFetchingIndicator}
+            loadingLabel="Updating alerts…"
           />
 
           <AdminPagination

@@ -7,6 +7,13 @@ export const ADMIN_STATUS_OPTIONS = [
   { value: 'archived', label: 'Archived' },
 ] as const;
 
+/** Alerts list — published/draft only (`is_published` on the API). */
+export const ADMIN_ALERT_STATUS_OPTIONS = [
+  { value: 'all', label: 'All Status' },
+  { value: 'published', label: 'Published' },
+  { value: 'draft', label: 'Draft' },
+] as const;
+
 /** Form-only options (no "all" sentinel). */
 export const ADMIN_RISK_LEVEL_FORM_OPTIONS = [
   { value: 'critical', label: 'Critical' },

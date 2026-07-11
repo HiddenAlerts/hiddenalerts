@@ -18,13 +18,11 @@ export function adminAlertsListQueryKey(filters: AdminAlertsListFilters) {
   return ['admin-alerts', 'list', filters] as const;
 }
 
-function mapStatusFilter(status: string): Pick<
-  Parameters<typeof fetchAdminAlertsPage>[0],
-  'is_published' | 'is_excluded'
-> {
+function mapStatusFilter(
+  status: string,
+): Pick<Parameters<typeof fetchAdminAlertsPage>[0], 'is_published'> {
   if (status === 'published') return { is_published: true };
   if (status === 'draft') return { is_published: false };
-  if (status === 'archived') return { is_excluded: true };
   return {};
 }
 

@@ -15,7 +15,6 @@ export type FetchAdminAlertsParams = {
   risk_level?: string;
   risk_band?: string;
   is_published?: boolean;
-  is_excluded?: boolean;
   limit?: number;
   offset?: number;
 };
@@ -28,9 +27,6 @@ export function buildAdminAlertsListPath(params: FetchAdminAlertsParams) {
   if (params.risk_band) search.set('risk_band', params.risk_band);
   if (params.is_published !== undefined) {
     search.set('is_published', String(params.is_published));
-  }
-  if (params.is_excluded !== undefined) {
-    search.set('is_excluded', String(params.is_excluded));
   }
   search.set('limit', String(params.limit ?? 50));
   search.set('offset', String(params.offset ?? 0));
