@@ -24,11 +24,20 @@ export const RecentAdditionCard: FC<RecentAdditionCardProps> = ({
       className,
     )}
   >
-    <BriefCover
-      theme={brief.coverTheme}
-      iconSizeClassName="size-10"
-      className="size-14 shrink-0 rounded-md"
-    />
+    {brief.featuredImage ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={brief.featuredImage}
+        alt=""
+        className="size-14 shrink-0 rounded-md object-cover"
+      />
+    ) : (
+      <BriefCover
+        theme={brief.coverTheme}
+        iconSizeClassName="size-10"
+        className="size-14 shrink-0 rounded-md"
+      />
+    )}
     <div className="min-w-0">
       <h4 className="text-foreground line-clamp-2 text-sm font-semibold leading-snug">
         {brief.title}

@@ -4,46 +4,52 @@ import {
   Button,
   DataTable,
   type DataTableColumn,
+  ErrorState,
+  LoadingState,
   PageHeader,
   ScoreBadge,
   StatusTag,
 } from '@/components';
-import { ADMIN_MOCK_BRIEFS } from '@/data/adminMockBriefs';
 import {
   ADMIN_CATEGORY_OPTIONS,
   ADMIN_RISK_LEVEL_OPTIONS,
   ADMIN_STATUS_OPTIONS,
-  riskScoreToLevel,
 } from '@/data/adminFilterOptions';
+import {
+  ADMIN_BRIEFS_PAGE_SIZE,
+  useAdminBriefsListQuery,
+  useDebouncedValue,
+} from '@/hooks';
+import { getApiErrorMessage } from '@/lib/api/queryError';
 import { formatAdminDate } from '@/lib/formatAdminDate';
-import type { AdminBrief } from '@/types/admin';
-import { Plus } from 'lucide-react';
+import type { AdminBriefListItem, AdminPublishStatus } from '@/types/admin';
+import { Loader2, Plus } from 'lucide-react';
 import Link from 'next/link';
-import { type FC, useMemo, useState } from 'react';
+import { type FC, useState } from 'react';
 
 import { AdminPagination } from './AdminPagination';
 import { AdminRowActions } from './AdminRowActions';
 import { AdminTableToolbar } from './AdminTableToolbar';
 
-const PAGE_SIZE = 5;
-
-const STATUS_TONE = {
+const STATUS_TONE: Record<AdminPublishStatus, 'success' | 'neutral' | 'warning'> = {
   published: 'success',
   draft: 'neutral',
-} as const;
+  archived: 'warning',
+};
 
-const STATUS_LABEL = {
+const STATUS_LABEL: Record<AdminPublishStatus, string> = {
   published: 'Published',
   draft: 'Draft',
-} as const;
+  archived: 'Archived',
+};
 
-const columns: DataTableColumn<AdminBrief>[] = [
+const columns: DataTableColumn<AdminBriefListItem>[] = [
   {
     id: 'title',
     header: 'Title',
     cell: row => (
       <Link
-        href={`/admin/briefs/${row.id}`}
+        href={`/admin/briefs/${row.slug}`}
         className="text-foreground hover:text-primary-400 line-clamp-2 font-medium"
       >
         {row.title}
@@ -67,7 +73,9 @@ const columns: DataTableColumn<AdminBrief>[] = [
     id: 'date',
     header: 'Date',
     cell: row => (
-      <span className="text-muted tabular-nums">{formatAdminDate(row.date)}</span>
+      <span className="text-muted tabular-nums">
+        {formatAdminDate(row.publishedDate ?? row.createdAt)}
+      </span>
     ),
     className: 'w-[140px]',
   },
@@ -84,10 +92,12 @@ const columns: DataTableColumn<AdminBrief>[] = [
   {
     id: 'actions',
     header: 'Actions',
-    cell: row => <AdminRowActions editHref={`/admin/briefs/${row.id}/edit`} />,
+    cell: row => <AdminRowActions editHref={`/admin/briefs/${row.slug}/edit`} />,
     className: 'w-[100px]',
   },
 ];
+
+const SEARCH_DEBOUNCE_MS = 400;
 
 export const AdminBriefsScreen: FC = () => {
   const [search, setSearch] = useState('');
@@ -95,28 +105,20 @@ export const AdminBriefsScreen: FC = () => {
   const [risk, setRisk] = useState<string>('all');
   const [category, setCategory] = useState<string>('all');
   const [page, setPage] = useState(1);
-
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return ADMIN_MOCK_BRIEFS.filter(brief => {
-      if (term && !brief.title.toLowerCase().includes(term)) return false;
-      if (status !== 'all' && brief.status !== status) return false;
-      if (risk !== 'all' && riskScoreToLevel(brief.riskScore) !== risk)
-        return false;
-      if (category !== 'all' && brief.category !== category) return false;
-      return true;
-    });
-  }, [search, status, risk, category]);
-
-  const total = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const rows = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return filtered.slice(start, start + PAGE_SIZE);
-  }, [filtered, currentPage]);
+  const debouncedSearch = useDebouncedValue(search, SEARCH_DEBOUNCE_MS);
 
   const resetPage = () => setPage(1);
+
+  const { data, isPending, isFetching, isError, error, refetch } = useAdminBriefsListQuery({
+    page,
+    status,
+    risk,
+    category,
+    search: debouncedSearch,
+  });
+
+  const isInitialLoading = isPending && !data;
+  const showFetchingIndicator = isFetching && !isInitialLoading;
 
   return (
     <div className="space-y-6">
@@ -177,20 +179,47 @@ export const AdminBriefsScreen: FC = () => {
         ]}
       />
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        rowKey={row => row.id}
-        emptyMessage="No briefs match your filters."
-      />
+      {isError ? (
+        <ErrorState
+          message={getApiErrorMessage(error, 'Unable to load briefs. Please try again.')}
+          onRetry={() => void refetch()}
+        />
+      ) : isInitialLoading ? (
+        <LoadingState label="Loading briefs…" />
+      ) : (
+        <>
+          {showFetchingIndicator ? (
+            <div
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+              className="border-border bg-surface/40 text-muted flex items-center gap-2 rounded-sm border px-3 py-2 text-sm font-medium"
+            >
+              <Loader2
+                className="text-primary-400 size-4 shrink-0 animate-spin"
+                strokeWidth={2}
+                aria-hidden
+              />
+              <span>Updating briefs…</span>
+            </div>
+          ) : null}
 
-      <AdminPagination
-        page={currentPage}
-        pageSize={PAGE_SIZE}
-        totalItems={total}
-        itemLabel="briefs"
-        onPageChange={setPage}
-      />
+          <DataTable
+            columns={columns}
+            rows={data?.items ?? []}
+            rowKey={row => row.id}
+            emptyMessage="No briefs match your filters."
+          />
+
+          <AdminPagination
+            page={page}
+            pageSize={ADMIN_BRIEFS_PAGE_SIZE}
+            totalItems={data?.total ?? 0}
+            itemLabel="briefs"
+            onPageChange={setPage}
+          />
+        </>
+      )}
     </div>
   );
 };

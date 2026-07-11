@@ -13,25 +13,25 @@ export function LandingFAQ() {
     >
       <h2
         id="faq-heading"
-        className="font-heading text-foreground text-center text-2xl font-semibold tracking-tight sm:text-3xl"
+        className="font-heading text-foreground text-center text-xl font-semibold tracking-[0.12em] uppercase sm:text-2xl"
       >
-        FAQ
+        Frequently Asked Questions
       </h2>
 
-      <div className="mx-auto mt-8 max-w-3xl space-y-0">
+      <div className="mt-10 grid gap-4 sm:grid-cols-2">
         {LANDING_FAQ.map(item => (
           <details
             key={item.question}
-            className="border-border group border-b first:border-t"
+            className="border-border bg-background-alt/60 group rounded-xl border"
           >
-            <summary className="text-foreground hover:text-body flex cursor-pointer list-none items-center justify-between gap-3 py-4 text-left text-sm font-medium sm:text-base [&::-webkit-details-marker]:hidden">
+            <summary className="text-foreground hover:text-body flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-left text-sm font-medium sm:text-base [&::-webkit-details-marker]:hidden">
               <span className="min-w-0 pr-2">{item.question}</span>
               <ChevronDown
                 className="text-muted size-5 shrink-0 transition-transform group-open:rotate-180"
                 aria-hidden
               />
             </summary>
-            <p className="text-muted pb-4 text-sm leading-relaxed">
+            <p className="text-muted px-5 pb-4 text-sm leading-relaxed">
               {item.answer}
             </p>
           </details>

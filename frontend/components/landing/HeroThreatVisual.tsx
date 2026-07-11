@@ -15,13 +15,11 @@ const HOTSPOTS = [
 function ThreatGlobe() {
   return (
     <div className="relative mx-auto aspect-square w-full max-w-md" aria-hidden>
-      {/* Ambient red glow */}
-      <div className="bg-primary-500/25 absolute inset-[12%] rounded-full blur-3xl" />
+      <div className="bg-primary-500/20 absolute inset-[12%] rounded-full blur-3xl" />
 
-      {/* Wireframe globe */}
       <svg
         viewBox="0 0 400 400"
-        className="text-primary-500/40 relative size-full"
+        className="text-primary-500/35 relative size-full"
         fill="none"
       >
         <defs>
@@ -41,7 +39,6 @@ function ThreatGlobe() {
           strokeWidth="1"
         />
 
-        {/* Latitudes */}
         {[60, 110, 150, 110, 60].map((ry, i) => (
           <ellipse
             key={`lat-${i}`}
@@ -55,7 +52,6 @@ function ThreatGlobe() {
           />
         ))}
 
-        {/* Longitudes */}
         {[150, 110, 60].map((rx, i) => (
           <ellipse
             key={`lon-${i}`}
@@ -79,7 +75,6 @@ function ThreatGlobe() {
         />
       </svg>
 
-      {/* Pulsing threat hotspots */}
       {HOTSPOTS.map((spot, i) => (
         <span
           key={i}
@@ -97,12 +92,11 @@ function ThreatGlobe() {
   );
 }
 
-/** Small upward-trending sparkline shown inside the live stat card. */
 function StatSparkline({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 120 40"
-      className={cn('text-primary-400 h-10 w-28', className)}
+      className={cn('text-primary-400 h-8 w-full', className)}
       fill="none"
       aria-hidden
     >
@@ -117,37 +111,29 @@ function StatSparkline({ className }: { className?: string }) {
   );
 }
 
-/**
- * Hero "active threat signals" visual: a stylised red wireframe globe with a
- * floating live-stat card. Purely presentational.
- */
 export function HeroThreatVisual({ className }: { className?: string }) {
   return (
     <div className={cn('relative w-full', className)}>
       <ThreatGlobe />
 
-      <div className="border-border bg-background-alt/85 shadow-lg sm:absolute sm:right-0 sm:bottom-0 mt-6 w-full rounded-xl border p-5 backdrop-blur sm:mt-0 sm:max-w-xs">
+      <div className="border-border bg-background-alt/90 shadow-lg sm:absolute sm:right-0 sm:bottom-4 mt-6 w-full rounded-xl border p-5 backdrop-blur sm:mt-0 sm:max-w-[280px]">
         <div className="flex items-center gap-2">
-          <span className="bg-primary-500 inline-flex size-2.5 animate-pulse rounded-full" />
-          <span className="text-primary-300 text-[0.7rem] font-semibold tracking-[0.14em] uppercase">
+          <span className="bg-primary-500 inline-flex size-2 animate-pulse rounded-full" />
+          <span className="text-primary-300 text-[0.65rem] font-semibold tracking-[0.12em] uppercase">
             {THREAT_SIGNAL_STAT.label}
           </span>
         </div>
 
-        <div className="mt-3 flex items-end justify-between gap-3">
-          <div>
-            <p className="text-primary-500 font-heading text-5xl leading-none font-bold tracking-tight tabular-nums">
-              {THREAT_SIGNAL_STAT.value}
-            </p>
-            <p className="text-foreground mt-2 text-sm font-medium">
-              {THREAT_SIGNAL_STAT.headline}
-            </p>
-            <p className="text-muted text-xs">{THREAT_SIGNAL_STAT.detected}</p>
-          </div>
-          <StatSparkline />
-        </div>
+        <p className="text-primary-500 font-heading mt-3 text-5xl leading-none font-bold tracking-tight tabular-nums">
+          {THREAT_SIGNAL_STAT.value}
+        </p>
+        <p className="text-foreground mt-2 text-sm font-medium">
+          {THREAT_SIGNAL_STAT.headline}
+        </p>
 
-        <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
+        <StatSparkline className="mt-3" />
+
+        <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
           {THREAT_SIGNAL_STAT.caption}
         </p>
       </div>

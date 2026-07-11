@@ -1,18 +1,18 @@
 'use client';
 
+import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { AlertTriangle } from 'lucide-react';
+import { Check, Lock } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 
-import type { BillingCycle } from '@/data/landing';
-import { PRICING_SECTION } from '@/data/landing';
+import { FREE_PLAN, PROFESSIONAL_PLAN } from '@/data/landing';
 
-import { LandingPricingCard } from './LandingPricingCard';
+import { LandingEmailForm } from './LandingEmailForm';
 import { LandingSection } from './LandingSection';
 
 export function LandingPricing() {
-  const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
-  const section = PRICING_SECTION;
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
 
   return (
     <LandingSection
@@ -20,57 +20,135 @@ export function LandingPricing() {
       ariaLabelledby="pricing-heading"
       className="border-border-subtle border-t"
     >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+      <div className="relative grid gap-6 lg:grid-cols-[1fr_auto_1fr] lg:items-stretch lg:gap-0">
+        {/* Free plan */}
+        <article className="border-info/50 bg-background-alt/60 flex flex-col rounded-2xl border-2 p-6 sm:p-8">
           <h2
             id="pricing-heading"
-            className="font-heading text-foreground text-2xl font-semibold tracking-tight text-balance sm:text-3xl"
+            className="text-info text-sm font-bold tracking-[0.12em] uppercase"
           >
-            {section.title}
+            {FREE_PLAN.title}
           </h2>
-          <p className="text-primary-400 mt-2 text-sm font-semibold">
-            {section.introNote}
-          </p>
+          <p className="text-muted mt-3 text-sm">{FREE_PLAN.intro}</p>
+
+          <ul className="mt-5 space-y-2.5">
+            {FREE_PLAN.features.map(feature => (
+              <li
+                key={feature}
+                className="text-body flex items-start gap-2.5 text-sm"
+              >
+                <Check className="text-info mt-0.5 size-4 shrink-0" aria-hidden />
+                <span>{feature}</span>
+              </li>
+            ))}
+          </ul>
+
+          <div className="mt-6">
+            <LandingEmailForm
+              actionUrl={FREE_PLAN.actionUrl}
+              placeholder={FREE_PLAN.emailPlaceholder}
+              buttonLabel={FREE_PLAN.buttonLabel}
+              variant="blue"
+            />
+          </div>
+          <p className="text-muted-foreground mt-3 text-xs">{FREE_PLAN.footnote}</p>
+        </article>
+
+        {/* VS divider */}
+        <div className="flex items-center justify-center lg:px-4">
+          <span className="border-border bg-surface text-muted flex size-10 items-center justify-center rounded-full border text-xs font-bold">
+            VS
+          </span>
         </div>
 
-        <div className="flex flex-col items-start gap-3 sm:items-end">
-          <p className="text-muted flex items-center gap-2 text-xs sm:text-sm">
-            <AlertTriangle className="text-warning size-4 shrink-0" aria-hidden />
-            {section.urgencyNote}
+        {/* Professional plan */}
+        <article className="border-primary-500/60 bg-background-alt/60 flex flex-col rounded-2xl border-2 p-6 sm:p-8">
+          <h2 className="text-primary-400 text-sm font-bold tracking-[0.12em] uppercase">
+            {PROFESSIONAL_PLAN.title}
+          </h2>
+          <p className="text-muted mt-3 text-sm leading-relaxed">
+            {PROFESSIONAL_PLAN.description}
           </p>
 
-          <div
-            className="border-border bg-surface/50 inline-flex rounded-lg border p-1"
-            role="group"
-            aria-label="Billing cycle"
-          >
-            {(['monthly', 'annual'] as const).map(cycle => (
+          <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:gap-8">
+            <ul className="grid flex-1 gap-2 sm:grid-cols-2">
+              {PROFESSIONAL_PLAN.features.map(feature => (
+                <li
+                  key={feature}
+                  className="text-body flex items-start gap-2 text-sm"
+                >
+                  <Check
+                    className="text-primary-400 mt-0.5 size-4 shrink-0"
+                    aria-hidden
+                  />
+                  <span>{feature}</span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="flex shrink-0 flex-col gap-2 lg:w-36">
               <button
-                key={cycle}
                 type="button"
-                onClick={() => setBillingCycle(cycle)}
+                onClick={() => setBillingCycle('monthly')}
                 className={cn(
-                  'rounded-md px-3 py-1.5 text-xs font-semibold transition-colors sm:px-4 sm:text-sm',
-                  billingCycle === cycle
-                    ? 'bg-primary-500 text-white'
-                    : 'text-muted hover:text-foreground',
+                  'border-border rounded-lg border p-3 text-left transition-colors',
+                  billingCycle === 'monthly'
+                    ? 'border-primary-500/50 bg-primary-500/10'
+                    : 'bg-surface/40 hover:bg-surface/60',
                 )}
               >
-                {section.toggle[cycle]}
+                <p className="text-foreground text-lg font-bold">
+                  {PROFESSIONAL_PLAN.monthly.amount}
+                  <span className="text-muted text-sm font-normal">
+                    {PROFESSIONAL_PLAN.monthly.cadence}
+                  </span>
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  {PROFESSIONAL_PLAN.monthly.note}
+                </p>
               </button>
-            ))}
+              <button
+                type="button"
+                onClick={() => setBillingCycle('annual')}
+                className={cn(
+                  'border-border relative rounded-lg border p-3 text-left transition-colors',
+                  billingCycle === 'annual'
+                    ? 'border-primary-500/50 bg-primary-500/10'
+                    : 'bg-surface/40 hover:bg-surface/60',
+                )}
+              >
+                {PROFESSIONAL_PLAN.annual.badge ? (
+                  <span className="bg-primary-500 text-foreground absolute -top-2 right-2 rounded px-1.5 py-0.5 text-[0.6rem] font-bold">
+                    {PROFESSIONAL_PLAN.annual.badge}
+                  </span>
+                ) : null}
+                <p className="text-foreground text-lg font-bold">
+                  {PROFESSIONAL_PLAN.annual.amount}
+                  <span className="text-muted text-sm font-normal">
+                    {PROFESSIONAL_PLAN.annual.cadence}
+                  </span>
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  {PROFESSIONAL_PLAN.annual.note}
+                </p>
+              </button>
+            </div>
           </div>
-        </div>
-      </div>
 
-      <div className="mt-10 grid gap-6 lg:grid-cols-3">
-        {section.plans.map(plan => (
-          <LandingPricingCard
-            key={plan.id}
-            plan={plan}
-            billingCycle={billingCycle}
-          />
-        ))}
+          <Link
+            href={PROFESSIONAL_PLAN.cta.href}
+            className={cn(
+              buttonVariants({ variant: 'default', size: 'md' }),
+              'mt-6 h-12 w-full gap-2 text-sm font-semibold',
+            )}
+          >
+            <Lock className="size-4" aria-hidden />
+            {PROFESSIONAL_PLAN.cta.label}
+          </Link>
+          <p className="text-muted-foreground mt-2 text-center text-xs">
+            {PROFESSIONAL_PLAN.footnote}
+          </p>
+        </article>
       </div>
     </LandingSection>
   );

@@ -8,34 +8,29 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { useAuth } from '@/contexts/AuthProvider';
-import { DASHBOARD_DUMMY_LAST_UPDATED_ISO } from '@/data/dashboardConstants';
-import { DASHBOARD_MOCK_BRIEFS } from '@/data/dashboardBriefs';
-import { DASHBOARD_RECENT_BRIEFS } from '@/data/dashboardRecentBriefs';
-import { MOCK_ALERTS } from '@/data/mockAlerts';
-import { useAlertsSearchQuery } from '@/hooks/useAlertsSearchQuery';
-import { useAlertsStatsQuery } from '@/hooks/useAlertsStatsQuery';
-import { useDashboardTopAlertsWeekQuery } from '@/hooks/useDashboardTopAlertsWeekQuery';
-import { partitionAlertsByRisk } from '@/lib/alertRisk';
 import {
-  mapAlertsStatsToRiskCounts,
-  mapApiAlertToAlertItem,
-} from '@/lib/api/alerts';
+  DASHBOARD_SEARCH_ALERTS_LIMIT,
+  DASHBOARD_SEARCH_GROUP_LIMIT,
+  DASHBOARD_TOP_ALERTS_WEEK_LIMIT,
+  useAlertsSearchQuery,
+  useAlertsStatsQuery,
+  useDashboardBriefsPreviewQuery,
+  useDashboardTopAlertsWeekQuery,
+} from '@/hooks';
+import { mapAlertsStatsToRiskCounts } from '@/lib/api/alerts';
 import { buildAlertsListQueryString } from '@/lib/alertsUrlState';
 import { formatDashboardUpdatedRelative } from '@/lib/formatDashboardDate';
 import { mapApiAlertToDashboardTopAlertWeeklyItem } from '@/lib/mapApiAlertToDashboardTopAlertWeekly';
 import { AlertTriangle, ShieldAlert } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { FC } from 'react';
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useMemo } from 'react';
 
 import { DashboardCriticalRiskCard } from './DashboardCriticalRiskCard';
 import { DashboardIntelligenceBriefs } from './DashboardIntelligenceBriefs';
 import { DashboardRecentBriefsTable } from './DashboardRecentBriefsTable';
 import { DashboardTopAlertsThisWeek } from './DashboardTopAlertsThisWeek';
 import { DashboardWelcomeHeader } from './DashboardWelcomeHeader';
-
-const NEW_CRITICAL_SINCE_LAST_LOGIN = 5;
-const NEW_HIGH_SINCE_LAST_LOGIN = 2;
 
 function deriveFirstName(
   metadataFullName: string | undefined,
@@ -62,10 +57,6 @@ export const DashboardScreen: FC = () => {
   const searchTerm = searchQueryRaw.trim();
   const isSearchActive = searchTerm.length > 0;
 
-  const [lastUpdatedIso, setLastUpdatedIso] = useState(
-    DASHBOARD_DUMMY_LAST_UPDATED_ISO,
-  );
-
   const {
     data: statsData,
     dataUpdatedAt: statsDataUpdatedAt,
@@ -83,6 +74,8 @@ export const DashboardScreen: FC = () => {
 
   const searchQuery = useAlertsSearchQuery(searchTerm, {
     enabled: isSearchActive,
+    limit: DASHBOARD_SEARCH_ALERTS_LIMIT,
+    groupLimit: DASHBOARD_SEARCH_GROUP_LIMIT,
   });
 
   const searchRecords = searchQuery.data?.alerts;
@@ -92,25 +85,37 @@ export const DashboardScreen: FC = () => {
     refetch: refetchTopAlertsWeek,
     isError: topAlertsWeekError,
     isPending: topAlertsWeekPending,
+    dataUpdatedAt: topAlertsWeekUpdatedAt,
   } = useDashboardTopAlertsWeekQuery({ enabled: !isSearchActive });
 
-  const { high: mockHigh, medium: mockMedium } = useMemo(
-    () => partitionAlertsByRisk(MOCK_ALERTS),
-    [],
-  );
+  const {
+    data: briefsPreview,
+    refetch: refetchBriefsPreview,
+    isError: briefsPreviewError,
+    isPending: briefsPreviewPending,
+    dataUpdatedAt: briefsPreviewUpdatedAt,
+  } = useDashboardBriefsPreviewQuery({ enabled: !isSearchActive });
+
+  const dashboardBriefs = briefsPreview?.items ?? [];
 
   const searchPartition = useMemo(() => {
     if (!isSearchActive || !searchRecords) {
-      return { high: [], medium: [], low: [] };
+      return { critical: 0, high: 0 };
     }
-    return partitionAlertsByRisk(searchRecords.map(mapApiAlertToAlertItem));
+    let critical = 0;
+    let high = 0;
+    for (const record of searchRecords) {
+      if (record.risk_band?.trim().toLowerCase() === 'critical') critical += 1;
+      else if (record.risk_level?.trim().toLowerCase() === 'high') high += 1;
+    }
+    return { critical, high };
   }, [isSearchActive, searchRecords]);
 
   const topAlertsFromSearch = useMemo(() => {
     if (!isSearchActive || !searchRecords?.length) return [];
     return [...searchRecords]
       .sort((a, b) => b.signal_score - a.signal_score)
-      .slice(0, 3)
+      .slice(0, DASHBOARD_TOP_ALERTS_WEEK_LIMIT)
       .map(item => mapApiAlertToDashboardTopAlertWeeklyItem(item));
   }, [isSearchActive, searchRecords]);
 
@@ -119,15 +124,11 @@ export const DashboardScreen: FC = () => {
     : (topAlertsWeekData ?? []);
 
   const criticalCount = isSearchActive
-    ? searchPartition.high.length
-    : typeof statsCounts?.high === 'number'
-      ? statsCounts.high
-      : mockHigh.length;
+    ? searchPartition.critical
+    : (statsData?.critical_count ?? 0);
   const highCount = isSearchActive
-    ? searchPartition.medium.length
-    : typeof statsCounts?.medium === 'number'
-      ? statsCounts.medium
-      : mockMedium.length;
+    ? searchPartition.high
+    : (statsCounts?.high ?? 0);
 
   const alertsContinueHref = useMemo(() => {
     const q = isSearchActive ? searchTerm : undefined;
@@ -135,8 +136,8 @@ export const DashboardScreen: FC = () => {
       buildAlertsListQueryString(risk, 1, 'all', q);
     const allQs = buildAlertsListQueryString('all', 1, 'all', q);
     return {
-      critical: qs('high') ? `/alerts?${qs('high')}` : '/alerts',
-      high: qs('medium') ? `/alerts?${qs('medium')}` : '/alerts',
+      critical: allQs ? `/alerts?${allQs}` : '/alerts',
+      high: qs('high') ? `/alerts?${qs('high')}` : '/alerts?risk=high',
       all: allQs ? `/alerts?${allQs}` : '/alerts',
     };
   }, [isSearchActive, searchTerm]);
@@ -151,30 +152,40 @@ export const DashboardScreen: FC = () => {
         new Date(searchQuery.dataUpdatedAt).toISOString(),
       );
     }
-    if (statsDataUpdatedAt > 0 && statsData && !statsError) {
+
+    const timestamps = [
+      !statsError && statsDataUpdatedAt > 0 ? statsDataUpdatedAt : 0,
+      !topAlertsWeekError && topAlertsWeekUpdatedAt > 0
+        ? topAlertsWeekUpdatedAt
+        : 0,
+      !briefsPreviewError && briefsPreviewUpdatedAt > 0
+        ? briefsPreviewUpdatedAt
+        : 0,
+    ].filter(value => value > 0);
+
+    if (timestamps.length > 0) {
       return formatDashboardUpdatedRelative(
-        new Date(statsDataUpdatedAt).toISOString(),
+        new Date(Math.max(...timestamps)).toISOString(),
       );
     }
-    return formatDashboardUpdatedRelative(lastUpdatedIso);
+
+    return 'recently';
   }, [
     isSearchActive,
     searchQuery.dataUpdatedAt,
     searchQuery.isError,
     statsDataUpdatedAt,
-    statsData,
     statsError,
-    lastUpdatedIso,
+    topAlertsWeekError,
+    topAlertsWeekUpdatedAt,
+    briefsPreviewError,
+    briefsPreviewUpdatedAt,
   ]);
 
   const metadataName = user?.user_metadata?.full_name;
   const fullName = typeof metadataName === 'string' ? metadataName : undefined;
   const email = subscriber?.email ?? user?.email ?? null;
   const firstName = deriveFirstName(fullName, email);
-
-  const newCriticalSinceLogin = isSearchActive ? 0 : NEW_CRITICAL_SINCE_LAST_LOGIN;
-  const newHighSinceLogin = isSearchActive ? 0 : NEW_HIGH_SINCE_LAST_LOGIN;
-  const totalNewSinceLogin = newCriticalSinceLogin + newHighSinceLogin;
 
   const searchResultsLoading =
     isSearchActive && searchQuery.isPending && searchQuery.data === undefined;
@@ -188,22 +199,42 @@ export const DashboardScreen: FC = () => {
     topAlertsPendingEffective &&
     !(isSearchActive ? searchQuery.data : topAlertsWeekData);
 
+  const briefsStillLoading =
+    !isSearchActive &&
+    briefsPreviewPending &&
+    briefsPreview === undefined;
+
   function handleRefresh() {
-    setLastUpdatedIso(new Date().toISOString());
     if (isSearchActive) {
       void searchQuery.refetch();
     } else {
       void refetchStats();
       void refetchTopAlertsWeek();
+      void refetchBriefsPreview();
     }
     router.refresh();
   }
+
+  const briefsBodyContent = isSearchActive ? (
+    <p className="text-muted border-border mt-5 rounded-lg border border-dashed px-4 py-8 text-center text-sm">
+      Brief previews are hidden while search is active. Open the briefs library
+      to browse intelligence reports.
+    </p>
+  ) : briefsStillLoading ? (
+    <LoadingState label="Loading intelligence briefs…" className="py-10" />
+  ) : briefsPreviewError ? (
+    <ErrorState
+      title="Unable to load intelligence briefs"
+      message="We could not fetch brief previews right now. Please try again."
+      onRetry={() => void refetchBriefsPreview()}
+      className="py-10"
+    />
+  ) : undefined;
 
   return (
     <div className="space-y-6 lg:space-y-8">
       <DashboardWelcomeHeader
         firstName={firstName}
-        newAlertsSinceLastLogin={totalNewSinceLogin}
         lastUpdatedLabel={lastUpdatedLabel}
         onRefresh={handleRefresh}
       />
@@ -227,34 +258,34 @@ export const DashboardScreen: FC = () => {
       <div className="grid gap-4 lg:grid-cols-2">
         <DashboardCriticalRiskCard
           label="Critical Risk Alerts"
-          rangeLabel="80-100"
+          rangeLabel="81-100"
           value={criticalCount}
           description="Immediate attention required."
           tone="critical"
           icon={<ShieldAlert className="size-6 sm:size-7" aria-hidden />}
           href={alertsContinueHref.critical}
-          newSinceLastLogin={newCriticalSinceLogin}
         />
         <DashboardCriticalRiskCard
           label="High Risk Alerts"
-          rangeLabel="60-79"
+          rangeLabel="71-80"
           value={highCount}
           description="Elevated risk requiring close monitoring."
           tone="high"
           icon={<AlertTriangle className="size-6 sm:size-7" aria-hidden />}
           href={alertsContinueHref.high}
-          newSinceLastLogin={newHighSinceLogin}
         />
       </div>
 
       <DashboardIntelligenceBriefs
-        briefs={DASHBOARD_MOCK_BRIEFS}
+        briefs={dashboardBriefs}
         viewAllHref="/briefs"
+        bodyContent={briefsBodyContent}
       />
 
       <DashboardRecentBriefsTable
-        briefs={DASHBOARD_RECENT_BRIEFS}
+        briefs={dashboardBriefs}
         viewAllHref="/briefs"
+        bodyContent={briefsBodyContent}
       />
 
       <DashboardTopAlertsThisWeek

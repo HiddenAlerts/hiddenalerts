@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { Loader2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 export type DataTableColumn<T> = {
@@ -21,6 +22,9 @@ export type DataTableProps<T> = {
   rows: T[];
   rowKey: (row: T) => string;
   emptyMessage?: string;
+  /** Shows a loading overlay inside the table while refetching filtered results. */
+  isLoading?: boolean;
+  loadingLabel?: string;
   className?: string;
 };
 
@@ -33,6 +37,8 @@ export function DataTable<T>({
   rows,
   rowKey,
   emptyMessage = 'No items to show.',
+  isLoading = false,
+  loadingLabel = 'Updating…',
   className,
 }: DataTableProps<T>) {
   return (
@@ -42,8 +48,29 @@ export function DataTable<T>({
         className,
       )}
     >
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] border-collapse text-left">
+      <div className="relative overflow-x-auto">
+        {isLoading ? (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+            className="bg-background-alt/80 absolute inset-0 z-10 flex items-center justify-center gap-2 backdrop-blur-[1px]"
+          >
+            <Loader2
+              className="text-primary-400 size-5 animate-spin"
+              strokeWidth={2}
+              aria-hidden
+            />
+            <span className="text-muted text-sm font-medium">{loadingLabel}</span>
+          </div>
+        ) : null}
+
+        <table
+          className={cn(
+            'w-full min-w-[640px] border-collapse text-left transition-opacity',
+            isLoading && 'opacity-60',
+          )}
+        >
           <thead className="border-border bg-surface/40 border-b">
             <tr>
               {columns.map(col => (

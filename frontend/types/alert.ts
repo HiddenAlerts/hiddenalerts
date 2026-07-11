@@ -9,8 +9,12 @@ export type AlertItem = {
   /** Short label for the source tag when set; otherwise `sourceLabel` is used. */
   sourceDisplayLabel?: string;
   badgeTone: AlertBadgeTone;
-  /** Uppercase label for UI, e.g. HIGH, MEDIUM, LOW */
+  /** Legacy 3-level label (HIGH / MEDIUM / LOW) — use `riskBandLabel` for badges. */
   riskLevelLabel: string;
+  /** Badge label from `risk_band` (`CRITICAL` / `HIGH`), or null when no badge. */
+  riskBandLabel: string | null;
+  /** Raw API `risk_band` value when present. */
+  riskBand?: string;
   /** From API when available */
   signalScore?: number;
   /** External link for “View Full Signal” (from API `source_url`). */

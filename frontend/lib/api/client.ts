@@ -91,3 +91,15 @@ export function apiPost<TResponse>(
 ) {
   return apiRequest<TResponse>(path, { ...init, method: 'POST', json: body });
 }
+
+export function apiPut<TResponse>(
+  path: string,
+  body: NonNullable<ApiRequestInit['json']>,
+  init?: ApiRequestInit,
+) {
+  return apiRequest<TResponse>(path, { ...init, method: 'PUT', json: body });
+}
+
+export function apiDelete<TResponse>(path: string, init?: ApiRequestInit) {
+  return apiRequest<TResponse>(path, { ...init, method: 'DELETE' });
+}

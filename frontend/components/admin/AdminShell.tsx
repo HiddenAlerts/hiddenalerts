@@ -4,14 +4,15 @@ import { Sidebar, type SidebarNavItem } from '@/components/dashboard';
 import { useAdminAuth } from '@/contexts/AdminAuthProvider';
 import { useSidebar } from '@/hooks/useSidebar';
 import { cn } from '@/lib/utils';
-import { Bell, FileText, LogOut, Menu, Users } from 'lucide-react';
+import { Bell, FileText, LogOut, Menu /* , Users */ } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { FC, ReactNode } from 'react';
 
 const ADMIN_NAV: SidebarNavItem[] = [
   { href: '/admin/briefs', label: 'Briefs', icon: FileText },
   { href: '/admin/alerts', label: 'Alerts', icon: Bell },
-  { href: '/admin/subscribers', label: 'Subscribers', icon: Users },
+  // Subscribers API not wired yet — restore when backend is ready.
+  // { href: '/admin/subscribers', label: 'Subscribers', icon: Users },
 ];
 
 export type AdminShellProps = {

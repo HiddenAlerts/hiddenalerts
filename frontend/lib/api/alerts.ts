@@ -1,11 +1,13 @@
 import type { AlertsRiskFilterValue } from '@/data/alertRiskFilterOptions';
 import {
   formatRiskLevelLabel,
+  getRiskBandBadgeLabel,
   simplifyAlertSourceName,
 } from '@/lib/alertDisplay';
 import type { AlertBadgeTone, AlertItem } from '@/types/alert';
 import type {
   AlertApiRecord,
+  AlertDetailApiRecord,
   AlertsListResponse,
   AlertsSearchResponse,
   AlertsStatsResponse,
@@ -30,6 +32,12 @@ export type FetchAlertsParams = {
   source?: string;
 };
 
+function riskBandToBadgeTone(riskBand?: string | null): AlertBadgeTone {
+  const band = riskBand?.trim().toLowerCase();
+  if (band === 'critical' || band === 'high') return 'danger';
+  return 'info';
+}
+
 function riskLevelToBadge(risk: string): AlertBadgeTone {
   const r = risk.toLowerCase();
   if (r === 'high') return 'danger';
@@ -45,14 +53,20 @@ export function mapApiAlertToAlertItem(record: AlertApiRecord): AlertItem {
       ? matchedRaw.trim()
       : undefined;
 
+  const riskBandLabel = getRiskBandBadgeLabel(record.risk_band);
+
   return {
     id: String(record.id),
     title: record.title,
     description: record.summary,
     sourceLabel: record.source_name,
     sourceDisplayLabel: simplifyAlertSourceName(record.source_name),
-    badgeTone: riskLevelToBadge(record.risk_level),
+    badgeTone: riskBandLabel
+      ? riskBandToBadgeTone(record.risk_band)
+      : riskLevelToBadge(record.risk_level),
     riskLevelLabel: formatRiskLevelLabel(record.risk_level),
+    riskBandLabel,
+    riskBand: record.risk_band,
     signalScore: record.signal_score,
     sourceUrl: record.source_url,
     category: record.category,
@@ -90,8 +104,8 @@ export async function fetchAlertsPage(
 export async function fetchAlertDetail(
   alertId: string,
   token: string,
-): Promise<AlertApiRecord> {
-  return apiGet<AlertApiRecord>(buildAlertDetailPath(alertId), { token });
+): Promise<AlertDetailApiRecord> {
+  return apiGet<AlertDetailApiRecord>(buildAlertDetailPath(alertId), { token });
 }
 
 export function buildTopAlertsPath() {

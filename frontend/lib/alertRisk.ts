@@ -2,8 +2,12 @@ import type { AlertItem } from '@/types/alert';
 
 export type AlertRiskLevel = 'high' | 'medium' | 'low';
 
-/** Maps existing badge tones to dashboard risk columns without changing alert data. */
+/** Maps badge tones and `risk_band` to dashboard risk columns. */
 export function getAlertRisk(alert: AlertItem): AlertRiskLevel {
+  const band = alert.riskBand?.trim().toLowerCase();
+  if (band === 'critical' || band === 'high' || alert.riskBandLabel === 'HIGH' || alert.riskBandLabel === 'CRITICAL') {
+    return 'high';
+  }
   switch (alert.badgeTone) {
     case 'danger':
       return 'high';

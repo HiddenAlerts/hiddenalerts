@@ -27,6 +27,8 @@ export type SubscriberBrief = {
   riskScore: number;
   riskLabel: BriefRiskLabel;
   coverTheme: BriefCoverTheme;
+  /** Real uploaded photo, if set — falls back to the themed cover when absent. */
+  featuredImage?: string;
   /** Number of supporting/verified sources cited in the brief. */
   sourceCount: number;
   /** Added or updated within the current week. */
@@ -53,4 +55,43 @@ export type BriefFilters = {
 export type BriefCountItem = {
   label: string;
   count: number;
+};
+
+export type BriefDetailRiskLevel = 'critical' | 'high' | 'medium' | 'low';
+
+export type BriefDetailConfidenceLevel = 'high' | 'medium' | 'low';
+
+export type BriefSupportingAlert = {
+  url: string;
+  title?: string;
+};
+
+/**
+ * Full content for a single brief's reading view — the shape `BriefReader`
+ * renders, regardless of whether the data came from the admin form or
+ * subscriber mock data.
+ */
+export type BriefDetail = {
+  id: string;
+  slug: string;
+  title: string;
+  category: string;
+  /** Fallback banner visual used when there's no `featuredImage`. */
+  coverTheme: BriefCoverTheme;
+  riskScore: number;
+  riskLevel: BriefDetailRiskLevel;
+  confidenceLevel: BriefDetailConfidenceLevel;
+  primaryEntities: string[];
+  tags: string[];
+  featuredImage?: string;
+  executiveSummary: string;
+  whyThisMatters: string;
+  keySignals: string;
+  riskAssessment: string;
+  whatOthersMiss: string;
+  implications: string;
+  mainBrief: string;
+  supportingAlerts: BriefSupportingAlert[];
+  status: 'draft' | 'published' | 'archived';
+  publishedDate?: string;
 };

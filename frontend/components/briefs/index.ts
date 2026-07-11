@@ -2,7 +2,13 @@ export { BriefCard } from './BriefCard';
 export { BriefCategoriesPanel } from './BriefCategoriesPanel';
 export { BriefCover } from './BriefCover';
 export { BriefCoveragePanel } from './BriefCoveragePanel';
+export {
+  BriefDetailScreen,
+  type BriefDetailScreenProps,
+} from './BriefDetailScreen';
+export { BriefReader, type BriefReaderProps } from './BriefReader';
 export { BriefRiskTag } from './BriefRiskTag';
+export { BriefScoreGauge } from './BriefScoreGauge';
 export { BriefStatCard } from './BriefStatCard';
 export { BriefsGrid } from './BriefsGrid';
 export { BriefsLibraryHeader } from './BriefsLibraryHeader';

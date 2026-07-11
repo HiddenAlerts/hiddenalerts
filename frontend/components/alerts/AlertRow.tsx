@@ -23,17 +23,19 @@ const toneText: Record<ReturnType<typeof scoreVisualTone>, string> = {
   muted: 'text-body',
 };
 
-function cardAccentClass(label: string) {
-  if (label === 'HIGH') return 'border-l-danger';
-  if (label === 'MEDIUM') return 'border-l-warning';
-  if (label === 'LOW') return 'border-l-success';
+function cardAccentClass(riskBandLabel: string | null, riskLevelLabel: string) {
+  if (riskBandLabel === 'CRITICAL') return 'border-l-danger border-l-[4px]';
+  if (riskBandLabel === 'HIGH') return 'border-l-danger';
+  if (riskLevelLabel === 'MEDIUM') return 'border-l-warning';
+  if (riskLevelLabel === 'LOW') return 'border-l-success';
   return 'border-l-border';
 }
 
-function iconWellClass(label: string) {
-  if (label === 'HIGH') return 'bg-danger-muted text-danger';
-  if (label === 'MEDIUM') return 'bg-warning-muted text-warning';
-  if (label === 'LOW') return 'bg-success-muted text-success';
+function iconWellClass(riskBandLabel: string | null, riskLevelLabel: string) {
+  if (riskBandLabel === 'CRITICAL') return 'bg-danger/20 text-danger';
+  if (riskBandLabel === 'HIGH') return 'bg-danger-muted text-danger';
+  if (riskLevelLabel === 'MEDIUM') return 'bg-warning-muted text-warning';
+  if (riskLevelLabel === 'LOW') return 'bg-success-muted text-success';
   return 'bg-surface-muted text-body';
 }
 
@@ -51,7 +53,11 @@ export const AlertRow: FC<AlertRowProps> = ({
 }) => {
   const sourceShort = alert.sourceDisplayLabel ?? alert.sourceLabel;
   const categoryLine = formatDashboardAlertTypeLabel(alert.category);
-  const tone = scoreVisualTone(alert.signalScore, alert.riskLevelLabel);
+  const tone = scoreVisualTone(
+    alert.signalScore,
+    alert.riskLevelLabel,
+    alert.riskBand,
+  );
   const scoreToneClass = toneText[tone];
   const displayedAtIso = alertDisplayedAtIso(alert);
   const dateLine = formatDashboardAlertDateOnlyUtc(displayedAtIso);
@@ -67,7 +73,7 @@ export const AlertRow: FC<AlertRowProps> = ({
       href={detailHref}
       className={cn(
         'border-border bg-background-alt group focus-visible:ring-primary-500/40 flex w-full min-w-0 cursor-pointer flex-col justify-between gap-4 rounded-md border border-l-[3px] p-4 transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none sm:flex-row sm:items-center sm:gap-10',
-        cardAccentClass(alert.riskLevelLabel),
+        cardAccentClass(alert.riskBandLabel, alert.riskLevelLabel),
         'hover:bg-surface/20',
         className,
       )}
@@ -76,7 +82,7 @@ export const AlertRow: FC<AlertRowProps> = ({
         <div
           className={cn(
             'flex size-11 shrink-0 items-center justify-center rounded-full sm:size-16',
-            iconWellClass(alert.riskLevelLabel),
+            iconWellClass(alert.riskBandLabel, alert.riskLevelLabel),
           )}
         >
           <DashboardCategoryIcon
@@ -106,7 +112,9 @@ export const AlertRow: FC<AlertRowProps> = ({
 
       <div className="flex w-full min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-3 sm:w-auto sm:shrink-0 sm:flex-nowrap sm:items-center sm:gap-6">
         <div className="flex items-end gap-6 sm:min-w-[5rem]">
-          <RiskBadge label={alert.riskLevelLabel} variant="outline" />
+          {alert.riskBandLabel ? (
+            <RiskBadge label={alert.riskBandLabel} variant="outline" />
+          ) : null}
           <p className="flex items-baseline gap-0.5 tabular-nums">
             {typeof alert.signalScore === 'number' ? (
               <>

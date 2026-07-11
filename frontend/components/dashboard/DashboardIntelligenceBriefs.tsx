@@ -1,17 +1,19 @@
-import type { DashboardBriefItem } from '@/data/dashboardBriefs';
+'use client';
+
+import { BriefCard } from '@/components/briefs/BriefCard';
 import { cn } from '@/lib/utils';
+import type { SubscriberBrief } from '@/types/briefs';
 import { ArrowRight } from 'lucide-react';
 import Link from 'next/link';
-import type { FC } from 'react';
-
-import { DashboardBriefCard } from './DashboardBriefCard';
+import type { FC, ReactNode } from 'react';
 
 export type DashboardIntelligenceBriefsProps = {
   title?: string;
   subtitle?: string;
-  briefs: DashboardBriefItem[];
+  briefs: SubscriberBrief[];
   viewAllHref: string;
   viewAllLabel?: string;
+  bodyContent?: ReactNode;
   className?: string;
 };
 
@@ -23,6 +25,7 @@ export const DashboardIntelligenceBriefs: FC<
   briefs,
   viewAllHref,
   viewAllLabel = 'View all briefs',
+  bodyContent,
   className,
 }) => (
   <section
@@ -53,16 +56,18 @@ export const DashboardIntelligenceBriefs: FC<
       </Link>
     </div>
 
-    {briefs.length === 0 ? (
-      <p className="text-muted border-border mt-5 rounded-lg border border-dashed px-4 py-8 text-center text-sm">
-        No intelligence briefs available right now.
-      </p>
-    ) : (
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
-        {briefs.map(brief => (
-          <DashboardBriefCard key={brief.id} brief={brief} />
-        ))}
-      </div>
+    {bodyContent ?? (
+      briefs.length === 0 ? (
+        <p className="text-muted border-border mt-5 rounded-lg border border-dashed px-4 py-8 text-center text-sm">
+          No intelligence briefs available right now.
+        </p>
+      ) : (
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
+          {briefs.map(brief => (
+            <BriefCard key={brief.id} brief={brief} />
+          ))}
+        </div>
+      )
     )}
   </section>
 );

@@ -1,60 +1,56 @@
 'use client';
 
-import { Button, PageHeader, ScoreBadge, StatusTag } from '@/components';
-import { findAdminBrief } from '@/data/adminMockBriefs';
-import { formatAdminDate } from '@/lib/formatAdminDate';
+import { Button, EmptyState, ErrorState, LoadingState, PageHeader } from '@/components';
+import { BriefReader } from '@/components/briefs';
+import { useAdminBriefBySlugQuery } from '@/hooks';
+import { getApiErrorMessage } from '@/lib/api/queryError';
+import { adminBriefToDetail } from '@/lib/briefDetail';
 import { ArrowLeft, Pencil } from 'lucide-react';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import type { FC } from 'react';
 
-import { AdminDetailField } from './AdminDetailField';
-
-const TIME_HORIZON_LABEL = {
-  'short-term': 'Short-term',
-  'medium-term': 'Medium-term',
-  'long-term': 'Long-term',
-} as const;
-
-const RISK_LEVEL_LABEL = {
-  high: 'High',
-  medium: 'Medium',
-  low: 'Low',
-} as const;
-
-const STATUS_TONE = {
-  published: 'success',
-  draft: 'neutral',
-} as const;
-
-const STATUS_LABEL = {
-  published: 'Published',
-  draft: 'Draft',
-} as const;
-
 export type AdminBriefDetailScreenProps = {
-  briefId: string;
+  slug: string;
 };
 
-const Chip: FC<{ children: string }> = ({ children }) => (
-  <span className="bg-surface-muted text-body inline-flex items-center rounded-md px-2.5 py-1 text-xs">
-    {children}
-  </span>
-);
-
+/**
+ * Admin's read view for a single brief. Renders through the same
+ * `BriefReader` a subscriber sees, so admins can review published or draft
+ * content exactly as it will appear.
+ */
 export const AdminBriefDetailScreen: FC<AdminBriefDetailScreenProps> = ({
-  briefId,
+  slug,
 }) => {
-  const brief = findAdminBrief(briefId);
+  const { data: brief, isPending, isError, error, refetch } =
+    useAdminBriefBySlugQuery(slug);
+
+  if (isPending) {
+    return <LoadingState label="Loading brief…" />;
+  }
+
+  if (isError) {
+    return (
+      <ErrorState
+        message={getApiErrorMessage(error, 'Unable to load this brief. Please try again.')}
+        onRetry={() => void refetch()}
+      />
+    );
+  }
+
   if (!brief) {
-    notFound();
+    return (
+      <EmptyState
+        title="Brief not found"
+        description="This brief is not available right now."
+      />
+    );
   }
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={brief.title}
-        subtitle={`/${brief.slug}`}
+        subtitle={`${brief.briefCode} · /${brief.slug}`}
         actions={
           <>
             <Link
@@ -64,7 +60,7 @@ export const AdminBriefDetailScreen: FC<AdminBriefDetailScreenProps> = ({
               <ArrowLeft className="size-4" aria-hidden />
               Back
             </Link>
-            <Link href={`/admin/briefs/${brief.id}/edit`}>
+            <Link href={`/admin/briefs/${brief.slug}/edit`}>
               <Button
                 type="button"
                 size="sm"
@@ -77,85 +73,8 @@ export const AdminBriefDetailScreen: FC<AdminBriefDetailScreenProps> = ({
         }
       />
 
-      <div className="border-border bg-background-alt rounded-lg border p-4 sm:p-6">
-        <div className="grid gap-6 lg:grid-cols-2 lg:gap-x-8">
-          <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-4">
-              <AdminDetailField label="Risk Score">
-                <ScoreBadge score={brief.riskScore} />
-              </AdminDetailField>
-              <AdminDetailField label="Risk Level">
-                {RISK_LEVEL_LABEL[brief.riskLevel]}
-              </AdminDetailField>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <AdminDetailField label="Category">{brief.category}</AdminDetailField>
-              <AdminDetailField label="Status">
-                <StatusTag tone={STATUS_TONE[brief.status]}>
-                  {STATUS_LABEL[brief.status]}
-                </StatusTag>
-              </AdminDetailField>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <AdminDetailField label="Date">
-                {formatAdminDate(brief.date)}
-              </AdminDetailField>
-              <AdminDetailField label="Time Horizon">
-                {TIME_HORIZON_LABEL[brief.timeHorizon]}
-              </AdminDetailField>
-            </div>
-
-            <AdminDetailField label="Primary Entities">
-              {brief.primaryEntities.length === 0 ? (
-                '—'
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {brief.primaryEntities.map(entity => (
-                    <Chip key={entity}>{entity}</Chip>
-                  ))}
-                </div>
-              )}
-            </AdminDetailField>
-
-            <AdminDetailField label="Tags">
-              {brief.tags.length === 0 ? (
-                '—'
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {brief.tags.map(tag => (
-                    <Chip key={tag}>{tag}</Chip>
-                  ))}
-                </div>
-              )}
-            </AdminDetailField>
-          </div>
-
-          <div className="space-y-5">
-            <AdminDetailField
-              label="Executive Summary"
-              hint="(Public)"
-              block
-            >
-              {brief.executiveSummary}
-            </AdminDetailField>
-            <AdminDetailField
-              label="Key Intelligence"
-              hint="(Subscribers Only)"
-              block
-            >
-              {brief.keyIntelligence}
-            </AdminDetailField>
-            <AdminDetailField
-              label="Risk Assessment"
-              hint="(Subscribers Only)"
-              block
-            >
-              {brief.riskAssessment}
-            </AdminDetailField>
-          </div>
-        </div>
+      <div className="border-border bg-background-alt overflow-hidden rounded-lg border">
+        <BriefReader brief={adminBriefToDetail(brief)} topBar="none" />
       </div>
     </div>
   );

@@ -4,6 +4,8 @@ import type { FC, ReactNode } from 'react';
 export type PageHeaderProps = {
   title: string;
   subtitle?: string;
+  /** Optional leading icon rendered in a rounded square before the title. */
+  icon?: ReactNode;
   /** Rendered on the right side (e.g. primary CTA buttons). */
   actions?: ReactNode;
   className?: string;
@@ -16,6 +18,7 @@ export type PageHeaderProps = {
 export const PageHeader: FC<PageHeaderProps> = ({
   title,
   subtitle,
+  icon,
   actions,
   className,
 }) => (
@@ -25,13 +28,20 @@ export const PageHeader: FC<PageHeaderProps> = ({
       className,
     )}
   >
-    <div className="min-w-0 space-y-1">
-      <h1 className="font-heading text-foreground text-2xl font-semibold tracking-tight sm:text-[1.7rem]">
-        {title}
-      </h1>
-      {subtitle ? (
-        <p className="text-muted text-sm sm:text-[0.95rem]">{subtitle}</p>
+    <div className="flex min-w-0 items-start gap-3">
+      {icon ? (
+        <span className="bg-primary-500 text-foreground flex size-10 shrink-0 items-center justify-center rounded-lg">
+          {icon}
+        </span>
       ) : null}
+      <div className="min-w-0 space-y-1">
+        <h1 className="font-heading text-foreground text-2xl font-semibold tracking-tight sm:text-[1.7rem]">
+          {title}
+        </h1>
+        {subtitle ? (
+          <p className="text-muted text-sm sm:text-[0.95rem]">{subtitle}</p>
+        ) : null}
+      </div>
     </div>
     {actions ? (
       <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">

@@ -8,8 +8,8 @@ export const metadata: Metadata = {
 export default function AdminBriefNewPage() {
   return (
     <AdminBriefForm
-      title="Create Brief"
-      subtitle="Add a new intelligence brief"
+      title="Create Intelligence Brief"
+      subtitle="All fields marked with * are required."
       returnHref="/admin/briefs"
     />
   );

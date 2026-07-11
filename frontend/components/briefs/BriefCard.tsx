@@ -30,14 +30,24 @@ export const BriefCard: FC<BriefCardProps> = ({ brief, className }) => (
       className,
     )}
   >
-    <BriefCover theme={brief.coverTheme} className="aspect-[16/10] w-full">
+    <div className="relative aspect-[16/10] w-full overflow-hidden">
+      {brief.featuredImage ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={brief.featuredImage}
+          alt=""
+          className="size-full object-cover"
+        />
+      ) : (
+        <BriefCover theme={brief.coverTheme} className="size-full" />
+      )}
       <div className="absolute inset-x-3 top-3 flex items-start justify-between gap-2">
         <BriefRiskTag riskLabel={brief.riskLabel} />
         <span className="rounded-sm bg-black/45 px-1.5 py-0.5 text-sm font-semibold text-white tabular-nums backdrop-blur-sm">
           {brief.riskScore}/100
         </span>
       </div>
-    </BriefCover>
+    </div>
 
     <div className="flex flex-1 flex-col gap-3 p-4">
       <span
@@ -48,9 +58,9 @@ export const BriefCard: FC<BriefCardProps> = ({ brief, className }) => (
       <h3 className="text-foreground line-clamp-3 text-sm font-semibold leading-snug">
         {brief.title}
       </h3>
-      <div className="text-muted mt-auto flex items-center justify-between gap-2 text-xs">
-        <span>{formatBriefDate(brief.date)}</span>
-        <span className="inline-flex items-center gap-1">
+      <div className="text-muted mt-auto flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
+        <span className="whitespace-nowrap">{formatBriefDate(brief.date)}</span>
+        <span className="inline-flex items-center gap-1 whitespace-nowrap">
           <FileText className="size-3.5" aria-hidden />
           Source Count: {brief.sourceCount}
         </span>

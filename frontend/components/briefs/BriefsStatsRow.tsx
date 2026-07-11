@@ -2,13 +2,7 @@ import { formatBriefDate } from '@/lib/briefs';
 import type { BriefLibraryStats } from '@/lib/briefs';
 import { cn } from '@/lib/utils';
 import type { SubscriberBrief } from '@/types/briefs';
-import {
-  AlertTriangle,
-  Clock,
-  FileText,
-  ShieldAlert,
-  Star,
-} from 'lucide-react';
+import { AlertTriangle, FileText, ShieldAlert, Star } from 'lucide-react';
 import Link from 'next/link';
 import type { FC } from 'react';
 
@@ -54,14 +48,6 @@ export const BriefsStatsRow: FC<BriefsStatsRowProps> = ({
       sublabel="Monitor Closely"
       tone="warning"
       className="border-border px-3 md:border-l"
-    />
-    <BriefStatCard
-      icon={<Clock />}
-      value={stats.updatedThisWeek}
-      label="Updated This Week"
-      sublabel="New / Updated"
-      tone="success"
-      className="border-border border-l px-3 md:border-l-0 xl:border-l"
     />
 
     {featured ? (
