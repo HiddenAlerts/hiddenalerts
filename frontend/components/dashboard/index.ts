@@ -1,7 +1,6 @@
 export { DashboardAlertGroup } from './DashboardAlertGroup';
 export { DashboardAlertListItem } from './DashboardAlertListItem';
 export { DashboardAlertMiniRow } from './DashboardAlertMiniRow';
-export { DashboardBriefCard } from './DashboardBriefCard';
 export { DashboardCriticalRiskCard } from './DashboardCriticalRiskCard';
 export { DashboardIntelligenceBriefs } from './DashboardIntelligenceBriefs';
 export { DashboardPageHeader } from './DashboardPageHeader';

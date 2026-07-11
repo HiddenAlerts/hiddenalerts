@@ -25,7 +25,12 @@ export {
   adminBriefsListQueryKey,
   useAdminBriefsListQuery,
 } from './useAdminBriefsListQuery';
-export { alertsSearchQueryKey, useAlertsSearchQuery } from './useAlertsSearchQuery';
+export {
+  DASHBOARD_SEARCH_ALERTS_LIMIT,
+  DASHBOARD_SEARCH_GROUP_LIMIT,
+  alertsSearchQueryKey,
+  useAlertsSearchQuery,
+} from './useAlertsSearchQuery';
 export {
   alertsStatsQueryKey,
   useAlertsStatsQuery,
@@ -57,6 +62,11 @@ export {
   subscriberBriefsListQueryKey,
   useSubscriberBriefsPageQuery,
 } from './useSubscriberBriefsPageQuery';
+export {
+  DASHBOARD_BRIEFS_PREVIEW_LIMIT,
+  dashboardBriefsPreviewQueryKey,
+  useDashboardBriefsPreviewQuery,
+} from './useDashboardBriefsPreviewQuery';
 export {
   subscriberFeaturedBriefQueryKey,
   useSubscriberFeaturedBriefQuery,
