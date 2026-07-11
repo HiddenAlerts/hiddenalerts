@@ -63,8 +63,8 @@ export type AdminRiskLevelFilter =
 export function riskScoreToLevel(
   score: number,
 ): 'critical' | 'high' | 'medium' | 'low' {
-  if (score >= 90) return 'critical';
-  if (score >= 80) return 'high';
-  if (score >= 60) return 'medium';
+  if (score >= 81) return 'critical';
+  if (score >= 71) return 'high';
+  if (score >= 61) return 'medium';
   return 'low';
 }

@@ -26,24 +26,30 @@ const scoreToneClass = {
   muted: 'text-body',
 } as const;
 
-function cardAccentClass(label: string) {
-  if (label === 'HIGH') return 'border-l-danger';
-  if (label === 'MEDIUM') return 'border-l-warning';
-  if (label === 'LOW') return 'border-l-success';
+function cardAccentClass(riskBandLabel: string | null, riskLevelLabel: string) {
+  if (riskBandLabel === 'CRITICAL' || riskBandLabel === 'HIGH') {
+    return 'border-l-danger';
+  }
+  if (riskLevelLabel === 'MEDIUM') return 'border-l-warning';
+  if (riskLevelLabel === 'LOW') return 'border-l-success';
   return 'border-l-border';
 }
 
-function cardHoverBorderClass(label: string) {
-  if (label === 'HIGH') return 'hover:border-danger';
-  if (label === 'MEDIUM') return 'hover:border-warning';
-  if (label === 'LOW') return 'hover:border-success';
+function cardHoverBorderClass(riskBandLabel: string | null, riskLevelLabel: string) {
+  if (riskBandLabel === 'CRITICAL' || riskBandLabel === 'HIGH') {
+    return 'hover:border-danger';
+  }
+  if (riskLevelLabel === 'MEDIUM') return 'hover:border-warning';
+  if (riskLevelLabel === 'LOW') return 'hover:border-success';
   return 'hover:border-primary-500/45';
 }
 
-function iconWellClass(label: string) {
-  if (label === 'HIGH') return 'bg-danger-muted text-danger';
-  if (label === 'MEDIUM') return 'bg-warning-muted text-warning';
-  if (label === 'LOW') return 'bg-success-muted text-success';
+function iconWellClass(riskBandLabel: string | null, riskLevelLabel: string) {
+  if (riskBandLabel === 'CRITICAL' || riskBandLabel === 'HIGH') {
+    return 'bg-danger-muted text-danger';
+  }
+  if (riskLevelLabel === 'MEDIUM') return 'bg-warning-muted text-warning';
+  if (riskLevelLabel === 'LOW') return 'bg-success-muted text-success';
   return 'bg-surface-muted text-body';
 }
 
@@ -69,7 +75,11 @@ export const DashboardAlertListItem: FC<DashboardAlertListItemProps> = ({
   alert,
   className,
 }) => {
-  const tone = scoreVisualTone(alert.signalScore, alert.riskLevelLabel);
+  const tone = scoreVisualTone(
+    alert.signalScore,
+    alert.riskLevelLabel,
+    alert.riskBand,
+  );
   const scoreClass = scoreToneClass[tone];
   const typeLabel = formatDashboardAlertTypeLabel(alert.category);
   const sourceShort = alert.sourceDisplayLabel ?? alert.sourceLabel;
@@ -107,8 +117,8 @@ export const DashboardAlertListItem: FC<DashboardAlertListItemProps> = ({
     <div
       className={cn(
         'border-border bg-background-alt group relative flex overflow-hidden rounded-lg border border-l-[3px] shadow-xs transition-colors',
-        cardAccentClass(alert.riskLevelLabel),
-        cardHoverBorderClass(alert.riskLevelLabel),
+        cardAccentClass(alert.riskBandLabel, alert.riskLevelLabel),
+        cardHoverBorderClass(alert.riskBandLabel, alert.riskLevelLabel),
         className,
       )}
     >
@@ -119,7 +129,7 @@ export const DashboardAlertListItem: FC<DashboardAlertListItemProps> = ({
         <div
           className={cn(
             'flex size-10 shrink-0 items-center justify-center rounded-full sm:size-16',
-            iconWellClass(alert.riskLevelLabel),
+            iconWellClass(alert.riskBandLabel, alert.riskLevelLabel),
           )}
         >
           <DashboardCategoryIcon

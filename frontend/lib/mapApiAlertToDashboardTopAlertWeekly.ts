@@ -3,6 +3,10 @@ import type {
   DashboardTopAlertWeeklyItem,
   DashboardTopAlertWeeklyRiskTone,
 } from '@/data/dashboardTopAlertsThisWeek';
+import {
+  ALERT_SCORE_THRESHOLDS,
+  scoreToRiskBand,
+} from '@/lib/alertDisplay';
 import type { AlertApiRecord } from '@/types/alertsApi';
 
 /** Window (ms) within which an alert is flagged as "NEW" relative to `now`. */
@@ -15,18 +19,63 @@ type RiskPresentation = {
 };
 
 /**
- * Derives the score box presentation from the numeric signal score so the
- * displayed range matches the dashboard risk tiers (Critical 80-100,
- * High 60-79, Medium below).
+ * Derives the score box presentation from `risk_band` when available, otherwise
+ * from numeric score using aligned thresholds (81 / 71 / 61).
  */
 export function mapSignalScoreToWeeklyRisk(score: number): RiskPresentation {
-  if (score >= 80) {
-    return { tone: 'critical', label: 'Critical Risk', range: '80-100' };
+  const band = scoreToRiskBand(score);
+  if (band === 'critical') {
+    return {
+      tone: 'critical',
+      label: 'Critical Risk',
+      range: `${ALERT_SCORE_THRESHOLDS.critical}-100`,
+    };
   }
-  if (score >= 60) {
-    return { tone: 'high', label: 'High Risk', range: '60-79' };
+  if (band === 'high') {
+    return {
+      tone: 'high',
+      label: 'High Risk',
+      range: `${ALERT_SCORE_THRESHOLDS.high}-${ALERT_SCORE_THRESHOLDS.critical - 1}`,
+    };
   }
-  return { tone: 'medium', label: 'Medium Risk', range: '0-59' };
+  if (band === 'medium') {
+    return {
+      tone: 'medium',
+      label: 'Medium Risk',
+      range: `${ALERT_SCORE_THRESHOLDS.medium}-${ALERT_SCORE_THRESHOLDS.high - 1}`,
+    };
+  }
+  return {
+    tone: 'medium',
+    label: 'Medium Risk',
+    range: `0-${ALERT_SCORE_THRESHOLDS.medium - 1}`,
+  };
+}
+
+function mapRiskBandToWeeklyRisk(record: AlertApiRecord): RiskPresentation {
+  const band = record.risk_band?.trim().toLowerCase();
+  if (band === 'critical') {
+    return {
+      tone: 'critical',
+      label: 'Critical Risk',
+      range: `${ALERT_SCORE_THRESHOLDS.critical}-100`,
+    };
+  }
+  if (band === 'high') {
+    return {
+      tone: 'high',
+      label: 'High Risk',
+      range: `${ALERT_SCORE_THRESHOLDS.high}-${ALERT_SCORE_THRESHOLDS.critical - 1}`,
+    };
+  }
+  if (band === 'medium') {
+    return {
+      tone: 'medium',
+      label: 'Medium Risk',
+      range: `${ALERT_SCORE_THRESHOLDS.medium}-${ALERT_SCORE_THRESHOLDS.high - 1}`,
+    };
+  }
+  return mapSignalScoreToWeeklyRisk(record.signal_score);
 }
 
 export function mapCategoryToWeeklyIcon(
@@ -77,7 +126,7 @@ export function mapApiAlertToDashboardTopAlertWeeklyItem(
   const isNew =
     !Number.isNaN(occurredMs) && now - occurredMs <= NEW_ALERT_WINDOW_MS;
 
-  const risk = mapSignalScoreToWeeklyRisk(record.signal_score);
+  const risk = mapRiskBandToWeeklyRisk(record);
 
   const tags = [record.category, record.source_name].filter(
     (value): value is string =>

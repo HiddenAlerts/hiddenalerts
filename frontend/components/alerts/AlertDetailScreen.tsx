@@ -6,12 +6,17 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { useAlertDetailQuery } from '@/hooks';
 import {
   confidenceLabelFromRisk,
+  formatRiskBandLabel,
   formatRiskLevelLabel,
+  getRiskBandBadgeLabel,
+  scoreVisualTone,
+  scoreVisualToneClass,
 } from '@/lib/alertDisplay';
 import { alertsListHrefFromReturnParam } from '@/lib/alertsUrlState';
 import type { HttpRequestError } from '@/lib/api/client';
 import { formatAlertDatePublished } from '@/lib/formatAlertDate';
-import type { AlertApiRecord } from '@/types/alertsApi';
+import { cn } from '@/lib/utils';
+import type { AlertDetailApiRecord } from '@/types/alertsApi';
 import {
   Calendar,
   Clock3,
@@ -28,6 +33,7 @@ import { useQueryState } from 'nuqs';
 import { useMemo } from 'react';
 
 import { RiskBadge } from './RiskBadge';
+import { AlertWhyThisScorePanel } from './AlertWhyThisScorePanel';
 
 type AlertDetailScreenProps = {
   alertId: string;
@@ -68,7 +74,7 @@ function inferScopeFromTitle(title: string): string | null {
   return null;
 }
 
-function buildWhyThisMattersLines(data: AlertApiRecord): string[] {
+function buildWhyThisMattersLines(data: AlertDetailApiRecord): string[] {
   const items: string[] = [];
   const summary = data.summary?.trim();
   if (summary) {
@@ -144,8 +150,16 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
     );
   }
 
-  const riskLabel = formatRiskLevelLabel(data.risk_level);
-  const confidence = confidenceLabelFromRisk(riskLabel);
+  const riskBandBadge = getRiskBandBadgeLabel(data.risk_band);
+  const riskBandLabel = formatRiskBandLabel(data.risk_band);
+  const scoreTone = scoreVisualTone(
+    data.signal_score,
+    formatRiskLevelLabel(data.risk_level),
+    data.risk_band,
+  );
+  const confidence =
+    data.risk_explanation?.confidence?.trim() ||
+    confidenceLabelFromRisk(formatRiskLevelLabel(data.risk_level));
   const updatedAt = data.processed_at ?? data.published_at;
   const updatedLabel = updatedAt ? formatAlertDatePublished(updatedAt) : '—';
   const sourcePublishedRaw = data.source_published_at?.trim();
@@ -166,7 +180,8 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
   const geographicScope = inferScopeFromTitle(data.title);
   const affectedLabel =
     typeof data.affected === 'string' ? data.affected.trim() : '';
-  const whyThisMattersLines = buildWhyThisMattersLines(data);
+  const whyThisMattersLines =
+    data.risk_explanation == null ? buildWhyThisMattersLines(data) : [];
 
   return (
     <div className="bg-background text-foreground min-h-screen px-6 py-8">
@@ -182,7 +197,9 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
       <header className="border-border bg-surface/55 mb-6 rounded-sm border px-5 py-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
-            <RiskBadge label={riskLabel} className="px-2 py-1" />
+            {riskBandBadge ? (
+              <RiskBadge label={riskBandBadge} className="px-2 py-1" />
+            ) : null}
             <h1 className="font-heading text-foreground mt-2 max-w-4xl text-2xl leading-tight font-semibold tracking-tight">
               {data.title}
             </h1>
@@ -192,7 +209,12 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
             <p className="text-muted text-xs font-semibold tracking-[0.12em] uppercase">
               Score
             </p>
-            <p className="text-danger mt-1 text-5xl leading-none font-bold tabular-nums">
+            <p
+              className={cn(
+                'mt-1 text-5xl leading-none font-bold tabular-nums',
+                scoreVisualToneClass(scoreTone),
+              )}
+            >
               {data.signal_score ?? '—'}
             </p>
           </div>
@@ -236,6 +258,10 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
           </p>
         </div>
       </section>
+
+      {data.risk_explanation ? (
+        <AlertWhyThisScorePanel explanation={data.risk_explanation} />
+      ) : null}
 
       {whyThisMattersLines.length > 0 ? (
         <section className="mb-6">
@@ -333,9 +359,14 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
           </h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
             <div className="border-border/80 bg-surface/60 rounded-sm border px-4 py-3 md:rounded-none md:border-y-0 md:border-r md:border-l-0 md:bg-transparent">
-              <p className="text-body/80 text-sm font-medium">Risk Level</p>
-              <p className="text-danger mt-1 text-4xl font-bold tracking-tight">
-                {riskLabel}
+              <p className="text-body/80 text-sm font-medium">Risk Band</p>
+              <p
+                className={cn(
+                  'mt-1 text-4xl font-bold tracking-tight',
+                  scoreVisualToneClass(scoreTone),
+                )}
+              >
+                {riskBandLabel}
               </p>
             </div>
             <p className="text-body/95 line-clamp-2 text-[1.02rem] leading-relaxed">

@@ -1,3 +1,6 @@
+import {
+  ALERT_SCORE_THRESHOLDS,
+} from '@/lib/alertDisplay';
 import { cn } from '@/lib/utils';
 import type { FC } from 'react';
 
@@ -7,13 +10,19 @@ export type ScoreBadgeProps = {
 };
 
 /**
- * Numeric risk score chip. Tone is derived from the score so callers don't
- * have to pass it in. Mirrors the CMS table style: a soft tinted background
- * with the score in a darker matching color.
+ * Numeric risk score chip. Tone follows admin CMS thresholds:
+ * Critical ≥81, High ≥71, Medium ≥61.
  */
 function scoreToneClasses(score: number): string {
-  if (score >= 80) return 'bg-danger-muted text-danger border-danger/30';
-  if (score >= 60) return 'bg-warning-muted text-warning border-warning/30';
+  if (score >= ALERT_SCORE_THRESHOLDS.critical) {
+    return 'bg-danger/20 text-danger border-danger/40';
+  }
+  if (score >= ALERT_SCORE_THRESHOLDS.high) {
+    return 'bg-danger-muted text-danger border-danger/30';
+  }
+  if (score >= ALERT_SCORE_THRESHOLDS.medium) {
+    return 'bg-warning-muted text-warning border-warning/30';
+  }
   return 'bg-success-muted text-success border-success/30';
 }
 

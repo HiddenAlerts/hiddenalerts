@@ -1,9 +1,39 @@
+export type AlertRiskExplanationFactorLabels = {
+  source_credibility?: string;
+  financial_impact?: string;
+  victim_scale?: string;
+  cross_source?: string;
+  trend_acceleration?: string;
+};
+
+export type AlertRiskExplanationFactors = {
+  source_credibility?: number;
+  financial_impact?: number;
+  victim_scale?: number;
+  cross_source?: number;
+  trend_acceleration?: number;
+};
+
+/** Curated explanation from `GET /v1/subscriber/alerts/{id}`. */
+export type AlertRiskExplanation = {
+  score: number;
+  risk_band: string;
+  risk_level: string;
+  confidence: string;
+  factors: AlertRiskExplanationFactors;
+  factor_labels: AlertRiskExplanationFactorLabels;
+  primary_exposure: string[];
+  reason_for_score: string[];
+};
+
 export type AlertApiRecord = {
   id: number;
   title: string;
   summary: string;
   category: string;
   risk_level: string;
+  /** Source of truth for subscriber badges (`critical` / `high` show a badge). */
+  risk_band?: string;
   signal_score: number;
   source_name: string;
   source_url: string;
@@ -19,6 +49,11 @@ export type AlertApiRecord = {
   matched_entity?: string | null;
 };
 
+/** Detail record includes curated `risk_explanation`. */
+export type AlertDetailApiRecord = AlertApiRecord & {
+  risk_explanation?: AlertRiskExplanation | null;
+};
+
 export type AlertsStatsCategoryBreakdown = {
   category: string;
   count: number;
@@ -27,6 +62,7 @@ export type AlertsStatsCategoryBreakdown = {
 /** Response from `GET /alerts/stats` (risk totals and category breakdown). */
 export type AlertsStatsResponse = {
   total_alerts: number;
+  critical_count?: number;
   high_count: number;
   medium_count: number;
   low_count: number;

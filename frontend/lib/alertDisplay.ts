@@ -7,6 +7,38 @@ export function formatRiskLevelLabel(risk: string): string {
   return risk.trim().toUpperCase();
 }
 
+/** Returns CRITICAL / HIGH badge label from `risk_band`, or null when no badge. */
+export function getRiskBandBadgeLabel(riskBand?: string | null): string | null {
+  const band = riskBand?.trim().toLowerCase();
+  if (band === 'critical') return 'CRITICAL';
+  if (band === 'high') return 'HIGH';
+  return null;
+}
+
+export function shouldShowRiskBadge(riskBand?: string | null): boolean {
+  return getRiskBandBadgeLabel(riskBand) !== null;
+}
+
+/** Display text for badge labels (Critical / High). */
+export function formatRiskBandBadgeText(label: string): string {
+  if (label === 'CRITICAL') return 'Critical';
+  if (label === 'HIGH') return 'High';
+  return label;
+}
+
+/** Human-readable risk band for detail panels, e.g. "Critical". */
+export function formatRiskBandLabel(riskBand?: string | null): string {
+  const badge = getRiskBandBadgeLabel(riskBand);
+  if (badge) return formatRiskBandBadgeText(badge);
+  const band = riskBand?.trim().toLowerCase();
+  if (band === 'medium') return 'Medium';
+  if (band === 'below_60') return 'Below 60';
+  if (band) {
+    return band.replaceAll('_', ' ').replace(/\b\w/g, char => char.toUpperCase());
+  }
+  return '—';
+}
+
 /**
  * Shortens common agency/source strings for compact UI (e.g. FBI National Press Releases → FBI).
  */
@@ -43,20 +75,76 @@ export function confidenceLabelFromRisk(riskLevelLabel: string): string {
 
 export type ScoreVisualTone = 'danger' | 'warning' | 'success' | 'muted';
 
-/** Large score color: high scores red, mid orange, else neutral (mockup-style). */
+/** Score thresholds: Critical ≥81, High ≥71, Medium ≥61. */
+export const ALERT_SCORE_THRESHOLDS = {
+  critical: 81,
+  high: 71,
+  medium: 61,
+} as const;
+
+export type AlertScoreBand = 'critical' | 'high' | 'medium' | 'below_60';
+
+/** Derives `risk_band` from numeric score when the API omits it. */
+export function scoreToRiskBand(score: number): AlertScoreBand {
+  if (score >= ALERT_SCORE_THRESHOLDS.critical) return 'critical';
+  if (score >= ALERT_SCORE_THRESHOLDS.high) return 'high';
+  if (score >= ALERT_SCORE_THRESHOLDS.medium) return 'medium';
+  return 'below_60';
+}
+
+/** Resolves the effective band from API `risk_band` or score fallback. */
+export function resolveAlertRiskBand(
+  riskBand: string | null | undefined,
+  signalScore?: number,
+): AlertScoreBand | null {
+  const band = riskBand?.trim().toLowerCase();
+  if (
+    band === 'critical' ||
+    band === 'high' ||
+    band === 'medium' ||
+    band === 'below_60'
+  ) {
+    return band;
+  }
+  if (typeof signalScore === 'number' && Number.isFinite(signalScore)) {
+    return scoreToRiskBand(signalScore);
+  }
+  return null;
+}
+
+export function riskBandToScoreVisualTone(
+  band: AlertScoreBand | null,
+): ScoreVisualTone {
+  if (band === 'critical' || band === 'high') return 'danger';
+  if (band === 'medium') return 'warning';
+  if (band === 'below_60') return 'muted';
+  return 'muted';
+}
+
+/** Tailwind text class for large score numerals on alert detail. */
+export function scoreVisualToneClass(tone: ScoreVisualTone): string {
+  if (tone === 'danger') return 'text-danger';
+  if (tone === 'warning') return 'text-warning';
+  if (tone === 'success') return 'text-success';
+  return 'text-body';
+}
+
+/** Large score color — prefers `risk_band`, then admin score thresholds. */
 export function scoreVisualTone(
   signalScore: number | undefined,
   riskLevelLabel: string,
+  riskBand?: string | null,
 ): ScoreVisualTone {
+  const resolved = resolveAlertRiskBand(riskBand, signalScore);
+  if (resolved) return riskBandToScoreVisualTone(resolved);
+
   const u = riskLevelLabel.toUpperCase();
   if (typeof signalScore === 'number') {
-    if (signalScore >= 90) return 'danger';
-    if (signalScore >= 70) return 'warning';
+    return riskBandToScoreVisualTone(scoreToRiskBand(signalScore));
   }
   if (u === 'HIGH') return 'danger';
   if (u === 'MEDIUM') return 'warning';
   if (u === 'LOW') return 'success';
-  if (typeof signalScore === 'number' && signalScore >= 50) return 'success';
   return 'muted';
 }
 

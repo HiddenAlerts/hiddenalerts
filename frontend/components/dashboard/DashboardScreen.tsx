@@ -18,7 +18,6 @@ import { useDashboardTopAlertsWeekQuery } from '@/hooks/useDashboardTopAlertsWee
 import { partitionAlertsByRisk } from '@/lib/alertRisk';
 import {
   mapAlertsStatsToRiskCounts,
-  mapApiAlertToAlertItem,
 } from '@/lib/api/alerts';
 import { buildAlertsListQueryString } from '@/lib/alertsUrlState';
 import { formatDashboardUpdatedRelative } from '@/lib/formatDashboardDate';
@@ -101,9 +100,15 @@ export const DashboardScreen: FC = () => {
 
   const searchPartition = useMemo(() => {
     if (!isSearchActive || !searchRecords) {
-      return { high: [], medium: [], low: [] };
+      return { critical: 0, high: 0 };
     }
-    return partitionAlertsByRisk(searchRecords.map(mapApiAlertToAlertItem));
+    let critical = 0;
+    let high = 0;
+    for (const record of searchRecords) {
+      if (record.risk_band?.trim().toLowerCase() === 'critical') critical += 1;
+      else if (record.risk_level?.trim().toLowerCase() === 'high') high += 1;
+    }
+    return { critical, high };
   }, [isSearchActive, searchRecords]);
 
   const topAlertsFromSearch = useMemo(() => {
@@ -119,14 +124,14 @@ export const DashboardScreen: FC = () => {
     : (topAlertsWeekData ?? []);
 
   const criticalCount = isSearchActive
-    ? searchPartition.high.length
-    : typeof statsCounts?.high === 'number'
-      ? statsCounts.high
+    ? searchPartition.critical
+    : typeof statsData?.critical_count === 'number'
+      ? statsData.critical_count
       : mockHigh.length;
   const highCount = isSearchActive
-    ? searchPartition.medium.length
-    : typeof statsCounts?.medium === 'number'
-      ? statsCounts.medium
+    ? searchPartition.high
+    : typeof statsCounts?.high === 'number'
+      ? statsCounts.high
       : mockMedium.length;
 
   const alertsContinueHref = useMemo(() => {
@@ -135,8 +140,8 @@ export const DashboardScreen: FC = () => {
       buildAlertsListQueryString(risk, 1, 'all', q);
     const allQs = buildAlertsListQueryString('all', 1, 'all', q);
     return {
-      critical: qs('high') ? `/alerts?${qs('high')}` : '/alerts',
-      high: qs('medium') ? `/alerts?${qs('medium')}` : '/alerts',
+      critical: allQs ? `/alerts?${allQs}` : '/alerts',
+      high: qs('high') ? `/alerts?${qs('high')}` : '/alerts?risk=high',
       all: allQs ? `/alerts?${allQs}` : '/alerts',
     };
   }, [isSearchActive, searchTerm]);
@@ -227,7 +232,7 @@ export const DashboardScreen: FC = () => {
       <div className="grid gap-4 lg:grid-cols-2">
         <DashboardCriticalRiskCard
           label="Critical Risk Alerts"
-          rangeLabel="80-100"
+          rangeLabel="81-100"
           value={criticalCount}
           description="Immediate attention required."
           tone="critical"
@@ -237,7 +242,7 @@ export const DashboardScreen: FC = () => {
         />
         <DashboardCriticalRiskCard
           label="High Risk Alerts"
-          rangeLabel="60-79"
+          rangeLabel="71-80"
           value={highCount}
           description="Elevated risk requiring close monitoring."
           tone="high"

@@ -37,6 +37,23 @@ export function RiskBadge({
     );
   }
 
+  if (label === 'CRITICAL') {
+    return (
+      <span
+        className={cn(
+          base,
+          solidBase,
+          variant === 'outline'
+            ? 'border-danger bg-danger-500/15 text-danger border'
+            : 'bg-danger/20 text-danger',
+          className,
+        )}
+      >
+        {variant === 'outline' ? 'Critical' : label}
+      </span>
+    );
+  }
+
   if (label === 'MEDIUM') {
     return (
       <span
