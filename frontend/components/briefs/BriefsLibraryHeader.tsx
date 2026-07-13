@@ -11,14 +11,7 @@ import type {
   BriefRiskFilterValue,
   BriefSortValue,
 } from '@/types/briefs';
-import {
-  Calendar,
-  Lock,
-  RotateCcw,
-  Search,
-  ShieldAlert,
-  Tag,
-} from 'lucide-react';
+import { Calendar, RotateCcw, Search, ShieldAlert, Tag } from 'lucide-react';
 import type { FC } from 'react';
 
 export type BriefsLibraryHeaderProps = {
@@ -45,14 +38,14 @@ export const BriefsLibraryHeader: FC<BriefsLibraryHeaderProps> = ({
   className,
 }) => (
   <header className={cn('space-y-5', className)}>
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-      <div className="min-w-0 space-y-2">
-        <h1 className="font-heading text-foreground inline-flex items-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl">
-          Intelligence Brief Library
-        </h1>
-        <p className="text-danger text-sm font-semibold tracking-wide">
+    <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between lg:gap-8">
+      <div className="min-w-0 flex-1 space-y-2">
+        <p className="text-danger text-xs font-semibold tracking-[0.14em] uppercase">
           Signals Before the Headlines
         </p>
+        <h1 className="font-heading text-foreground text-2xl font-bold tracking-tight sm:text-3xl">
+          Intelligence Brief Library
+        </h1>
         <p className="text-muted max-w-2xl text-sm leading-relaxed">
           Access curated intelligence briefs identifying emerging trends,
           criminal methodologies, cyber threats, national security risks, and
@@ -60,7 +53,7 @@ export const BriefsLibraryHeader: FC<BriefsLibraryHeaderProps> = ({
         </p>
       </div>
 
-      <div className="w-full max-w-md shrink-0 lg:w-[26rem]">
+      <div className="w-full shrink-0 lg:w-[22rem] lg:pb-0.5">
         <label htmlFor="brief-search" className="sr-only">
           Search intelligence briefs
         </label>

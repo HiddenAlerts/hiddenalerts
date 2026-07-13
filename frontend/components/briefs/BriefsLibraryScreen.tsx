@@ -205,7 +205,6 @@ export const BriefsLibraryScreen: FC = () => {
 
         <BriefsLibrarySidebar
           categories={overviewQuery.data?.categories ?? []}
-          coverage={overviewQuery.data?.coverage ?? []}
           total={overviewQuery.data?.stats.total ?? 0}
           activeCategory={filters.category}
           onSelectCategory={value => updateFilters({ category: value })}
