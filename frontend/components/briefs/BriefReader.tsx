@@ -181,16 +181,24 @@ export const BriefReader: FC<BriefReaderProps> = ({
 
         {brief.featuredImage ? (
           // Local/uploaded image URL; no remote host to optimize via next/image.
-          // Use natural height (not a fixed aspect + object-cover) so full
-          // infographic covers are visible end-to-end in preview and reader.
+          // Subscriber detail: capped 16:9 hero so Executive Summary starts sooner.
+          // CMS Preview: full natural height so tall infographics stay reviewable.
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={brief.featuredImage}
             alt=""
-            className="bg-surface-muted w-full rounded-lg object-contain"
+            className={cn(
+              'bg-surface-muted w-full rounded-lg',
+              topBar === 'preview'
+                ? 'object-contain'
+                : 'aspect-[16/9] max-h-[22rem] object-cover object-center sm:max-h-[26rem]',
+            )}
           />
         ) : (
-          <BriefCover theme={brief.coverTheme} className="aspect-[21/9] w-full rounded-lg" />
+          <BriefCover
+            theme={brief.coverTheme}
+            className="aspect-[16/9] max-h-[22rem] w-full rounded-lg sm:max-h-[26rem]"
+          />
         )}
 
         <div className="grid gap-6 lg:grid-cols-3 lg:gap-8">
