@@ -31,7 +31,7 @@ export function ImageUpload({
   value,
   onFileSelect,
   onRemove,
-  hint = 'Recommended size: 1200x675px',
+  hint = 'Recommended size: 1200×675px (16:9)',
   id,
   parentStyles,
   disabled,

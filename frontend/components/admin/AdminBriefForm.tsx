@@ -602,7 +602,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
           value={imagePreview}
           onFileSelect={handleImageSelect}
           onRemove={handleImageRemove}
-          hint="Recommended size: 1200x675px. Max file size: 2MB."
+          hint="Recommended size: 1200×675px (16:9). Max file size: 2MB. One Featured Image populates Dashboard, Library, Featured, and Detail."
         />
       </div>
 
