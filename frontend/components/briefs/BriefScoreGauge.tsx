@@ -1,4 +1,4 @@
-import { riskScoreToLabel } from '@/lib/briefs';
+import { formatBriefRiskScore, riskScoreToLabel } from '@/lib/briefs';
 import { cn } from '@/lib/utils';
 import type { BriefRiskLabel } from '@/types/briefs';
 import type { FC } from 'react';
@@ -20,8 +20,14 @@ export const BriefScoreGauge: FC<BriefScoreGaugeProps> = ({
   score,
   className,
 }) => {
-  const tone = TONE_CLASSES[riskScoreToLabel(score)];
-  const pct = Math.max(0, Math.min(100, score));
+  const hasScore =
+    typeof score === 'number' && Number.isFinite(score) && score > 0;
+  const tone = TONE_CLASSES[riskScoreToLabel(hasScore ? score : 0)];
+  const pct = hasScore ? Math.max(0, Math.min(100, score)) : 0;
+  const display = formatBriefRiskScore(score);
+  const [main, denom] = display.includes('/')
+    ? (display.split('/') as [string, string])
+    : ([display, null] as const);
 
   return (
     <div
@@ -35,9 +41,9 @@ export const BriefScoreGauge: FC<BriefScoreGaugeProps> = ({
       </p>
       <p className="mt-1 flex items-baseline gap-1">
         <span className={cn('text-3xl font-bold tabular-nums', tone.text)}>
-          {score}
+          {main}
         </span>
-        <span className="text-muted text-sm">/100</span>
+        {denom ? <span className="text-muted text-sm">/{denom}</span> : null}
       </p>
       <div className="bg-surface-muted mt-3 h-1.5 w-full overflow-hidden rounded-full">
         <div

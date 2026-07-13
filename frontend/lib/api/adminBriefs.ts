@@ -136,10 +136,13 @@ function mapAdminBriefToWritePayload(brief: AdminBrief): BriefWritePayload {
     implications: brief.implications || undefined,
     main_intelligence_brief: brief.mainBrief || undefined,
     analyst_notes: brief.analystNotes || undefined,
-    supporting_alerts: brief.supportingAlerts.map(a => ({
-      url: a.url,
-      title: a.title || undefined,
-    })),
+    // Persist Name (API `title`) + URL; drop incomplete rows with no URL.
+    supporting_alerts: brief.supportingAlerts
+      .filter(a => a.url.trim())
+      .map(a => ({
+        url: a.url.trim(),
+        title: a.title?.trim() || undefined,
+      })),
     confidence_level: brief.confidenceLevel,
     brief_type: 'intelligence_brief',
     is_premium: brief.isPremium,

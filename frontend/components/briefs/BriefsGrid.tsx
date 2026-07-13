@@ -10,6 +10,7 @@ export type BriefsGridProps = {
   className?: string;
 };
 
+/** Library grid — 3 columns on desktop (mockup); compact 16:9 thumbs. */
 export const BriefsGrid: FC<BriefsGridProps> = ({ briefs, className }) => {
   if (briefs.length === 0) {
     return (
@@ -23,12 +24,16 @@ export const BriefsGrid: FC<BriefsGridProps> = ({ briefs, className }) => {
   return (
     <div
       className={cn(
-        'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4',
+        'grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3',
         className,
       )}
     >
       {briefs.map(brief => (
-        <BriefCard key={brief.id} brief={brief} />
+        <BriefCard
+          key={brief.id}
+          brief={brief}
+          imageClassName="aspect-[16/9]"
+        />
       ))}
     </div>
   );

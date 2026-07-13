@@ -1,7 +1,7 @@
-import { formatBriefDate } from '@/lib/briefs';
+import { formatBriefDate, formatBriefRiskScore } from '@/lib/briefs';
 import { cn } from '@/lib/utils';
 import type { BriefRiskLabel, SubscriberBrief } from '@/types/briefs';
-import { ArrowRight, FileText } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import type { FC } from 'react';
 
@@ -18,19 +18,30 @@ const riskScoreTone: Record<BriefRiskLabel, string> = {
 export type BriefCardProps = {
   brief: SubscriberBrief;
   className?: string;
+  /** Override cover aspect (default `aspect-[16/10]`). */
+  imageClassName?: string;
 };
 
 /** Standard library grid card: themed cover, risk score, title, meta footer. */
-export const BriefCard: FC<BriefCardProps> = ({ brief, className }) => (
+export const BriefCard: FC<BriefCardProps> = ({
+  brief,
+  className,
+  imageClassName,
+}) => (
   <Link
     href={brief.href}
-    aria-label={`${brief.title} — risk score ${brief.riskScore} out of 100, ${brief.riskLabel} risk`}
+    aria-label={`${brief.title} — risk score ${formatBriefRiskScore(brief.riskScore)}, ${brief.riskLabel} risk`}
     className={cn(
       'border-border bg-background-alt focus-visible:ring-primary-500/40 group relative flex flex-col overflow-hidden rounded-xl border transition-colors hover:border-primary-500/40 focus-visible:ring-2 focus-visible:outline-none',
       className,
     )}
   >
-    <div className="relative aspect-[16/10] w-full overflow-hidden">
+    <div
+      className={cn(
+        'relative w-full overflow-hidden',
+        imageClassName ?? 'aspect-[16/10]',
+      )}
+    >
       {brief.featuredImage ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -43,26 +54,30 @@ export const BriefCard: FC<BriefCardProps> = ({ brief, className }) => (
       )}
       <div className="absolute inset-x-3 top-3 flex items-start justify-between gap-2">
         <BriefRiskTag riskLabel={brief.riskLabel} />
-        <span className="rounded-sm bg-black/45 px-1.5 py-0.5 text-sm font-semibold text-white tabular-nums backdrop-blur-sm">
-          {brief.riskScore}/100
-        </span>
       </div>
     </div>
 
-    <div className="flex flex-1 flex-col gap-3 p-4">
+    <div className="flex flex-1 flex-col gap-2.5 p-3.5 sm:p-4">
       <span
-        className={cn('text-xs font-semibold tracking-wide uppercase', riskScoreTone[brief.riskLabel])}
+        className={cn(
+          'text-xs font-semibold tracking-wide uppercase',
+          riskScoreTone[brief.riskLabel],
+        )}
       >
         {brief.category}
       </span>
-      <h3 className="text-foreground line-clamp-3 text-sm font-semibold leading-snug">
+      <h3 className="text-foreground line-clamp-3 text-sm leading-snug font-semibold">
         {brief.title}
       </h3>
       <div className="text-muted mt-auto flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
         <span className="whitespace-nowrap">{formatBriefDate(brief.date)}</span>
-        <span className="inline-flex items-center gap-1 whitespace-nowrap">
-          <FileText className="size-3.5" aria-hidden />
-          Source Count: {brief.sourceCount}
+        <span
+          className={cn(
+            'font-semibold whitespace-nowrap tabular-nums',
+            riskScoreTone[brief.riskLabel],
+          )}
+        >
+          {formatBriefRiskScore(brief.riskScore)}
         </span>
       </div>
     </div>

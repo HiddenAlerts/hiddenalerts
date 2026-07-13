@@ -8,7 +8,6 @@ import { WhySubscribersPanel } from './WhySubscribersPanel';
 
 export type BriefsLibrarySidebarProps = {
   categories: BriefCountItem[];
-  coverage: BriefCountItem[];
   total: number;
   activeCategory: string;
   onSelectCategory: (category: string) => void;
@@ -17,7 +16,6 @@ export type BriefsLibrarySidebarProps = {
 
 export const BriefsLibrarySidebar: FC<BriefsLibrarySidebarProps> = ({
   categories,
-  coverage,
   total,
   activeCategory,
   onSelectCategory,
@@ -31,6 +29,6 @@ export const BriefsLibrarySidebar: FC<BriefsLibrarySidebarProps> = ({
       activeCategory={activeCategory}
       onSelectCategory={onSelectCategory}
     />
-    <BriefCoveragePanel coverage={coverage} />
+    <BriefCoveragePanel />
   </aside>
 );

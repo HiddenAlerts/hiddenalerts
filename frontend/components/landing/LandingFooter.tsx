@@ -1,11 +1,12 @@
 import { cn } from '@/lib/utils';
 import { Mail, Shield } from 'lucide-react';
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 
 import { FOOTER_CONTENT } from '@/data/landing';
 
-import { LandingEmailForm } from './LandingEmailForm';
 import { LandingLogo } from './LandingLogo';
+import { LandingMailerLiteForm } from './LandingMailerLiteForm';
 import { LinkedInIcon, XIcon } from './SocialIcons';
 
 const linkClass =
@@ -13,6 +14,43 @@ const linkClass =
 
 const columnTitleClass =
   'text-muted-foreground text-xs font-semibold tracking-[0.14em] uppercase';
+
+function isExternalHref(href: string) {
+  return (
+    href.startsWith('http://') ||
+    href.startsWith('https://') ||
+    href.startsWith('mailto:')
+  );
+}
+
+function FooterLink({
+  href,
+  children,
+}: {
+  href: string;
+  children: ReactNode;
+}) {
+  if (isExternalHref(href)) {
+    const isMail = href.startsWith('mailto:');
+    return (
+      <a
+        href={href}
+        className={linkClass}
+        {...(isMail
+          ? {}
+          : { target: '_blank', rel: 'noopener noreferrer' })}
+      >
+        {children}
+      </a>
+    );
+  }
+
+  return (
+    <Link href={href} className={linkClass}>
+      {children}
+    </Link>
+  );
+}
 
 export function LandingFooter() {
   const c = FOOTER_CONTENT;
@@ -22,7 +60,7 @@ export function LandingFooter() {
       className="border-border-subtle bg-background-alt/95 mt-auto border-t"
       aria-label="Site footer"
     >
-      <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 md:py-16">
+      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 md:py-12">
         <div className="grid gap-10 lg:grid-cols-[1.5fr_1fr_1fr_1fr_1fr] lg:gap-8">
           {/* Brand */}
           <div className="flex flex-col gap-4 lg:col-span-1">
@@ -74,9 +112,9 @@ export function LandingFooter() {
           <nav aria-label="Product links" className="flex flex-col gap-3">
             <p className={columnTitleClass}>Product</p>
             {c.productLinks.map(link => (
-              <Link key={link.href} href={link.href} className={linkClass}>
+              <FooterLink key={link.href + link.label} href={link.href}>
                 {link.label}
-              </Link>
+              </FooterLink>
             ))}
           </nav>
 
@@ -84,9 +122,9 @@ export function LandingFooter() {
           <nav aria-label="Resource links" className="flex flex-col gap-3">
             <p className={columnTitleClass}>Resources</p>
             {c.resourceLinks.map(link => (
-              <Link key={link.href} href={link.href} className={linkClass}>
+              <FooterLink key={link.href + link.label} href={link.href}>
                 {link.label}
-              </Link>
+              </FooterLink>
             ))}
           </nav>
 
@@ -94,9 +132,9 @@ export function LandingFooter() {
           <nav aria-label="Legal links" className="flex flex-col gap-3">
             <p className={columnTitleClass}>Legal</p>
             {c.legalLinks.map(link => (
-              <Link key={link.href} href={link.href} className={linkClass}>
+              <FooterLink key={link.href + link.label} href={link.href}>
                 {link.label}
-              </Link>
+              </FooterLink>
             ))}
           </nav>
 
@@ -104,15 +142,15 @@ export function LandingFooter() {
           <nav aria-label="Contact links" className="flex flex-col gap-3">
             <p className={columnTitleClass}>Contact</p>
             {c.contactLinks.map(link => (
-              <Link key={link.href} href={link.href} className={linkClass}>
+              <FooterLink key={link.href + link.label} href={link.href}>
                 {link.label}
-              </Link>
+              </FooterLink>
             ))}
           </nav>
         </div>
 
         {/* Newsletter row */}
-        <div className="border-border-subtle mt-10 grid gap-6 border-t pt-10 lg:grid-cols-[1fr_auto] lg:items-center">
+        <div className="border-border-subtle mt-8 grid gap-6 border-t pt-8 lg:grid-cols-[1fr_auto] lg:items-center">
           <div>
             <p className="text-foreground text-sm font-semibold tracking-wide uppercase">
               {c.newsletterTitle}
@@ -121,11 +159,10 @@ export function LandingFooter() {
               {c.newsletterDescription}
             </p>
           </div>
-          <LandingEmailForm
-            actionUrl={c.newsletterActionUrl}
-            placeholder={c.newsletterPlaceholder}
-            buttonLabel={c.newsletterButtonLabel}
+          <LandingMailerLiteForm
+            id="newsletter"
             className="w-full lg:max-w-md"
+            ariaLabel="Footer newsletter signup"
           />
         </div>
 

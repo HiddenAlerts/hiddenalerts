@@ -8,8 +8,8 @@ export const BRIEF_RISK_FILTER_OPTIONS: ReadonlyArray<{
   label: string;
 }> = [
   { value: 'all', label: 'All Levels' },
-  { value: 'critical', label: 'Critical (80-100)' },
-  { value: 'high', label: 'High (60-79)' },
+  { value: 'critical', label: 'Critical (81–100)' },
+  { value: 'high', label: 'High (71–80)' },
 ];
 
 export const BRIEF_SORT_OPTIONS: ReadonlyArray<{

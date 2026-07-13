@@ -1,11 +1,17 @@
 import { cn } from '@/lib/utils';
 import type { FC } from 'react';
 
-/** Matches dashboard alert group tones and alerts risk tabs. */
-export type RiskCountPillVariant = 'all' | 'high' | 'medium' | 'low';
+/** Matches alerts risk pills and dashboard group tones. */
+export type RiskCountPillVariant =
+  | 'all'
+  | 'critical'
+  | 'high'
+  | 'medium'
+  | 'low';
 
 const VARIANT_STYLES: Record<RiskCountPillVariant, string> = {
   all: 'bg-surface-muted text-muted-foreground',
+  critical: 'bg-danger text-white',
   high: 'bg-danger-muted text-danger',
   medium: 'bg-warning-muted text-warning',
   low: 'bg-success-muted text-success',

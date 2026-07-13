@@ -37,6 +37,8 @@ const TEXT_STYLE_OPTIONS = [
 
 export type RichTextEditorProps = {
   label?: string;
+  /** Short helper shown under the label. */
+  description?: string;
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
@@ -305,6 +307,7 @@ function LinkBubbleMenu({ editor, pluginKey }: { editor: Editor; pluginKey: stri
  */
 export function RichTextEditor({
   label,
+  description,
   value,
   onChange,
   placeholder,
@@ -378,6 +381,10 @@ export function RichTextEditor({
             <span className="text-danger-500 ml-0.5 font-medium">*</span>
           ) : null}
         </label>
+      ) : null}
+
+      {description ? (
+        <p className="text-muted -mt-0.5 text-xs leading-relaxed">{description}</p>
       ) : null}
 
       <div

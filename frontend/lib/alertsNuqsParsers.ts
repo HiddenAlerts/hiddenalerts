@@ -14,7 +14,6 @@ const ALERT_LIST_RISK_IN_ORDER = ALERTS_RISK_FILTER_OPTIONS.map(
   AlertsRiskFilterValue,
   AlertsRiskFilterValue,
   AlertsRiskFilterValue,
-  AlertsRiskFilterValue,
 ];
 
 const ALERT_LIST_CATEGORY_IN_ORDER = API_ALERT_CATEGORY_OPTIONS.map(

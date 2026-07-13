@@ -18,7 +18,7 @@ export function LandingFAQ() {
         Frequently Asked Questions
       </h2>
 
-      <div className="mt-10 grid gap-4 sm:grid-cols-2">
+      <div className="mt-7 grid gap-4 sm:grid-cols-2">
         {LANDING_FAQ.map(item => (
           <details
             key={item.question}

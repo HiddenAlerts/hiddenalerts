@@ -1,9 +1,5 @@
 'use client';
 
-import {
-  AlertsSearchForm,
-  AlertsSearchFormFallback,
-} from '@/components/alerts/AlertsSearchForm';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
@@ -13,22 +9,19 @@ import {
   DASHBOARD_SEARCH_GROUP_LIMIT,
   DASHBOARD_TOP_ALERTS_WEEK_LIMIT,
   useAlertsSearchQuery,
-  useAlertsStatsQuery,
   useDashboardBriefsPreviewQuery,
   useDashboardTopAlertsWeekQuery,
 } from '@/hooks';
-import { mapAlertsStatsToRiskCounts } from '@/lib/api/alerts';
 import { buildAlertsListQueryString } from '@/lib/alertsUrlState';
+import { pickNewestCriticalHighAlerts } from '@/lib/dashboardAlerts';
 import { formatDashboardUpdatedRelative } from '@/lib/formatDashboardDate';
 import { mapApiAlertToDashboardTopAlertWeeklyItem } from '@/lib/mapApiAlertToDashboardTopAlertWeekly';
-import { AlertTriangle, ShieldAlert } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { FC } from 'react';
-import { Suspense, useMemo } from 'react';
+import { useMemo } from 'react';
 
-import { DashboardCriticalRiskCard } from './DashboardCriticalRiskCard';
+import { DashboardCoverageAreas } from './DashboardCoverageAreas';
 import { DashboardIntelligenceBriefs } from './DashboardIntelligenceBriefs';
-import { DashboardRecentBriefsTable } from './DashboardRecentBriefsTable';
 import { DashboardTopAlertsThisWeek } from './DashboardTopAlertsThisWeek';
 import { DashboardWelcomeHeader } from './DashboardWelcomeHeader';
 
@@ -49,6 +42,10 @@ function deriveFirstName(
   return 'there';
 }
 
+/**
+ * Subscriber dashboard aligned to Ken’s revised mockup:
+ * Welcome → Featured Briefs → Top Alerts (Critical/High) → Coverage Areas
+ */
 export const DashboardScreen: FC = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -56,21 +53,6 @@ export const DashboardScreen: FC = () => {
   const searchQueryRaw = searchParams.get('q') ?? '';
   const searchTerm = searchQueryRaw.trim();
   const isSearchActive = searchTerm.length > 0;
-
-  const {
-    data: statsData,
-    dataUpdatedAt: statsDataUpdatedAt,
-    refetch: refetchStats,
-    isError: statsError,
-  } = useAlertsStatsQuery('all', { enabled: !isSearchActive });
-
-  const statsCounts = useMemo(
-    () =>
-      !isSearchActive && statsData && !statsError
-        ? mapAlertsStatsToRiskCounts(statsData)
-        : null,
-    [isSearchActive, statsData, statsError],
-  );
 
   const searchQuery = useAlertsSearchQuery(searchTerm, {
     enabled: isSearchActive,
@@ -98,48 +80,23 @@ export const DashboardScreen: FC = () => {
 
   const dashboardBriefs = briefsPreview?.items ?? [];
 
-  const searchPartition = useMemo(() => {
-    if (!isSearchActive || !searchRecords) {
-      return { critical: 0, high: 0 };
-    }
-    let critical = 0;
-    let high = 0;
-    for (const record of searchRecords) {
-      if (record.risk_band?.trim().toLowerCase() === 'critical') critical += 1;
-      else if (record.risk_level?.trim().toLowerCase() === 'high') high += 1;
-    }
-    return { critical, high };
-  }, [isSearchActive, searchRecords]);
-
   const topAlertsFromSearch = useMemo(() => {
     if (!isSearchActive || !searchRecords?.length) return [];
-    return [...searchRecords]
-      .sort((a, b) => b.signal_score - a.signal_score)
-      .slice(0, DASHBOARD_TOP_ALERTS_WEEK_LIMIT)
-      .map(item => mapApiAlertToDashboardTopAlertWeeklyItem(item));
+    const now = Date.now();
+    return pickNewestCriticalHighAlerts(
+      searchRecords,
+      DASHBOARD_TOP_ALERTS_WEEK_LIMIT,
+    ).map(item => mapApiAlertToDashboardTopAlertWeeklyItem(item, now));
   }, [isSearchActive, searchRecords]);
 
   const topAlerts = isSearchActive
     ? topAlertsFromSearch
     : (topAlertsWeekData ?? []);
 
-  const criticalCount = isSearchActive
-    ? searchPartition.critical
-    : (statsData?.critical_count ?? 0);
-  const highCount = isSearchActive
-    ? searchPartition.high
-    : (statsCounts?.high ?? 0);
-
   const alertsContinueHref = useMemo(() => {
     const q = isSearchActive ? searchTerm : undefined;
-    const qs = (risk: string) =>
-      buildAlertsListQueryString(risk, 1, 'all', q);
     const allQs = buildAlertsListQueryString('all', 1, 'all', q);
-    return {
-      critical: allQs ? `/alerts?${allQs}` : '/alerts',
-      high: qs('high') ? `/alerts?${qs('high')}` : '/alerts?risk=high',
-      all: allQs ? `/alerts?${allQs}` : '/alerts',
-    };
+    return allQs ? `/alerts?${allQs}` : '/alerts';
   }, [isSearchActive, searchTerm]);
 
   const lastUpdatedLabel = useMemo(() => {
@@ -154,7 +111,6 @@ export const DashboardScreen: FC = () => {
     }
 
     const timestamps = [
-      !statsError && statsDataUpdatedAt > 0 ? statsDataUpdatedAt : 0,
       !topAlertsWeekError && topAlertsWeekUpdatedAt > 0
         ? topAlertsWeekUpdatedAt
         : 0,
@@ -174,8 +130,6 @@ export const DashboardScreen: FC = () => {
     isSearchActive,
     searchQuery.dataUpdatedAt,
     searchQuery.isError,
-    statsDataUpdatedAt,
-    statsError,
     topAlertsWeekError,
     topAlertsWeekUpdatedAt,
     briefsPreviewError,
@@ -208,7 +162,6 @@ export const DashboardScreen: FC = () => {
     if (isSearchActive) {
       void searchQuery.refetch();
     } else {
-      void refetchStats();
       void refetchTopAlertsWeek();
       void refetchBriefsPreview();
     }
@@ -235,46 +188,10 @@ export const DashboardScreen: FC = () => {
     <div className="space-y-6 lg:space-y-8">
       <DashboardWelcomeHeader
         firstName={firstName}
+        subtitle="Your fraud intelligence overview."
         lastUpdatedLabel={lastUpdatedLabel}
         onRefresh={handleRefresh}
       />
-
-      <Suspense
-        fallback={
-          <AlertsSearchFormFallback
-            className="w-full"
-            placeholder="Search briefs, alerts, or topics..."
-            inputClassName="h-12 rounded-lg"
-          />
-        }
-      >
-        <AlertsSearchForm
-          className="w-full"
-          placeholder="Search briefs, alerts, or topics..."
-          inputClassName="h-12 rounded-lg"
-        />
-      </Suspense>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <DashboardCriticalRiskCard
-          label="Critical Risk Alerts"
-          rangeLabel="81-100"
-          value={criticalCount}
-          description="Immediate attention required."
-          tone="critical"
-          icon={<ShieldAlert className="size-6 sm:size-7" aria-hidden />}
-          href={alertsContinueHref.critical}
-        />
-        <DashboardCriticalRiskCard
-          label="High Risk Alerts"
-          rangeLabel="71-80"
-          value={highCount}
-          description="Elevated risk requiring close monitoring."
-          tone="high"
-          icon={<AlertTriangle className="size-6 sm:size-7" aria-hidden />}
-          href={alertsContinueHref.high}
-        />
-      </div>
 
       <DashboardIntelligenceBriefs
         briefs={dashboardBriefs}
@@ -282,15 +199,11 @@ export const DashboardScreen: FC = () => {
         bodyContent={briefsBodyContent}
       />
 
-      <DashboardRecentBriefsTable
-        briefs={dashboardBriefs}
-        viewAllHref="/briefs"
-        bodyContent={briefsBodyContent}
-      />
-
       <DashboardTopAlertsThisWeek
+        title="Top Alerts This Week"
+        subtitle="Critical & High only — newest first."
         alerts={topAlerts}
-        viewAllHref={alertsContinueHref.all}
+        viewAllHref={alertsContinueHref}
         viewAllLabel="View all alerts"
         bodyContent={
           topAlertsStillLoading ? (
@@ -308,18 +221,22 @@ export const DashboardScreen: FC = () => {
           ) : topAlerts.length === 0 ? (
             <EmptyState
               title={
-                isSearchActive ? 'No matching alerts' : 'No top alerts yet'
+                isSearchActive
+                  ? 'No matching alerts'
+                  : 'No Critical or High alerts yet'
               }
               description={
                 isSearchActive
-                  ? 'No alerts match your search right now.'
-                  : 'Top alerts will appear here once high-priority signals are available.'
+                  ? 'No Critical or High-Risk alerts match your search right now.'
+                  : 'Newest Critical and High-Risk alerts will appear here when available.'
               }
               className="py-10"
             />
           ) : undefined
         }
       />
+
+      {!isSearchActive ? <DashboardCoverageAreas /> : null}
     </div>
   );
 };

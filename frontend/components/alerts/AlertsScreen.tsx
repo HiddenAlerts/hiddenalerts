@@ -5,6 +5,10 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { LoadingState } from '@/components/ui/LoadingState';
 import type { AlertsCategoryFilterValue } from '@/data/apiAlertCategories';
 import { DASHBOARD_RISK_LEGEND_ITEMS } from '@/data/dashboardRiskLegend';
+import {
+  alertMatchesSubscriberRiskFilter,
+  type AlertsRiskFilterValue,
+} from '@/data/alertRiskFilterOptions';
 import { useAlertsPageQuery } from '@/hooks/useAlertsPageQuery';
 import { useAlertsSearchQuery } from '@/hooks/useAlertsSearchQuery';
 import { useAlertsStatsQuery } from '@/hooks/useAlertsStatsQuery';
@@ -43,15 +47,20 @@ function getQueryErrorMessage(error: unknown): string {
 
 function filterAlertsRecordsByBrowsingFilters(
   records: AlertApiRecord[],
-  risk: string,
+  risk: AlertsRiskFilterValue,
   category: string,
 ): AlertApiRecord[] {
   return records.filter(record => {
-    if (risk !== 'all' && record.risk_level !== risk) return false;
+    if (!alertMatchesSubscriberRiskFilter(record, risk)) return false;
     if (category !== 'all' && record.category !== category) return false;
     return true;
   });
 }
+
+/** Critical / High legend only — Medium & Low are not subscriber-facing. */
+const SUBSCRIBER_ALERTS_LEGEND_ITEMS = DASHBOARD_RISK_LEGEND_ITEMS.filter(
+  item => item.id === 'critical' || item.id === 'high',
+);
 
 export const AlertsScreen: FC = () => {
   const [
@@ -109,10 +118,12 @@ export const AlertsScreen: FC = () => {
     );
   }, [isSearchActive, searchQuery.data, riskFilter, categoryFilter]);
 
-  const browseAlerts = useMemo(
-    () => (listQuery.data?.alerts ?? []).map(mapApiAlertToAlertItem),
-    [listQuery.data?.alerts],
-  );
+  const browseAlerts = useMemo(() => {
+    const records = listQuery.data?.alerts ?? [];
+    return records
+      .filter(record => alertMatchesSubscriberRiskFilter(record, riskFilter))
+      .map(mapApiAlertToAlertItem);
+  }, [listQuery.data?.alerts, riskFilter]);
 
   const searchAlertsAllPages = useMemo(
     () => searchRecordsFiltered.map(mapApiAlertToAlertItem),
@@ -346,7 +357,7 @@ export const AlertsScreen: FC = () => {
             activeSearchQuery={isSearchActive ? searchTerm : null}
           />
 
-          <AlertsRiskLegendStrip items={DASHBOARD_RISK_LEGEND_ITEMS} />
+          <AlertsRiskLegendStrip items={SUBSCRIBER_ALERTS_LEGEND_ITEMS} />
 
           <div
             className={

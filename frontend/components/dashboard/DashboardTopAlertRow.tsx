@@ -105,14 +105,11 @@ export const DashboardTopAlertRow: FC<DashboardTopAlertRowProps> = ({
           </span>
           <span
             className={cn(
-              'text-center text-xs font-semibold tracking-tight',
+              'text-center text-[0.65rem] font-bold tracking-wide uppercase',
               scoreStyle.label,
             )}
           >
             {alert.riskLabel}
-          </span>
-          <span className="text-muted text-[0.65rem] tabular-nums">
-            {alert.riskRange}
           </span>
         </div>
         <div

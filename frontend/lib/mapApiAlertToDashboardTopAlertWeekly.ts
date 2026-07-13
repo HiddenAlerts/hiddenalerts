@@ -128,6 +128,7 @@ export function mapApiAlertToDashboardTopAlertWeeklyItem(
 
   const risk = mapRiskBandToWeeklyRisk(record);
 
+  // Category + source only (avoid repeating title-like headlines in the row).
   const tags = [record.category, record.source_name].filter(
     (value): value is string =>
       typeof value === 'string' && value.trim().length > 0,
@@ -140,11 +141,11 @@ export function mapApiAlertToDashboardTopAlertWeeklyItem(
     title: record.title,
     tags,
     headline: '',
-    description: record.summary,
+    description: record.summary?.trim() || '',
     riskScore: record.signal_score,
     riskTone: risk.tone,
-    riskLabel: risk.label,
-    riskRange: risk.range,
+    riskLabel: risk.tone === 'critical' ? 'CRITICAL' : risk.tone === 'high' ? 'HIGH' : risk.label,
+    riskRange: '',
     iconType: mapCategoryToWeeklyIcon(record.category),
     isNew,
     occurredAtIso,

@@ -28,6 +28,7 @@ import {
 } from '@/hooks';
 import { getApiErrorMessage } from '@/lib/api/queryError';
 import { adminBriefToDetail } from '@/lib/briefDetail';
+import { riskScoreToDetailLevel } from '@/lib/briefs';
 import { stripHtmlToText } from '@/lib/htmlText';
 import { slugify } from '@/lib/utils';
 import type { AdminBrief, AdminPublishStatus } from '@/types/admin';
@@ -76,6 +77,47 @@ const EMPTY_BRIEF: AdminBrief = {
   updatedAt: '',
 };
 
+/** Fields validated before Publish (and for draft title). */
+type BriefFieldKey =
+  | 'title'
+  | 'category'
+  | 'riskScore'
+  | 'primaryEntities'
+  | 'executiveSummary'
+  | 'whyThisMatters'
+  | 'keySignals'
+  | 'riskAssessment'
+  | 'mainBrief';
+
+type FieldErrors = Partial<Record<BriefFieldKey, string>>;
+
+const FIELD_DOM_IDS: Record<BriefFieldKey, string> = {
+  title: 'brief-field-title',
+  category: 'brief-field-category',
+  riskScore: 'brief-field-risk-score',
+  primaryEntities: 'brief-field-primary-entities',
+  executiveSummary: 'brief-field-executive-summary',
+  whyThisMatters: 'brief-field-why-this-matters',
+  keySignals: 'brief-field-key-signals',
+  riskAssessment: 'brief-field-risk-assessment',
+  mainBrief: 'brief-field-main-brief',
+};
+
+/** Top-to-bottom order so we scroll to the first problem on the page. */
+const FIELD_ORDER: BriefFieldKey[] = [
+  'title',
+  'category',
+  'riskScore',
+  'primaryEntities',
+  'executiveSummary',
+  'whyThisMatters',
+  'keySignals',
+  'riskAssessment',
+  'mainBrief',
+];
+
+const REQUIRED_MSG = 'This field is required.';
+
 export type AdminBriefFormProps = {
   /** Pre-fills the form for the edit flow. */
   initial?: AdminBrief;
@@ -83,7 +125,7 @@ export type AdminBriefFormProps = {
   title?: string;
   /** Header subtitle. */
   subtitle?: string;
-  /** Where to navigate when the user saves/publishes/archives/cancels. */
+  /** Where Cancel / Archive navigate. Save Draft stays on the edit page. */
   returnHref?: string;
 };
 
@@ -105,24 +147,57 @@ const STATUS_LABEL: Record<AdminPublishStatus, string> = {
   archived: 'Archived',
 };
 
+function briefEditHref(slug: string) {
+  return `/admin/briefs/${encodeURIComponent(slug)}/edit`;
+}
+
 /**
- * Backend rejects publish when required fields are missing/invalid — this
- * mirrors that check client-side (against the same fields the form itself
- * marks `required`) so the error surfaces immediately instead of after a
- * round-trip. Draft saves skip this entirely; only publish requires it.
+ * Publish requires the structured intelligence fields to be filled.
+ * Draft saves only need a title (so the create API can succeed).
  */
-function getMissingPublishFields(brief: AdminBrief): string[] {
-  const missing: string[] = [];
-  if (!brief.title.trim()) missing.push('Title');
-  if (!brief.category.trim()) missing.push('Category');
-  if (!brief.riskScore || brief.riskScore <= 0) missing.push('Risk Score');
-  if (brief.primaryEntities.length === 0) missing.push('Primary Entities');
-  if (!stripHtmlToText(brief.executiveSummary)) missing.push('Executive Summary');
-  if (!stripHtmlToText(brief.whyThisMatters)) missing.push('Why This Matters');
-  if (!stripHtmlToText(brief.keySignals)) missing.push('Key Signals');
-  if (!stripHtmlToText(brief.riskAssessment)) missing.push('Risk Assessment');
-  if (!stripHtmlToText(brief.mainBrief)) missing.push('Main Intelligence Brief');
-  return missing;
+function getPublishFieldErrors(brief: AdminBrief): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!brief.title.trim()) errors.title = REQUIRED_MSG;
+  if (!brief.category.trim()) errors.category = REQUIRED_MSG;
+  if (!brief.riskScore || brief.riskScore <= 0) {
+    errors.riskScore = 'Enter a risk score greater than 0.';
+  }
+  if (brief.primaryEntities.length === 0) {
+    errors.primaryEntities = 'Add at least one primary entity.';
+  }
+  if (!stripHtmlToText(brief.executiveSummary)) {
+    errors.executiveSummary = REQUIRED_MSG;
+  }
+  if (!stripHtmlToText(brief.whyThisMatters)) {
+    errors.whyThisMatters = REQUIRED_MSG;
+  }
+  if (!stripHtmlToText(brief.keySignals)) {
+    errors.keySignals = REQUIRED_MSG;
+  }
+  if (!stripHtmlToText(brief.riskAssessment)) {
+    errors.riskAssessment = REQUIRED_MSG;
+  }
+  if (!stripHtmlToText(brief.mainBrief)) {
+    errors.mainBrief = REQUIRED_MSG;
+  }
+  return errors;
+}
+
+function firstErrorKey(errors: FieldErrors): BriefFieldKey | undefined {
+  return FIELD_ORDER.find(key => Boolean(errors[key]));
+}
+
+/** Offset for the sticky admin header so highlighted fields are not hidden. */
+const FIELD_ANCHOR_CLASS = 'scroll-mt-24';
+
+function scrollToField(key: BriefFieldKey) {
+  const el = document.getElementById(FIELD_DOM_IDS[key]);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const focusable = el.querySelector<HTMLElement>(
+    'input, select, textarea, [contenteditable="true"]',
+  );
+  window.setTimeout(() => focusable?.focus({ preventScroll: true }), 320);
 }
 
 /**
@@ -134,15 +209,18 @@ function getMissingPublishFields(brief: AdminBrief): string[] {
 export const AdminBriefForm: FC<AdminBriefFormProps> = ({
   initial,
   title = 'Create / Edit Intelligence Brief',
-  subtitle = 'All fields marked with * are required.',
+  subtitle = 'All fields marked with * are required to publish. Drafts only need a title.',
   returnHref = '/admin/briefs',
 }) => {
   const router = useRouter();
   const [brief, setBrief] = useState<AdminBrief>(initial ?? EMPTY_BRIEF);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [previewOpen, setPreviewOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<
     'draft' | 'publish' | 'archive' | null
   >(null);
+  /** Scroll after React paints error styles so highlight + focus stay in sync. */
+  const pendingScrollFieldRef = useRef<BriefFieldKey | null>(null);
 
   const [imageFile, setImageFile] = useState<File | undefined>();
   const [imagePreview, setImagePreview] = useState<string | undefined>(
@@ -158,15 +236,53 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
     [],
   );
 
+  useEffect(() => {
+    const key = pendingScrollFieldRef.current;
+    if (!key || !fieldErrors[key]) return;
+    pendingScrollFieldRef.current = null;
+    const frame = window.requestAnimationFrame(() => scrollToField(key));
+    return () => window.cancelAnimationFrame(frame);
+  }, [fieldErrors]);
+
+  function showFieldErrors(errors: FieldErrors) {
+    const first = firstErrorKey(errors);
+    pendingScrollFieldRef.current = first ?? null;
+    setFieldErrors(errors);
+  }
+
   const saveMutation = useSaveAdminBriefMutation();
   const publishMutation = usePublishAdminBriefMutation();
   const archiveMutation = useArchiveAdminBriefMutation();
   const featureMutation = useSetAdminBriefFeaturedMutation();
 
-  const update = <K extends keyof AdminBrief>(key: K, value: AdminBrief[K]) =>
-    setBrief(prev => ({ ...prev, [key]: value }));
+  const clearFieldError = (key: BriefFieldKey) =>
+    setFieldErrors(prev => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+
+  const update = <K extends keyof AdminBrief>(key: K, value: AdminBrief[K]) => {
+    if (key in FIELD_DOM_IDS) {
+      clearFieldError(key as BriefFieldKey);
+    }
+    setBrief(prev => {
+      if (key === 'riskScore') {
+        const score = value as number;
+        return {
+          ...prev,
+          riskScore: score,
+          // Keep risk_level aligned with the 0–100 score (Critical ≥81, High ≥71, …).
+          riskLevel: riskScoreToDetailLevel(score),
+        };
+      }
+      return { ...prev, [key]: value };
+    });
+  };
 
   function handleTitleChange(nextTitle: string) {
+    clearFieldError('title');
     setBrief(prev => ({ ...prev, title: nextTitle, slug: slugify(nextTitle) }));
   }
 
@@ -191,6 +307,14 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
     setRemoveImage(true);
   }
 
+  /** Stay on the edit URL after create so a refresh reloads the saved draft. */
+  function stayOnSavedBrief(saved: AdminBrief) {
+    const editHref = briefEditHref(saved.slug);
+    if (typeof window !== 'undefined' && window.location.pathname !== editHref) {
+      router.replace(editHref);
+    }
+  }
+
   /** Create-or-update, then upload/remove the image if it changed. Returns the saved brief on success. */
   async function persist(): Promise<AdminBrief | undefined> {
     try {
@@ -205,44 +329,58 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
       setRemoveImage(false);
       return saved;
     } catch (err) {
+      // Keep in-memory form values — never clear the form on API failure.
       toast.error(getApiErrorMessage(err, 'Could not save the brief.'));
       return undefined;
     }
   }
 
   async function handleSave() {
-    setPendingAction('draft');
-    const saved = await persist();
-    setPendingAction(null);
-    if (saved) {
-      toast.success(saved.status === 'published' ? 'Changes saved.' : 'Draft saved.');
-      router.push(returnHref);
-    }
-  }
-
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-
-    const missingFields = getMissingPublishFields(brief);
-    if (missingFields.length > 0) {
-      toast.error(
-        `Complete these fields before publishing: ${missingFields.join(', ')}.`,
-      );
+    if (!brief.title.trim()) {
+      showFieldErrors({
+        title: 'Add a title before saving a draft.',
+      });
       return;
     }
 
+    setPendingAction('draft');
+    const saved = await persist();
+    setPendingAction(null);
+    if (!saved) return;
+
+    toast.success(saved.status === 'published' ? 'Changes saved.' : 'Draft saved.');
+    stayOnSavedBrief(saved);
+  }
+
+  async function handlePublish() {
+    const errors = getPublishFieldErrors(brief);
+    if (Object.keys(errors).length > 0) {
+      showFieldErrors(errors);
+      toast.error('Complete the highlighted required fields before publishing.');
+      return;
+    }
+
+    setFieldErrors({});
     setPendingAction('publish');
     const saved = await persist();
     if (saved) {
+      // Persist succeeded — move to edit URL before publish so a refresh
+      // cannot wipe content if publish fails next.
+      stayOnSavedBrief(saved);
       try {
         await publishMutation.mutateAsync(saved.id);
         toast.success('Brief published.');
-        router.push(returnHref);
+        router.push(`/admin/briefs/${encodeURIComponent(saved.slug)}`);
       } catch (err) {
         toast.error(getApiErrorMessage(err, 'Could not publish the brief.'));
       }
     }
     setPendingAction(null);
+  }
+
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    void handlePublish();
   }
 
   async function handleArchive() {
@@ -276,9 +414,11 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
   const canArchive = Boolean(brief.id) && brief.status !== 'archived';
   const canPublish = brief.status !== 'published';
   const saveLabel = brief.status === 'published' ? 'Save Changes' : 'Save Draft';
+  const canFeature = Boolean(brief.id);
+  const errorCount = Object.keys(fieldErrors).length;
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form noValidate onSubmit={handleSubmit} className="space-y-6">
       <PageHeader
         title={title}
         subtitle={subtitle}
@@ -326,10 +466,11 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
             ) : null}
             {canPublish ? (
               <Button
-                type="submit"
+                type="button"
                 size="sm"
                 loading={pendingAction === 'publish'}
                 disabled={pendingAction !== null}
+                onClick={handlePublish}
                 leftIcon={<Feather className="size-4" aria-hidden />}
               >
                 Publish Brief
@@ -339,6 +480,17 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         }
       />
 
+      {errorCount > 0 ? (
+        <div
+          role="alert"
+          className="border-danger/40 bg-danger/10 text-danger rounded-lg border px-4 py-3 text-sm"
+        >
+          {errorCount === 1
+            ? '1 required field needs attention before publishing.'
+            : `${errorCount} required fields need attention before publishing.`}{' '}
+          They are highlighted below.
+        </div>
+      ) : null}
       <Modal open={previewOpen} onClose={() => setPreviewOpen(false)}>
         <BriefReader
           brief={adminBriefToDetail({ ...brief, featuredImage: imagePreview })}
@@ -352,33 +504,52 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         <h2 className={SECTION_HEADING_CLASSNAME}>1. Basic Information</h2>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Input
-            label="Title"
-            required
-            addAsterisk
-            value={brief.title}
-            onChange={e => handleTitleChange(e.target.value)}
-            placeholder="Enter brief title"
-            parentStyles="sm:col-span-2 lg:col-span-1"
-          />
-          <Select
-            label="Category"
-            required
-            addAsterisk
-            options={ADMIN_CATEGORY_FORM_OPTIONS}
-            value={brief.category}
-            onChange={e => update('category', e.target.value)}
-          />
-          <Input
-            label="Risk Score (0-100)"
-            required
-            addAsterisk
-            type="number"
-            min={0}
-            max={100}
-            value={String(brief.riskScore)}
-            onChange={e => update('riskScore', Number(e.target.value) || 0)}
-          />
+          <div
+            id={FIELD_DOM_IDS.title}
+            className={`sm:col-span-2 lg:col-span-1 ${FIELD_ANCHOR_CLASS}`}
+          >
+            <Input
+              label="Title"
+              required
+              addAsterisk
+              value={brief.title}
+              onChange={e => handleTitleChange(e.target.value)}
+              placeholder="Enter brief title"
+              isError={Boolean(fieldErrors.title)}
+              errorMessage={fieldErrors.title}
+            />
+          </div>
+          <div id={FIELD_DOM_IDS.category} className={FIELD_ANCHOR_CLASS}>
+            <Select
+              label="Category"
+              required
+              addAsterisk
+              options={ADMIN_CATEGORY_FORM_OPTIONS}
+              value={brief.category}
+              onChange={e => update('category', e.target.value)}
+              isError={Boolean(fieldErrors.category)}
+              errorMessage={fieldErrors.category}
+            />
+          </div>
+          <div id={FIELD_DOM_IDS.riskScore} className={FIELD_ANCHOR_CLASS}>
+            <Input
+              label="Risk Score (0-100)"
+              required
+              addAsterisk
+              type="number"
+              min={0}
+              max={100}
+              value={String(brief.riskScore)}
+              onChange={e => update('riskScore', Number(e.target.value) || 0)}
+              isError={Boolean(fieldErrors.riskScore)}
+              errorMessage={fieldErrors.riskScore}
+            />
+            <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
+              Use the full 0–100 scale (e.g. 80–100 for Critical/High). Values
+              like 10–12 look like placeholders on cards. Risk Level updates
+              automatically from this score.
+            </p>
+          </div>
           <Select
             label="Risk Level"
             required
@@ -407,14 +578,18 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <TagsInput
-            label="Primary Entities"
-            required
-            addAsterisk
-            value={brief.primaryEntities}
-            onChange={next => update('primaryEntities', next)}
-            placeholder="Type and press Enter to add entities…"
-          />
+          <div id={FIELD_DOM_IDS.primaryEntities} className={FIELD_ANCHOR_CLASS}>
+            <TagsInput
+              label="Primary Entities"
+              required
+              addAsterisk
+              value={brief.primaryEntities}
+              onChange={next => update('primaryEntities', next)}
+              placeholder="Type and press Enter to add entities…"
+              isError={Boolean(fieldErrors.primaryEntities)}
+              errorMessage={fieldErrors.primaryEntities}
+            />
+          </div>
           <TagsInput
             label="Tags"
             value={brief.tags}
@@ -427,7 +602,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
           value={imagePreview}
           onFileSelect={handleImageSelect}
           onRemove={handleImageRemove}
-          hint="Recommended size: 1200x675px. Max file size: 2MB."
+          hint="Recommended size: 1200×675px (16:9). Max file size: 2MB. One Featured Image populates Dashboard, Library, Featured, and Detail."
         />
       </div>
 
@@ -436,38 +611,54 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         <h2 className={SECTION_HEADING_CLASSNAME}>2. Intelligence Content</h2>
 
         <div className="grid gap-5 lg:grid-cols-2">
-          <RichTextEditor
-            label="Executive Summary"
-            required
-            addAsterisk
-            value={brief.executiveSummary}
-            onChange={html => update('executiveSummary', html)}
-            placeholder="Provide a brief summary of the key intelligence…"
-          />
-          <RichTextEditor
-            label="Why This Matters"
-            required
-            addAsterisk
-            value={brief.whyThisMatters}
-            onChange={html => update('whyThisMatters', html)}
-            placeholder="Explain the significance and potential impact…"
-          />
-          <RichTextEditor
-            label="Key Signals"
-            required
-            addAsterisk
-            value={brief.keySignals}
-            onChange={html => update('keySignals', html)}
-            placeholder="Highlight the key indicators and warning signs…"
-          />
-          <RichTextEditor
-            label="Risk Assessment"
-            required
-            addAsterisk
-            value={brief.riskAssessment}
-            onChange={html => update('riskAssessment', html)}
-            placeholder="Assess the risk, potential impact and likelihood…"
-          />
+          <div id={FIELD_DOM_IDS.executiveSummary} className={FIELD_ANCHOR_CLASS}>
+            <RichTextEditor
+              label="Executive Summary"
+              required
+              addAsterisk
+              value={brief.executiveSummary}
+              onChange={html => update('executiveSummary', html)}
+              placeholder="Provide a brief summary of the key intelligence…"
+              isError={Boolean(fieldErrors.executiveSummary)}
+              errorMessage={fieldErrors.executiveSummary}
+            />
+          </div>
+          <div id={FIELD_DOM_IDS.whyThisMatters} className={FIELD_ANCHOR_CLASS}>
+            <RichTextEditor
+              label="Why This Matters"
+              required
+              addAsterisk
+              value={brief.whyThisMatters}
+              onChange={html => update('whyThisMatters', html)}
+              placeholder="Explain the significance and potential impact…"
+              isError={Boolean(fieldErrors.whyThisMatters)}
+              errorMessage={fieldErrors.whyThisMatters}
+            />
+          </div>
+          <div id={FIELD_DOM_IDS.keySignals} className={FIELD_ANCHOR_CLASS}>
+            <RichTextEditor
+              label="Key Signals"
+              required
+              addAsterisk
+              value={brief.keySignals}
+              onChange={html => update('keySignals', html)}
+              placeholder="Highlight the key indicators and warning signs…"
+              isError={Boolean(fieldErrors.keySignals)}
+              errorMessage={fieldErrors.keySignals}
+            />
+          </div>
+          <div id={FIELD_DOM_IDS.riskAssessment} className={FIELD_ANCHOR_CLASS}>
+            <RichTextEditor
+              label="Risk Assessment"
+              required
+              addAsterisk
+              value={brief.riskAssessment}
+              onChange={html => update('riskAssessment', html)}
+              placeholder="Assess the risk, potential impact and likelihood…"
+              isError={Boolean(fieldErrors.riskAssessment)}
+              errorMessage={fieldErrors.riskAssessment}
+            />
+          </div>
           <RichTextEditor
             label="What Others Miss"
             value={brief.whatOthersMiss}
@@ -482,16 +673,21 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
           />
         </div>
 
-        <RichTextEditor
-          label="Main Intelligence Brief"
-          required
-          addAsterisk
-          value={brief.mainBrief}
-          onChange={html => update('mainBrief', html)}
-          placeholder="Provide the full analysis, context, and details supporting this brief…"
-          minHeightClassName="min-h-[220px]"
-          showWordCount
-        />
+        <div id={FIELD_DOM_IDS.mainBrief} className={FIELD_ANCHOR_CLASS}>
+          <RichTextEditor
+            label="Detailed Intelligence Analysis"
+            description="Use for additional analyst content that doesn't fit the sections above — for example intelligence indicators, key actors & affiliations, geographic focus, criminal methodology, or trend / strategic outlook when applicable."
+            required
+            addAsterisk
+            value={brief.mainBrief}
+            onChange={html => update('mainBrief', html)}
+            placeholder="Write the deeper analysis supporting this brief…"
+            minHeightClassName="min-h-[220px]"
+            showWordCount
+            isError={Boolean(fieldErrors.mainBrief)}
+            errorMessage={fieldErrors.mainBrief}
+          />
+        </div>
       </div>
 
       {/* 3. Publishing */}
@@ -526,24 +722,30 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
           </div>
 
           <div className="space-y-4">
-            <div>
+            <div
+              className={
+                canFeature
+                  ? 'border-border rounded-lg border p-4'
+                  : 'border-border bg-surface/40 rounded-lg border border-dashed p-4'
+              }
+            >
               <span className="text-body mb-2 block text-sm font-medium">
                 Featured Brief
               </span>
               <Switch
                 checked={brief.featured}
                 onChange={handleFeaturedToggle}
-                disabled={!brief.id || featureMutation.isPending}
+                disabled={!canFeature || featureMutation.isPending}
                 label="Display as the featured brief on the subscriber library"
               />
-              <p className="text-muted mt-1.5 text-xs">
-                {brief.id
-                  ? 'Only one brief can be featured at a time.'
-                  : 'Save the brief first to feature it.'}
+              <p className="text-muted mt-2 text-xs leading-relaxed">
+                {canFeature
+                  ? 'Optional. Only one brief can be featured at a time. Turning this on updates the subscriber library immediately.'
+                  : 'Optional — not required to save or publish. Save Draft once to unlock this toggle (the brief needs an ID before it can be featured).'}
               </p>
             </div>
 
-            <div>
+            <div className="border-border rounded-lg border p-4">
               <span className="text-body mb-2 block text-sm font-medium">
                 Premium Content
               </span>
@@ -552,13 +754,17 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
                 onChange={next => update('isPremium', next)}
                 label="Gate this brief behind a premium subscription"
               />
+              <p className="text-muted mt-2 text-xs leading-relaxed">
+                Optional. Can be set anytime and is stored when you save.
+              </p>
             </div>
           </div>
         </div>
 
         <p className="border-border text-muted border-t pt-4 text-xs">
           Published Date will be set automatically when the brief is
-          published.
+          published. Featured and Premium are optional and are not required to
+          save or publish.
         </p>
       </div>
 

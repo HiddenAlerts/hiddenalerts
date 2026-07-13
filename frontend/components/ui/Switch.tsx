@@ -35,9 +35,15 @@ export function Switch({
         id={fieldId}
         aria-checked={checked}
         disabled={disabled}
-        onClick={() => onChange(!checked)}
+        onClick={() => {
+          if (disabled) return;
+          onChange(!checked);
+        }}
         className={cn(
-          'focus-visible:ring-primary-500/30 relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40',
+          'focus-visible:ring-primary-500/30 relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:ring-2 focus-visible:outline-none',
+          disabled
+            ? 'cursor-not-allowed opacity-40'
+            : 'cursor-pointer',
           checked ? 'bg-success' : 'bg-surface-muted',
         )}
       >
@@ -49,7 +55,13 @@ export function Switch({
         />
       </button>
       {label ? (
-        <label htmlFor={fieldId} className="text-body cursor-pointer text-sm">
+        <label
+          htmlFor={fieldId}
+          className={cn(
+            'text-body text-sm',
+            disabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer',
+          )}
+        >
           {label}
         </label>
       ) : null}

@@ -1,6 +1,4 @@
-export { DashboardAlertGroup } from './DashboardAlertGroup';
-export { DashboardAlertListItem } from './DashboardAlertListItem';
-export { DashboardAlertMiniRow } from './DashboardAlertMiniRow';
+export { DashboardCoverageAreas } from './DashboardCoverageAreas';
 export { DashboardCriticalRiskCard } from './DashboardCriticalRiskCard';
 export { DashboardIntelligenceBriefs } from './DashboardIntelligenceBriefs';
 export { DashboardPageHeader } from './DashboardPageHeader';
@@ -21,3 +19,6 @@ export { DashboardStatCard } from './DashboardStatCard';
 export { DashboardUnlockCta } from './DashboardUnlockCta';
 export { Sidebar, type SidebarNavItem, type SidebarProps } from './Sidebar';
 export { TopBar } from './TopBar';
+export { DashboardAlertGroup } from './DashboardAlertGroup';
+export { DashboardAlertListItem } from './DashboardAlertListItem';
+export { DashboardAlertMiniRow } from './DashboardAlertMiniRow';

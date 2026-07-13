@@ -1,6 +1,5 @@
 import { StatusTag } from '@/components/ui/StatusTag';
 import { cn } from '@/lib/utils';
-import { ChevronRight } from 'lucide-react';
 import type { LiveAlert } from '@/data/landing';
 
 export type LandingLiveAlertRowProps = {
@@ -60,6 +59,7 @@ function ScoreCircle({ score, level }: { score: number; level: LiveAlert['level'
   );
 }
 
+/** Non-interactive preview row — no links (MVP marketing-only). */
 export function LandingLiveAlertRow({
   alert,
   className,
@@ -67,7 +67,7 @@ export function LandingLiveAlertRow({
   return (
     <article
       className={cn(
-        'group border-border/60 hover:bg-surface/30 flex items-center gap-3 border-b py-4 transition-colors last:border-b-0 sm:gap-4',
+        'border-border/60 flex items-start gap-3 border-b py-3.5 last:border-b-0 sm:gap-4 sm:py-4',
         className,
       )}
     >
@@ -84,11 +84,6 @@ export function LandingLiveAlertRow({
           <span className="text-muted-foreground text-xs">{alert.timestamp}</span>
         </div>
       </div>
-
-      <ChevronRight
-        className="text-primary-500 size-5 shrink-0 opacity-60 transition-opacity group-hover:opacity-100"
-        aria-hidden
-      />
     </article>
   );
 }

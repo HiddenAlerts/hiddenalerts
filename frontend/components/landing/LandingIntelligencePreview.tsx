@@ -1,9 +1,9 @@
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Check } from 'lucide-react';
-import Link from 'next/link';
+import { Check, ExternalLink } from 'lucide-react';
 
 import {
+  ANALYST_CONTENT,
   INTELLIGENCE_BRIEF_PREVIEW,
   LIVE_ALERTS,
   LIVE_ALERTS_PANEL,
@@ -14,44 +14,45 @@ import { LandingSection } from './LandingSection';
 
 export function LandingIntelligencePreview() {
   const brief = INTELLIGENCE_BRIEF_PREVIEW;
+  const analyst = ANALYST_CONTENT;
 
   return (
     <LandingSection
-      id="sample-brief"
-      ariaLabelledby="sample-brief-heading"
-      className="border-border-subtle border-t py-12 md:py-16"
+      id="alerts"
+      ariaLabelledby="alerts-heading"
+      className="border-border-subtle border-t py-10 md:py-12"
     >
-      <div className="grid gap-6 lg:grid-cols-2 lg:gap-8">
-        {/* Live alerts panel */}
-        <div className="border-border bg-background-alt/80 rounded-2xl border p-5 sm:p-6">
-          <div className="flex items-start justify-between gap-3">
+      <div className="grid gap-5 lg:grid-cols-3 lg:gap-5">
+        {/* Latest high-risk alerts — preview only */}
+        <div className="border-border bg-background-alt/80 flex flex-col rounded-2xl border p-5 sm:p-6">
+          <div className="flex flex-wrap items-center gap-2">
             <h2
-              id="sample-brief-heading"
+              id="alerts-heading"
               className="text-primary-400 text-xs font-semibold tracking-[0.14em] uppercase"
             >
               {LIVE_ALERTS_PANEL.title}
             </h2>
-            <Link
-              href={LIVE_ALERTS_PANEL.viewAllHref}
-              className="text-primary-400 hover:text-primary-300 shrink-0 text-xs font-medium transition-colors"
-            >
-              {LIVE_ALERTS_PANEL.viewAllLabel} →
-            </Link>
+            <span className="text-info border-info/30 bg-info/10 rounded-full border px-2 py-0.5 text-[0.65rem] font-semibold tracking-wide">
+              {LIVE_ALERTS_PANEL.badge}
+            </span>
           </div>
 
-          <div className="mt-1">
+          <div className="mt-1 flex-1">
             {LIVE_ALERTS.map((alert, i) => (
               <LandingLiveAlertRow key={i} alert={alert} />
             ))}
           </div>
 
-          <p className="text-muted-foreground mt-3 text-xs">
+          <p className="text-muted-foreground mt-4 border-border/50 border-t pt-3 text-xs leading-relaxed">
             {LIVE_ALERTS_PANEL.footnote}
           </p>
         </div>
 
         {/* Intelligence brief preview */}
-        <div className="border-border bg-background-alt/80 rounded-2xl border p-5 sm:p-6">
+        <div
+          id="intelligence-brief"
+          className="border-primary-500/50 bg-background-alt/80 scroll-mt-24 flex flex-col rounded-2xl border p-5 sm:p-6"
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="text-primary-400 text-xs font-semibold tracking-[0.14em] uppercase">
               {brief.eyebrow}
@@ -68,11 +69,11 @@ export function LandingIntelligencePreview() {
 
           <p className="text-body mt-4 text-sm leading-relaxed">{brief.summary}</p>
 
-          <div className="mt-5">
+          <div className="mt-5 flex-1">
             <p className="text-foreground text-sm font-semibold">
               {brief.includesTitle}
             </p>
-            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+            <ul className="mt-3 grid gap-2">
               {brief.includes.map(item => (
                 <li
                   key={item}
@@ -88,18 +89,61 @@ export function LandingIntelligencePreview() {
             </ul>
           </div>
 
-          <Link
+          <a
             href={brief.cta.href}
+            target="_blank"
+            rel="noopener noreferrer"
             className={cn(
               buttonVariants({ variant: 'outline', size: 'md' }),
-              'border-border bg-surface/40 text-foreground hover:bg-surface/70 hover:border-border mt-6 h-11 w-full text-sm font-semibold',
+              'border-primary-500/60 bg-surface/40 text-foreground hover:border-primary-500 hover:bg-primary-500/10 mt-6 h-11 w-full gap-2 text-sm font-semibold',
             )}
           >
             {brief.cta.label}
-          </Link>
+            <ExternalLink className="size-3.5 opacity-80" aria-hidden />
+          </a>
           <p className="text-muted-foreground mt-2 text-center text-xs">
             {brief.ctaFootnote}
           </p>
+        </div>
+
+        {/* Meet the analyst */}
+        <div className="border-border bg-background-alt/80 flex flex-col overflow-hidden rounded-2xl border">
+          <div className="relative aspect-[4/5] w-full overflow-hidden sm:aspect-[3/4] lg:aspect-auto lg:min-h-[280px] lg:flex-1">
+            {/* eslint-disable-next-line @next/next/no-img-element -- marketing portrait asset */}
+            <img
+              src={analyst.portraitSrc}
+              alt={analyst.portraitAlt}
+              className="absolute inset-0 size-full object-cover object-[center_20%]"
+            />
+            <div
+              className="absolute inset-0 bg-gradient-to-t from-[#070d19] via-[#070d19]/55 to-transparent"
+              aria-hidden
+            />
+            <div className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
+              <p className="text-primary-400 text-[0.65rem] font-semibold tracking-[0.14em] uppercase">
+                {analyst.eyebrow}
+              </p>
+              <h3 className="text-foreground mt-2 text-xl font-semibold tracking-tight">
+                {analyst.name}
+              </h3>
+              <p className="text-muted mt-1 text-sm">{analyst.title}</p>
+            </div>
+          </div>
+
+          <ul className="space-y-2.5 border-border/60 border-t p-5 sm:p-6">
+            {analyst.credentials.map(item => (
+              <li
+                key={item}
+                className="text-body flex items-start gap-2.5 text-sm"
+              >
+                <Check
+                  className="text-info mt-0.5 size-4 shrink-0"
+                  aria-hidden
+                />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
     </LandingSection>
