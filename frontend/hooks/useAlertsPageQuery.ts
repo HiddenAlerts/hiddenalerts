@@ -1,6 +1,10 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthProvider';
+import {
+  SUBSCRIBER_ALERTS_API_RISK_LEVEL,
+  type AlertsRiskFilterValue,
+} from '@/data/alertRiskFilterOptions';
 import { ALERTS_PAGE_SIZE, fetchAlertsPage } from '@/lib/api/alerts';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
@@ -12,9 +16,14 @@ export function alertsListQueryKey(args: {
   return ['alerts', 'list', args] as const;
 }
 
+/**
+ * Subscriber browse list — always requests the Critical+High API pool
+ * (`risk_level=high`). Critical vs High pills are applied client-side from
+ * `risk_band` (backend list has no `critical` risk_level).
+ */
 export function useAlertsPageQuery(
   page: number,
-  risk: string,
+  risk: AlertsRiskFilterValue | string,
   category: string,
   options?: { enabled?: boolean },
 ) {
@@ -29,7 +38,7 @@ export function useAlertsPageQuery(
         {
           limit: ALERTS_PAGE_SIZE,
           offset,
-          ...(risk !== 'all' ? { risk_level: risk } : {}),
+          risk_level: SUBSCRIBER_ALERTS_API_RISK_LEVEL,
           ...(category !== 'all' ? { category } : {}),
         },
         token!,

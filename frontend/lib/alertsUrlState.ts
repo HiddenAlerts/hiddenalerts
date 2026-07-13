@@ -27,6 +27,8 @@ function normalizeAlertsSearchQueryFromSearchParams(
 export function normalizeAlertsRiskFromSearchParams(raw: string | null): string {
   const v = (raw ?? '').trim().toLowerCase();
   if (!v) return 'all';
+  // Legacy Medium/Low links collapse to All (subscriber path is Critical/High only).
+  if (v === 'medium' || v === 'low') return 'all';
   if (ALLOWED_RISK.has(v)) return v;
   return 'all';
 }

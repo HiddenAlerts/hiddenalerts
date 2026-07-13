@@ -179,14 +179,25 @@ export async function fetchAlertsSearch(
   return apiGet<AlertsSearchResponse>(buildAlertsSearchPath(params), { token });
 }
 
-/** Maps `/alerts/stats` payload to risk tab counts. */
+/** Maps `/alerts/stats` to subscriber risk pills (Critical & High only). */
 export function mapAlertsStatsToRiskCounts(
   data: AlertsStatsResponse,
-): Record<AlertsRiskFilterValue, number> {
+): Partial<Record<AlertsRiskFilterValue, number>> {
+  // Backend `high_count` is score ≥ ~70 (Critical + High combined).
+  const criticalPlusHigh = data.high_count;
+  const critical =
+    typeof data.critical_count === 'number' &&
+    Number.isFinite(data.critical_count)
+      ? data.critical_count
+      : undefined;
+
   return {
-    all: data.total_alerts,
-    high: data.high_count,
-    medium: data.medium_count,
-    low: data.low_count,
+    // “All” = Critical + High only (not medium/low from `total_alerts`).
+    all: criticalPlusHigh,
+    ...(critical !== undefined ? { critical } : {}),
+    high:
+      critical !== undefined
+        ? Math.max(0, criticalPlusHigh - critical)
+        : criticalPlusHigh,
   };
 }
