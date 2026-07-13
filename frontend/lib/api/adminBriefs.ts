@@ -136,6 +136,7 @@ function mapAdminBriefToWritePayload(brief: AdminBrief): BriefWritePayload {
     implications: brief.implications || undefined,
     main_intelligence_brief: brief.mainBrief || undefined,
     analyst_notes: brief.analystNotes || undefined,
+    // Persist Name (API `title`) + URL; drop incomplete rows with no URL.
     supporting_alerts: brief.supportingAlerts
       .filter(a => a.url.trim())
       .map(a => ({

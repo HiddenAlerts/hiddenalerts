@@ -133,8 +133,8 @@ export const BriefReader: FC<BriefReaderProps> = ({
         </div>
       ) : null}
 
-      <div className="space-y-6 p-4 sm:p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="space-y-5 p-4 sm:space-y-6 sm:p-6">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
           <div className="min-w-0 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="bg-info inline-flex items-center rounded-sm px-2 py-0.5 text-[0.65rem] font-bold tracking-wide text-white uppercase">
@@ -181,11 +181,13 @@ export const BriefReader: FC<BriefReaderProps> = ({
 
         {brief.featuredImage ? (
           // Local/uploaded image URL; no remote host to optimize via next/image.
+          // Use natural height (not a fixed aspect + object-cover) so full
+          // infographic covers are visible end-to-end in preview and reader.
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={brief.featuredImage}
             alt=""
-            className="aspect-[21/9] w-full rounded-lg object-cover"
+            className="bg-surface-muted w-full rounded-lg object-contain"
           />
         ) : (
           <BriefCover theme={brief.coverTheme} className="aspect-[21/9] w-full rounded-lg" />
@@ -199,7 +201,7 @@ export const BriefReader: FC<BriefReaderProps> = ({
             <RichSection title="Risk Assessment" html={brief.riskAssessment} />
             <RichSection title="What Others Miss" html={brief.whatOthersMiss} />
             <RichSection title="Implications" html={brief.implications} />
-            <RichSection title="Main Intelligence Brief" html={brief.mainBrief} />
+            <RichSection title="Detailed Intelligence Analysis" html={brief.mainBrief} />
           </div>
 
           <div className="space-y-6">
@@ -251,7 +253,7 @@ export const BriefReader: FC<BriefReaderProps> = ({
                         rel="noopener noreferrer"
                         className="hover:text-primary-400 underline"
                       >
-                        {alert.title || alert.url}
+                        {alert.title?.trim() || alert.url}
                       </a>
                     </li>
                   ))}

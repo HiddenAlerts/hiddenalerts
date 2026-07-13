@@ -658,12 +658,13 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
 
         <div id={FIELD_DOM_IDS.mainBrief} className={FIELD_ANCHOR_CLASS}>
           <RichTextEditor
-            label="Main Intelligence Brief"
+            label="Detailed Intelligence Analysis"
+            description="Use for additional analyst content that doesn't fit the sections above — for example intelligence indicators, key actors & affiliations, geographic focus, criminal methodology, or trend / strategic outlook when applicable."
             required
             addAsterisk
             value={brief.mainBrief}
             onChange={html => update('mainBrief', html)}
-            placeholder="Provide the full analysis, context, and details supporting this brief…"
+            placeholder="Write the deeper analysis supporting this brief…"
             minHeightClassName="min-h-[220px]"
             showWordCount
             isError={Boolean(fieldErrors.mainBrief)}
