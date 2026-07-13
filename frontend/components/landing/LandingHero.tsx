@@ -1,8 +1,9 @@
-import { Lock, Mail } from 'lucide-react';
-
+import { buttonVariants } from '@/components/ui/button';
 import { HERO_CONTENT, LANDING_LINKS } from '@/data/landing';
+import { cn } from '@/lib/utils';
+import { Mail } from 'lucide-react';
+import Link from 'next/link';
 
-import { LandingEmailForm } from './LandingEmailForm';
 import { HeroThreatVisual } from './HeroThreatVisual';
 
 export function LandingHero() {
@@ -31,16 +32,18 @@ export function LandingHero() {
             {HERO_CONTENT.description}
           </p>
 
-          <div className="mt-7">
-            <LandingEmailForm
-              actionUrl={LANDING_LINKS.newsletter}
-              placeholder={HERO_CONTENT.emailPlaceholder}
-              buttonLabel={HERO_CONTENT.emailButtonLabel}
-              buttonClassName="sm:px-4 sm:text-xs md:text-sm"
-              buttonIcon={<Mail className="size-4" aria-hidden />}
-            />
-            <p className="text-muted-foreground mt-2.5 flex items-center gap-1.5 text-xs">
-              <Lock className="size-3 shrink-0" aria-hidden />
+          <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Link
+              href={LANDING_LINKS.heroSubscribe}
+              className={cn(
+                buttonVariants({ variant: 'default', size: 'md' }),
+                'h-11 gap-2 px-5 text-sm font-semibold',
+              )}
+            >
+              <Mail className="size-4" aria-hidden />
+              {HERO_CONTENT.ctaLabel}
+            </Link>
+            <p className="text-muted-foreground text-xs sm:max-w-xs">
               {HERO_CONTENT.emailFootnote}
             </p>
           </div>

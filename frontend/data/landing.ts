@@ -10,6 +10,11 @@ import {
   UserRound,
 } from 'lucide-react';
 
+import {
+  MAILERLITE_FOOTER_ANCHOR,
+  MAILERLITE_PRICING_ANCHOR,
+} from '@/data/mailerlite';
+
 /** Routes / anchors used across the landing page. Centralised so links stay in sync. */
 export const LANDING_LINKS = {
   signup: '/signup',
@@ -24,12 +29,10 @@ export const LANDING_LINKS = {
   alerts: '#alerts',
   briefs: '#intelligence-brief',
   contactSales: 'mailto:hello@hiddenalerts.com',
-  /**
-   * Newsletter signup destination.
-   * TODO: replace with MailerLite autoresponder URL when Ken provides it (task B3 / T7).
-   */
-  newsletter: 'https://hiddenalerts.beehiiv.com',
-  heroSubscribe: '#top',
+  /** Free newsletter — MailerLite on pricing + footer (not hero). */
+  newsletter: MAILERLITE_PRICING_ANCHOR,
+  heroSubscribe: MAILERLITE_PRICING_ANCHOR,
+  footerNewsletter: MAILERLITE_FOOTER_ANCHOR,
 } as const;
 
 export type LandingNavItem = { label: string; href: string };
@@ -48,8 +51,7 @@ export const HERO_CONTENT = {
   titleEmphasis: 'Before It Impacts Your Institution',
   description:
     'Actionable intelligence on emerging fraud threats from government, regulatory, cyber, and financial crime sources—validated by experts so you can act before losses occur.',
-  emailPlaceholder: 'Enter your email',
-  emailButtonLabel: 'Join Free Intelligence Updates',
+  ctaLabel: 'Join Free Intelligence Updates',
   emailFootnote: 'No spam. Unsubscribe anytime.',
 } as const;
 
@@ -228,9 +230,6 @@ export const FREE_PLAN = {
     'Intelligence Brief Preview',
     'Email Delivery',
   ],
-  emailPlaceholder: 'Enter your email',
-  buttonLabel: 'Join Free Intelligence Updates',
-  actionUrl: LANDING_LINKS.newsletter,
   footnote: 'Get your first Intelligence Brief this Friday.',
 } as const;
 
@@ -286,9 +285,6 @@ export const FOOTER_CONTENT = {
   newsletterTitle: 'Get Free Intelligence Updates',
   newsletterDescription:
     'Get the weekly intelligence brief and high-risk alert preview.',
-  newsletterPlaceholder: 'Enter your email',
-  newsletterButtonLabel: 'Join Free Updates',
-  newsletterActionUrl: LANDING_LINKS.newsletter,
   securityNote: 'Built for financial institutions. Secured for intelligence.',
   productLinks: [
     { label: 'How It Works', href: LANDING_LINKS.howItWorks },

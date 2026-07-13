@@ -1,5 +1,4 @@
 export { LandingBuiltFor } from './LandingBuiltFor';
-export { LandingEmailForm } from './LandingEmailForm';
 export { LandingFAQ } from './LandingFAQ';
 export { LandingFooter } from './LandingFooter';
 export { LandingHeader } from './LandingHeader';
@@ -8,7 +7,9 @@ export { LandingHowItWorks } from './LandingHowItWorks';
 export { LandingIntelligencePreview } from './LandingIntelligencePreview';
 export { LandingLiveAlertRow } from './LandingLiveAlertRow';
 export { LandingLogo } from './LandingLogo';
+export { LandingMailerLiteForm } from './LandingMailerLiteForm';
 export { LandingPricing } from './LandingPricing';
 export { LandingSection, SectionHeading } from './LandingSection';
 export { LandingSourcesWeMonitor } from './LandingSourcesWeMonitor';
 export { LandingValueProps } from './LandingValueProps';
+export { MailerLiteUniversalScript } from './MailerLiteUniversalScript';
