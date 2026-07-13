@@ -17,7 +17,7 @@ export function LandingHowItWorks() {
         subtitle={HOW_IT_WORKS.subtitle}
       />
 
-      <ol className="mt-12 grid gap-10 sm:grid-cols-2 lg:grid-cols-4 lg:gap-6">
+      <ol className="mt-8 grid gap-8 sm:grid-cols-2 lg:grid-cols-4 lg:gap-6">
         {HOW_IT_WORKS.steps.map((step, index) => {
           const Icon = step.icon;
           return (

@@ -26,7 +26,7 @@ export function LandingHeader({
   showAuthActions = true,
   navItems,
   primaryCta = {
-    label: 'Get Free Weekly Intelligence Brief',
+    label: 'Join Free Intelligence Updates',
     href: LANDING_LINKS.heroSubscribe,
   },
 }: LandingHeaderProps) {

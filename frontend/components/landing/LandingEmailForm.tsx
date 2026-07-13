@@ -1,6 +1,7 @@
 import { buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import type { ReactNode } from 'react';
 
 type LandingEmailFormProps = {
   actionUrl: string;
@@ -11,6 +12,7 @@ type LandingEmailFormProps = {
   className?: string;
   inputClassName?: string;
   buttonClassName?: string;
+  buttonIcon?: ReactNode;
 };
 
 export function LandingEmailForm({
@@ -21,6 +23,7 @@ export function LandingEmailForm({
   className,
   inputClassName,
   buttonClassName,
+  buttonIcon,
 }: LandingEmailFormProps) {
   const buttonColor =
     variant === 'blue'
@@ -50,11 +53,12 @@ export function LandingEmailForm({
         type="submit"
         className={cn(
           buttonVariants({ variant: 'default', size: 'md' }),
-          'h-11 shrink-0 px-5 text-sm font-semibold whitespace-nowrap',
+          'h-11 shrink-0 gap-2 px-5 text-sm font-semibold whitespace-nowrap',
           buttonColor,
           buttonClassName,
         )}
       >
+        {buttonIcon}
         {buttonLabel}
       </button>
     </form>

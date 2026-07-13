@@ -114,6 +114,17 @@ function StatSparkline({ className }: { className?: string }) {
 export function HeroThreatVisual({ className }: { className?: string }) {
   return (
     <div className={cn('relative w-full', className)}>
+      <div
+        className="pointer-events-none absolute inset-0 -z-10 opacity-40"
+        aria-hidden
+        style={{
+          backgroundImage:
+            'radial-gradient(circle at 1px 1px, rgba(79,140,255,0.35) 1px, transparent 0)',
+          backgroundSize: '18px 18px',
+          maskImage:
+            'radial-gradient(ellipse at center, black 35%, transparent 75%)',
+        }}
+      />
       <ThreatGlobe />
 
       <div className="border-border bg-background-alt/90 shadow-lg sm:absolute sm:right-0 sm:bottom-4 mt-6 w-full rounded-xl border p-5 backdrop-blur sm:mt-0 sm:max-w-[280px]">

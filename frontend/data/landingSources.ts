@@ -1,10 +1,18 @@
-export type SourceVariant = 'seal' | 'shield' | 'text' | 'brand';
+export type SourceIconVariant =
+  | 'seal'
+  | 'shield'
+  | 'network'
+  | 'bank'
+  | 'scales'
+  | 'cyber'
+  | 'press'
+  | 'tech';
 
 export type MonitorSource = {
   id: string;
   acronym: string;
   fullName?: string;
-  variant: SourceVariant;
+  icon: SourceIconVariant;
 };
 
 export const SOURCES_WE_MONITOR = {
@@ -13,53 +21,56 @@ export const SOURCES_WE_MONITOR = {
     {
       id: 'fbi',
       acronym: 'FBI',
-      variant: 'seal',
+      fullName: 'Federal Bureau of Investigation',
+      icon: 'seal',
     },
     {
       id: 'ic3',
       acronym: 'IC3',
       fullName: 'Internet Crime Complaint Center',
-      variant: 'text',
+      icon: 'network',
     },
     {
       id: 'doj',
       acronym: 'DOJ',
       fullName: 'Department of Justice',
-      variant: 'seal',
+      icon: 'seal',
     },
     {
       id: 'ftc',
       acronym: 'FTC',
       fullName: 'Federal Trade Commission',
-      variant: 'shield',
+      icon: 'shield',
     },
     {
       id: 'fincen',
       acronym: 'FinCEN',
       fullName: 'Financial Crimes Enforcement Network',
-      variant: 'text',
+      icon: 'bank',
     },
     {
       id: 'sec',
       acronym: 'SEC',
       fullName: 'U.S. Securities and Exchange Commission',
-      variant: 'text',
+      icon: 'scales',
     },
     {
       id: 'cisa',
       acronym: 'CISA',
       fullName: 'Cybersecurity & Infrastructure Security Agency',
-      variant: 'text',
+      icon: 'cyber',
     },
     {
       id: 'krebs',
       acronym: 'KrebsOnSecurity',
-      variant: 'brand',
+      fullName: 'Industry security reporting',
+      icon: 'press',
     },
     {
       id: 'bleeping',
       acronym: 'BleepingComputer',
-      variant: 'brand',
+      fullName: 'Cybersecurity news & analysis',
+      icon: 'tech',
     },
   ] as ReadonlyArray<MonitorSource>,
   footnote:

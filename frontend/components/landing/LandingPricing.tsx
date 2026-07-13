@@ -2,7 +2,7 @@
 
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Check, Lock } from 'lucide-react';
+import { Check, Lock, Mail } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 
@@ -20,9 +20,9 @@ export function LandingPricing() {
       ariaLabelledby="pricing-heading"
       className="border-border-subtle border-t"
     >
-      <div className="relative grid gap-6 lg:grid-cols-[1fr_auto_1fr] lg:items-stretch lg:gap-0">
+      <div className="relative grid gap-5 lg:grid-cols-[1fr_auto_1.15fr] lg:items-stretch lg:gap-0">
         {/* Free plan */}
-        <article className="border-info/50 bg-background-alt/60 flex flex-col rounded-2xl border-2 p-6 sm:p-8">
+        <article className="border-info/50 bg-background-alt/60 flex flex-col rounded-2xl border-2 p-6 sm:p-7">
           <h2
             id="pricing-heading"
             className="text-info text-sm font-bold tracking-[0.12em] uppercase"
@@ -49,20 +49,21 @@ export function LandingPricing() {
               placeholder={FREE_PLAN.emailPlaceholder}
               buttonLabel={FREE_PLAN.buttonLabel}
               variant="blue"
+              buttonIcon={<Mail className="size-4" aria-hidden />}
             />
           </div>
           <p className="text-muted-foreground mt-3 text-xs">{FREE_PLAN.footnote}</p>
         </article>
 
         {/* VS divider */}
-        <div className="flex items-center justify-center lg:px-4">
+        <div className="flex items-center justify-center lg:px-3">
           <span className="border-border bg-surface text-muted flex size-10 items-center justify-center rounded-full border text-xs font-bold">
             VS
           </span>
         </div>
 
         {/* Professional plan */}
-        <article className="border-primary-500/60 bg-background-alt/60 flex flex-col rounded-2xl border-2 p-6 sm:p-8">
+        <article className="border-primary-500/60 bg-background-alt/60 flex flex-col rounded-2xl border-2 p-6 sm:p-7">
           <h2 className="text-primary-400 text-sm font-bold tracking-[0.12em] uppercase">
             {PROFESSIONAL_PLAN.title}
           </h2>
@@ -70,7 +71,7 @@ export function LandingPricing() {
             {PROFESSIONAL_PLAN.description}
           </p>
 
-          <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:gap-8">
+          <div className="mt-6 flex flex-col gap-5 lg:flex-row lg:gap-6">
             <ul className="grid flex-1 gap-2 sm:grid-cols-2">
               {PROFESSIONAL_PLAN.features.map(feature => (
                 <li

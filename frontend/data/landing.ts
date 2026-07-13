@@ -1,14 +1,13 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Building2,
-  CreditCard,
+  Clock,
   FileWarning,
   Radar,
   ScanSearch,
   Shield,
   ShieldCheck,
-  Users,
-  Zap,
+  UserRound,
 } from 'lucide-react';
 
 /** Routes / anchors used across the landing page. Centralised so links stay in sync. */
@@ -16,14 +15,19 @@ export const LANDING_LINKS = {
   signup: '/signup',
   login: '/login',
   subscribe: '/subscribe',
-  sampleBrief: '#sample-brief',
+  /** External Elementor sample brief (client-maintained). */
+  sampleBrief: 'https://hiddenalerts.ai/operation-winter-shield',
   pricing: '#pricing',
   howItWorks: '#how-it-works',
   faq: '#faq',
-  alerts: '/login',
-  briefs: '/login',
-  allAlerts: '/login',
+  /** In-page marketing preview — never subscriber dashboard. */
+  alerts: '#alerts',
+  briefs: '#intelligence-brief',
   contactSales: 'mailto:hello@hiddenalerts.com',
+  /**
+   * Newsletter signup destination.
+   * TODO: replace with MailerLite autoresponder URL when Ken provides it (task B3 / T7).
+   */
   newsletter: 'https://hiddenalerts.beehiiv.com',
   heroSubscribe: '#top',
 } as const;
@@ -39,21 +43,14 @@ export const LANDING_NAV: ReadonlyArray<LandingNavItem> = [
 ] as const;
 
 export const HERO_CONTENT = {
-  eyebrow: 'Real-Time Fraud Intelligence',
-  titleLead: 'Real-Time Fraud Intelligence',
-  titleEmphasis: 'Before It Hits Your Institution',
+  eyebrow: 'Early Fraud Intelligence',
+  titleLead: 'Early Fraud Intelligence',
+  titleEmphasis: 'Before It Impacts Your Institution',
   description:
-    'Early intelligence on emerging fraud threats—before they impact banks, fintechs, and compliance teams.',
+    'Actionable intelligence on emerging fraud threats from government, regulatory, cyber, and financial crime sources—validated by experts so you can act before losses occur.',
   emailPlaceholder: 'Enter your email',
-  emailButtonLabel: 'Get Free Weekly Intelligence Brief',
+  emailButtonLabel: 'Join Free Intelligence Updates',
   emailFootnote: 'No spam. Unsubscribe anytime.',
-  trustLine: 'Trusted by professionals in:',
-  trustItems: [
-    { icon: Building2, label: 'Banks' },
-    { icon: Zap, label: 'Fintechs' },
-    { icon: CreditCard, label: 'Payment Providers' },
-    { icon: ShieldCheck, label: 'Compliance Teams' },
-  ] as ReadonlyArray<{ icon: LucideIcon; label: string }>,
 } as const;
 
 export const THREAT_SIGNAL_STAT = {
@@ -62,6 +59,35 @@ export const THREAT_SIGNAL_STAT = {
   headline: 'High-Risk Threat Signals',
   caption: 'Updated in real-time from global sources',
 } as const;
+
+export type ValueProp = {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+};
+
+export const VALUE_PROPS: ReadonlyArray<ValueProp> = [
+  {
+    icon: Building2,
+    title: 'Government & Regulatory Sources',
+    description: 'Trusted intelligence from 10+ leading sources.',
+  },
+  {
+    icon: UserRound,
+    title: '30+ Years Financial Crime Experience',
+    description: 'Decades of banking and investigative expertise.',
+  },
+  {
+    icon: Clock,
+    title: 'Continuous Monitoring',
+    description: 'Global coverage, updated around the clock.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Human + AI Validation',
+    description: 'Every alert analyzed and validated by experts.',
+  },
+] as const;
 
 export type RiskLevel = 'CRITICAL' | 'HIGH' | 'MEDIUM';
 
@@ -105,10 +131,10 @@ export const LIVE_ALERTS: ReadonlyArray<LiveAlert> = [
 ] as const;
 
 export const LIVE_ALERTS_PANEL = {
-  title: 'Live High-Risk Alerts',
-  viewAllLabel: 'View all alerts',
-  viewAllHref: LANDING_LINKS.allAlerts,
-  footnote: 'Real threats. Verified sources. Updated continuously.',
+  title: 'Latest High-Risk Alerts',
+  badge: 'Subscriber Preview',
+  footnote:
+    'Additional real-time alerts are available to subscribers.',
 } as const;
 
 export const INTELLIGENCE_BRIEF_PREVIEW = {
@@ -128,8 +154,26 @@ export const INTELLIGENCE_BRIEF_PREVIEW = {
     'Recommended Actions',
     'Sources & References',
   ],
-  cta: { label: 'View Sample Intelligence Brief', href: LANDING_LINKS.sampleBrief },
+  cta: {
+    label: 'View Sample Intelligence Brief',
+    href: LANDING_LINKS.sampleBrief,
+  },
   ctaFootnote: 'Full access included with paid plans.',
+} as const;
+
+export const ANALYST_CONTENT = {
+  eyebrow: 'Meet Your Lead Intelligence Analyst',
+  name: 'Ken W. Sather',
+  title: 'Founder & Chief Intelligence Analyst',
+  portraitSrc: '/images/ken-sather.png',
+  portraitAlt:
+    'Professional portrait of Ken W. Sather, Founder & Chief Intelligence Analyst at HiddenAlerts',
+  credentials: [
+    'Former FDIC Bank Examiner',
+    'Financial Crime Investigator',
+    'BSA/AML Compliance Expert',
+    '30+ Years of Banking & Financial Crime Experience',
+  ],
 } as const;
 
 export type HowItWorksStep = {
@@ -175,7 +219,7 @@ export const HOW_IT_WORKS = {
 } as const;
 
 export const FREE_PLAN = {
-  title: 'Free Weekly Intelligence Brief',
+  title: 'Stay Ahead of Emerging Fraud Risks',
   intro: "Every Friday you'll receive:",
   features: [
     'One Featured High-Risk Alert',
@@ -185,7 +229,7 @@ export const FREE_PLAN = {
     'Email Delivery',
   ],
   emailPlaceholder: 'Enter your email',
-  buttonLabel: 'Subscribe Free',
+  buttonLabel: 'Join Free Intelligence Updates',
   actionUrl: LANDING_LINKS.newsletter,
   footnote: 'Get your first Intelligence Brief this Friday.',
 } as const;
@@ -214,7 +258,6 @@ export const PROFESSIONAL_PLAN = {
   footnote: 'Secure checkout. Cancel anytime.',
 } as const;
 
-
 export const LANDING_FAQ = [
   {
     question: 'What is HiddenAlerts?',
@@ -239,12 +282,12 @@ export const LANDING_FAQ = [
 ] as const;
 
 export const FOOTER_CONTENT = {
-  tagline: 'Real-time fraud intelligence. Early detection. Actionable protection.',
-  newsletterTitle: 'Stay Ahead of Fraud',
+  tagline: 'Early fraud intelligence. Early detection. Actionable protection.',
+  newsletterTitle: 'Get Free Intelligence Updates',
   newsletterDescription:
     'Get the weekly intelligence brief and high-risk alert preview.',
   newsletterPlaceholder: 'Enter your email',
-  newsletterButtonLabel: 'Subscribe Free',
+  newsletterButtonLabel: 'Join Free Updates',
   newsletterActionUrl: LANDING_LINKS.newsletter,
   securityNote: 'Built for financial institutions. Secured for intelligence.',
   productLinks: [

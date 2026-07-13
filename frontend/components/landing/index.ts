@@ -11,3 +11,4 @@ export { LandingLogo } from './LandingLogo';
 export { LandingPricing } from './LandingPricing';
 export { LandingSection, SectionHeading } from './LandingSection';
 export { LandingSourcesWeMonitor } from './LandingSourcesWeMonitor';
+export { LandingValueProps } from './LandingValueProps';
