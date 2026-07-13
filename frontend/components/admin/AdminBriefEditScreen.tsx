@@ -44,7 +44,7 @@ export const AdminBriefEditScreen: FC<AdminBriefEditScreenProps> = ({
     <AdminBriefForm
       initial={brief}
       title="Edit Intelligence Brief"
-      subtitle="All fields marked with * are required."
+      subtitle="All fields marked with * are required to publish. Drafts only need a title."
       returnHref={`/admin/briefs/${brief.slug}`}
     />
   );

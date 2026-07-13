@@ -9,7 +9,7 @@ export default function AdminBriefNewPage() {
   return (
     <AdminBriefForm
       title="Create Intelligence Brief"
-      subtitle="All fields marked with * are required."
+      subtitle="All fields marked with * are required to publish. Drafts only need a title."
       returnHref="/admin/briefs"
     />
   );
