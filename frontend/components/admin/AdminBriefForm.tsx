@@ -186,14 +186,17 @@ function firstErrorKey(errors: FieldErrors): BriefFieldKey | undefined {
   return FIELD_ORDER.find(key => Boolean(errors[key]));
 }
 
+/** Offset for the sticky admin header so highlighted fields are not hidden. */
+const FIELD_ANCHOR_CLASS = 'scroll-mt-24';
+
 function scrollToField(key: BriefFieldKey) {
   const el = document.getElementById(FIELD_DOM_IDS[key]);
   if (!el) return;
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const focusable = el.querySelector<HTMLElement>(
     'input, select, textarea, [contenteditable="true"]',
   );
-  window.setTimeout(() => focusable?.focus(), 280);
+  window.setTimeout(() => focusable?.focus({ preventScroll: true }), 320);
 }
 
 /**
@@ -215,6 +218,8 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
   const [pendingAction, setPendingAction] = useState<
     'draft' | 'publish' | 'archive' | null
   >(null);
+  /** Scroll after React paints error styles so highlight + focus stay in sync. */
+  const pendingScrollFieldRef = useRef<BriefFieldKey | null>(null);
 
   const [imageFile, setImageFile] = useState<File | undefined>();
   const [imagePreview, setImagePreview] = useState<string | undefined>(
@@ -229,6 +234,20 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
     },
     [],
   );
+
+  useEffect(() => {
+    const key = pendingScrollFieldRef.current;
+    if (!key || !fieldErrors[key]) return;
+    pendingScrollFieldRef.current = null;
+    const frame = window.requestAnimationFrame(() => scrollToField(key));
+    return () => window.cancelAnimationFrame(frame);
+  }, [fieldErrors]);
+
+  function showFieldErrors(errors: FieldErrors) {
+    const first = firstErrorKey(errors);
+    pendingScrollFieldRef.current = first ?? null;
+    setFieldErrors(errors);
+  }
 
   const saveMutation = useSaveAdminBriefMutation();
   const publishMutation = usePublishAdminBriefMutation();
@@ -306,11 +325,9 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
 
   async function handleSave() {
     if (!brief.title.trim()) {
-      const errors: FieldErrors = {
+      showFieldErrors({
         title: 'Add a title before saving a draft.',
-      };
-      setFieldErrors(errors);
-      scrollToField('title');
+      });
       return;
     }
 
@@ -323,14 +340,10 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
     stayOnSavedBrief(saved);
   }
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-
+  async function handlePublish() {
     const errors = getPublishFieldErrors(brief);
     if (Object.keys(errors).length > 0) {
-      setFieldErrors(errors);
-      const first = firstErrorKey(errors);
-      if (first) scrollToField(first);
+      showFieldErrors(errors);
       toast.error('Complete the highlighted required fields before publishing.');
       return;
     }
@@ -351,6 +364,11 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
       }
     }
     setPendingAction(null);
+  }
+
+  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    void handlePublish();
   }
 
   async function handleArchive() {
@@ -384,6 +402,8 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
   const canArchive = Boolean(brief.id) && brief.status !== 'archived';
   const canPublish = brief.status !== 'published';
   const saveLabel = brief.status === 'published' ? 'Save Changes' : 'Save Draft';
+  const canFeature = Boolean(brief.id);
+  const errorCount = Object.keys(fieldErrors).length;
 
   return (
     <form noValidate onSubmit={handleSubmit} className="space-y-6">
@@ -434,10 +454,11 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
             ) : null}
             {canPublish ? (
               <Button
-                type="submit"
+                type="button"
                 size="sm"
                 loading={pendingAction === 'publish'}
                 disabled={pendingAction !== null}
+                onClick={handlePublish}
                 leftIcon={<Feather className="size-4" aria-hidden />}
               >
                 Publish Brief
@@ -447,6 +468,17 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         }
       />
 
+      {errorCount > 0 ? (
+        <div
+          role="alert"
+          className="border-danger/40 bg-danger/10 text-danger rounded-lg border px-4 py-3 text-sm"
+        >
+          {errorCount === 1
+            ? '1 required field needs attention before publishing.'
+            : `${errorCount} required fields need attention before publishing.`}{' '}
+          They are highlighted below.
+        </div>
+      ) : null}
       <Modal open={previewOpen} onClose={() => setPreviewOpen(false)}>
         <BriefReader
           brief={adminBriefToDetail({ ...brief, featuredImage: imagePreview })}
@@ -460,7 +492,10 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         <h2 className={SECTION_HEADING_CLASSNAME}>1. Basic Information</h2>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div id={FIELD_DOM_IDS.title} className="sm:col-span-2 lg:col-span-1">
+          <div
+            id={FIELD_DOM_IDS.title}
+            className={`sm:col-span-2 lg:col-span-1 ${FIELD_ANCHOR_CLASS}`}
+          >
             <Input
               label="Title"
               required
@@ -472,7 +507,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
               errorMessage={fieldErrors.title}
             />
           </div>
-          <div id={FIELD_DOM_IDS.category}>
+          <div id={FIELD_DOM_IDS.category} className={FIELD_ANCHOR_CLASS}>
             <Select
               label="Category"
               required
@@ -484,7 +519,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
               errorMessage={fieldErrors.category}
             />
           </div>
-          <div id={FIELD_DOM_IDS.riskScore}>
+          <div id={FIELD_DOM_IDS.riskScore} className={FIELD_ANCHOR_CLASS}>
             <Input
               label="Risk Score (0-100)"
               required
@@ -526,7 +561,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div id={FIELD_DOM_IDS.primaryEntities}>
+          <div id={FIELD_DOM_IDS.primaryEntities} className={FIELD_ANCHOR_CLASS}>
             <TagsInput
               label="Primary Entities"
               required
@@ -559,7 +594,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         <h2 className={SECTION_HEADING_CLASSNAME}>2. Intelligence Content</h2>
 
         <div className="grid gap-5 lg:grid-cols-2">
-          <div id={FIELD_DOM_IDS.executiveSummary}>
+          <div id={FIELD_DOM_IDS.executiveSummary} className={FIELD_ANCHOR_CLASS}>
             <RichTextEditor
               label="Executive Summary"
               required
@@ -571,7 +606,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
               errorMessage={fieldErrors.executiveSummary}
             />
           </div>
-          <div id={FIELD_DOM_IDS.whyThisMatters}>
+          <div id={FIELD_DOM_IDS.whyThisMatters} className={FIELD_ANCHOR_CLASS}>
             <RichTextEditor
               label="Why This Matters"
               required
@@ -583,7 +618,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
               errorMessage={fieldErrors.whyThisMatters}
             />
           </div>
-          <div id={FIELD_DOM_IDS.keySignals}>
+          <div id={FIELD_DOM_IDS.keySignals} className={FIELD_ANCHOR_CLASS}>
             <RichTextEditor
               label="Key Signals"
               required
@@ -595,7 +630,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
               errorMessage={fieldErrors.keySignals}
             />
           </div>
-          <div id={FIELD_DOM_IDS.riskAssessment}>
+          <div id={FIELD_DOM_IDS.riskAssessment} className={FIELD_ANCHOR_CLASS}>
             <RichTextEditor
               label="Risk Assessment"
               required
@@ -621,7 +656,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
           />
         </div>
 
-        <div id={FIELD_DOM_IDS.mainBrief}>
+        <div id={FIELD_DOM_IDS.mainBrief} className={FIELD_ANCHOR_CLASS}>
           <RichTextEditor
             label="Main Intelligence Brief"
             required
@@ -669,24 +704,30 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
           </div>
 
           <div className="space-y-4">
-            <div>
+            <div
+              className={
+                canFeature
+                  ? 'border-border rounded-lg border p-4'
+                  : 'border-border bg-surface/40 rounded-lg border border-dashed p-4'
+              }
+            >
               <span className="text-body mb-2 block text-sm font-medium">
                 Featured Brief
               </span>
               <Switch
                 checked={brief.featured}
                 onChange={handleFeaturedToggle}
-                disabled={!brief.id || featureMutation.isPending}
+                disabled={!canFeature || featureMutation.isPending}
                 label="Display as the featured brief on the subscriber library"
               />
-              <p className="text-muted mt-1.5 text-xs">
-                {brief.id
-                  ? 'Optional. Only one brief can be featured at a time.'
-                  : 'Optional. Save the brief once, then you can feature it.'}
+              <p className="text-muted mt-2 text-xs leading-relaxed">
+                {canFeature
+                  ? 'Optional. Only one brief can be featured at a time. Turning this on updates the subscriber library immediately.'
+                  : 'Optional — not required to save or publish. Save Draft once to unlock this toggle (the brief needs an ID before it can be featured).'}
               </p>
             </div>
 
-            <div>
+            <div className="border-border rounded-lg border p-4">
               <span className="text-body mb-2 block text-sm font-medium">
                 Premium Content
               </span>
@@ -695,7 +736,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
                 onChange={next => update('isPremium', next)}
                 label="Gate this brief behind a premium subscription"
               />
-              <p className="text-muted mt-1.5 text-xs">
+              <p className="text-muted mt-2 text-xs leading-relaxed">
                 Optional. Can be set anytime and is stored when you save.
               </p>
             </div>
