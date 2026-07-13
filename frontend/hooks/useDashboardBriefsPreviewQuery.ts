@@ -4,8 +4,8 @@ import { useAuth } from '@/contexts/AuthProvider';
 import { fetchSubscriberBriefsPage } from '@/lib/api/subscriberBriefs';
 import { useQuery } from '@tanstack/react-query';
 
-/** Brief cards and recent table on the subscriber dashboard. */
-export const DASHBOARD_BRIEFS_PREVIEW_LIMIT = 4;
+/** Brief cards on the subscriber dashboard (three per row). */
+export const DASHBOARD_BRIEFS_PREVIEW_LIMIT = 3;
 
 export function dashboardBriefsPreviewQueryKey() {
   return [

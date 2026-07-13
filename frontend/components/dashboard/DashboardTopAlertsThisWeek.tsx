@@ -20,7 +20,7 @@ export const DashboardTopAlertsThisWeek: FC<
   DashboardTopAlertsThisWeekProps
 > = ({
   title = 'Top Alerts This Week',
-  subtitle = 'The highest priority threats based on risk score and recency.',
+  subtitle = 'Newest Critical and High-Risk threats — updated continuously.',
   alerts,
   viewAllHref,
   viewAllLabel,
@@ -43,7 +43,7 @@ export const DashboardTopAlertsThisWeek: FC<
         bodyContent
       ) : alerts.length === 0 ? (
         <p className="text-muted border-border rounded-lg border border-dashed px-4 py-8 text-center text-sm">
-          No top alerts to display this week.
+          No Critical or High-Risk alerts to display this week.
         </p>
       ) : (
         alerts.map(alert => (

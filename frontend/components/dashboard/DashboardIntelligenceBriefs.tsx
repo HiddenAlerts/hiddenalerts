@@ -20,7 +20,7 @@ export type DashboardIntelligenceBriefsProps = {
 export const DashboardIntelligenceBriefs: FC<
   DashboardIntelligenceBriefsProps
 > = ({
-  title = 'Intelligence Briefs',
+  title = 'Featured Intelligence Briefs',
   subtitle = 'In-depth analysis and insights on emerging threats and trends.',
   briefs,
   viewAllHref,
@@ -62,9 +62,13 @@ export const DashboardIntelligenceBriefs: FC<
           No intelligence briefs available right now.
         </p>
       ) : (
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
+        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 md:gap-4">
           {briefs.map(brief => (
-            <BriefCard key={brief.id} brief={brief} />
+            <BriefCard
+              key={brief.id}
+              brief={brief}
+              imageClassName="aspect-[16/9]"
+            />
           ))}
         </div>
       )

@@ -3,14 +3,15 @@
 import { useAuth } from '@/contexts/AuthProvider';
 import type { DashboardTopAlertWeeklyItem } from '@/data/dashboardTopAlertsThisWeek';
 import { fetchTopAlerts } from '@/lib/api/alerts';
+import { pickNewestCriticalHighAlerts } from '@/lib/dashboardAlerts';
 import { mapApiAlertToDashboardTopAlertWeeklyItem } from '@/lib/mapApiAlertToDashboardTopAlertWeekly';
 import { useQuery } from '@tanstack/react-query';
 
 /** Number of weekly top alerts displayed on the dashboard. */
-export const DASHBOARD_TOP_ALERTS_WEEK_LIMIT = 3;
+export const DASHBOARD_TOP_ALERTS_WEEK_LIMIT = 5;
 
 export function dashboardTopAlertsWeekQueryKey() {
-  return ['alerts', 'dashboard', 'top-week'] as const;
+  return ['alerts', 'dashboard', 'top-week', 'critical-high'] as const;
 }
 
 export function useDashboardTopAlertsWeekQuery(options?: {
@@ -25,12 +26,13 @@ export function useDashboardTopAlertsWeekQuery(options?: {
     queryFn: () => fetchTopAlerts(token!),
     select: data => {
       const now = Date.now();
-      return (data.alerts ?? [])
-        .slice(0, DASHBOARD_TOP_ALERTS_WEEK_LIMIT)
-        .map(
-          (item): DashboardTopAlertWeeklyItem =>
-            mapApiAlertToDashboardTopAlertWeeklyItem(item, now),
-        );
+      return pickNewestCriticalHighAlerts(
+        data.alerts ?? [],
+        DASHBOARD_TOP_ALERTS_WEEK_LIMIT,
+      ).map(
+        (item): DashboardTopAlertWeeklyItem =>
+          mapApiAlertToDashboardTopAlertWeeklyItem(item, now),
+      );
     },
     staleTime: 60_000,
     enabled,
