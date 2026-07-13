@@ -28,6 +28,7 @@ import {
 } from '@/hooks';
 import { getApiErrorMessage } from '@/lib/api/queryError';
 import { adminBriefToDetail } from '@/lib/briefDetail';
+import { riskScoreToDetailLevel } from '@/lib/briefs';
 import { stripHtmlToText } from '@/lib/htmlText';
 import { slugify } from '@/lib/utils';
 import type { AdminBrief, AdminPublishStatus } from '@/types/admin';
@@ -266,7 +267,18 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
     if (key in FIELD_DOM_IDS) {
       clearFieldError(key as BriefFieldKey);
     }
-    setBrief(prev => ({ ...prev, [key]: value }));
+    setBrief(prev => {
+      if (key === 'riskScore') {
+        const score = value as number;
+        return {
+          ...prev,
+          riskScore: score,
+          // Keep risk_level aligned with the 0–100 score (Critical ≥81, High ≥71, …).
+          riskLevel: riskScoreToDetailLevel(score),
+        };
+      }
+      return { ...prev, [key]: value };
+    });
   };
 
   function handleTitleChange(nextTitle: string) {
@@ -532,6 +544,11 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
               isError={Boolean(fieldErrors.riskScore)}
               errorMessage={fieldErrors.riskScore}
             />
+            <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
+              Use the full 0–100 scale (e.g. 80–100 for Critical/High). Values
+              like 10–12 look like placeholders on cards. Risk Level updates
+              automatically from this score.
+            </p>
           </div>
           <Select
             label="Risk Level"

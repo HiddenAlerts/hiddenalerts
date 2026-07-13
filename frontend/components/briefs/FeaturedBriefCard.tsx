@@ -1,4 +1,4 @@
-import { formatBriefDate } from '@/lib/briefs';
+import { formatBriefDate, formatBriefRiskScore } from '@/lib/briefs';
 import { cn } from '@/lib/utils';
 import type { SubscriberBrief } from '@/types/briefs';
 import { Calendar, FileText, Lock, ShieldAlert, Tag } from 'lucide-react';
@@ -100,7 +100,9 @@ export const FeaturedBriefCard: FC<FeaturedBriefCardProps> = ({
           label="Risk Score"
           value={
             <span className="flex flex-wrap items-center gap-2">
-              <span className="tabular-nums">{brief.riskScore}/100</span>
+              <span className="tabular-nums">
+                {formatBriefRiskScore(brief.riskScore)}
+              </span>
               <BriefRiskTag riskLabel={brief.riskLabel} />
             </span>
           }

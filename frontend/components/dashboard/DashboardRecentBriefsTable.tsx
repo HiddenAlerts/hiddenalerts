@@ -1,5 +1,6 @@
 'use client';
 
+import { formatBriefRiskScore } from '@/lib/briefs';
 import { cn } from '@/lib/utils';
 import type { BriefRiskLabel, SubscriberBrief } from '@/types/briefs';
 import {
@@ -132,7 +133,7 @@ export const DashboardRecentBriefsTable: FC<
                           riskColor[brief.riskLabel],
                         )}
                       >
-                        {brief.riskScore}/100
+                        {formatBriefRiskScore(brief.riskScore)}
                       </span>
                       <span
                         className={cn(
@@ -166,7 +167,7 @@ export const DashboardRecentBriefsTable: FC<
                             riskColor[brief.riskLabel],
                           )}
                         >
-                          {brief.riskScore}/100
+                          {formatBriefRiskScore(brief.riskScore)}
                         </span>
                         <span
                           className={cn(

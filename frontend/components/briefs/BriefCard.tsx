@@ -1,4 +1,4 @@
-import { formatBriefDate } from '@/lib/briefs';
+import { formatBriefDate, formatBriefRiskScore } from '@/lib/briefs';
 import { cn } from '@/lib/utils';
 import type { BriefRiskLabel, SubscriberBrief } from '@/types/briefs';
 import { ArrowRight } from 'lucide-react';
@@ -30,7 +30,7 @@ export const BriefCard: FC<BriefCardProps> = ({
 }) => (
   <Link
     href={brief.href}
-    aria-label={`${brief.title} — risk score ${brief.riskScore} out of 100, ${brief.riskLabel} risk`}
+    aria-label={`${brief.title} — risk score ${formatBriefRiskScore(brief.riskScore)}, ${brief.riskLabel} risk`}
     className={cn(
       'border-border bg-background-alt focus-visible:ring-primary-500/40 group relative flex flex-col overflow-hidden rounded-xl border transition-colors hover:border-primary-500/40 focus-visible:ring-2 focus-visible:outline-none',
       className,
@@ -59,22 +59,25 @@ export const BriefCard: FC<BriefCardProps> = ({
 
     <div className="flex flex-1 flex-col gap-2.5 p-3.5 sm:p-4">
       <span
-        className={cn('text-xs font-semibold tracking-wide uppercase', riskScoreTone[brief.riskLabel])}
+        className={cn(
+          'text-xs font-semibold tracking-wide uppercase',
+          riskScoreTone[brief.riskLabel],
+        )}
       >
         {brief.category}
       </span>
-      <h3 className="text-foreground line-clamp-3 text-sm font-semibold leading-snug">
+      <h3 className="text-foreground line-clamp-3 text-sm leading-snug font-semibold">
         {brief.title}
       </h3>
       <div className="text-muted mt-auto flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
         <span className="whitespace-nowrap">{formatBriefDate(brief.date)}</span>
         <span
           className={cn(
-            'font-semibold tabular-nums whitespace-nowrap',
+            'font-semibold whitespace-nowrap tabular-nums',
             riskScoreTone[brief.riskLabel],
           )}
         >
-          {brief.riskScore}/100
+          {formatBriefRiskScore(brief.riskScore)}
         </span>
       </div>
     </div>

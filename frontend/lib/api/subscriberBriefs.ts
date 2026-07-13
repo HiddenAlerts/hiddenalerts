@@ -1,4 +1,5 @@
-import { categoryToCoverTheme, RISK_LEVEL_LABEL } from '@/lib/briefDetail';
+import { categoryToCoverTheme } from '@/lib/briefDetail';
+import { resolveBriefRiskLabel, riskScoreToDetailLevel } from '@/lib/briefs';
 import { stripHtmlToText } from '@/lib/htmlText';
 import { keySignalsArrayToHtml } from '@/lib/keySignalsFormat';
 import type { BriefDetail, BriefDetailRiskLevel, SubscriberBrief } from '@/types/briefs';
@@ -29,9 +30,15 @@ function riskLevelToDetailRiskLevel(level: string | null): BriefDetailRiskLevel 
   return 'low';
 }
 
+/** Pass through API score; null → 0 only as a typed sentinel (UI shows "—" for ≤0). */
+function mapRiskScore(score: number | null | undefined): number {
+  return typeof score === 'number' && Number.isFinite(score) ? score : 0;
+}
+
 export function mapApiListItemToSubscriberBrief(
   record: SubscriberBriefListItemApi,
 ): SubscriberBrief {
+  const riskScore = mapRiskScore(record.risk_score);
   const riskLevel = riskLevelToDetailRiskLevel(record.risk_level);
   return {
     id: String(record.id),
@@ -40,8 +47,8 @@ export function mapApiListItemToSubscriberBrief(
     category: record.category ?? '',
     coverageAreas: record.tags ?? [],
     date: record.published_at ? record.published_at.slice(0, 10) : '',
-    riskScore: record.risk_score ?? 0,
-    riskLabel: RISK_LEVEL_LABEL[riskLevel],
+    riskScore,
+    riskLabel: resolveBriefRiskLabel(riskScore, riskLevel),
     coverTheme: categoryToCoverTheme(record.category ?? ''),
     featuredImage: resolveAssetUrl(record.featured_image_url),
     sourceCount: record.alerts_count,
@@ -55,6 +62,7 @@ export function mapApiListItemToSubscriberBrief(
 export function mapApiDetailToSubscriberBriefCard(
   record: SubscriberBriefDetailApi,
 ): SubscriberBrief {
+  const riskScore = mapRiskScore(record.risk_score);
   const riskLevel = riskLevelToDetailRiskLevel(record.risk_level);
   return {
     id: String(record.id),
@@ -63,8 +71,8 @@ export function mapApiDetailToSubscriberBriefCard(
     category: record.category ?? '',
     coverageAreas: record.tags ?? [],
     date: record.published_at ? record.published_at.slice(0, 10) : '',
-    riskScore: record.risk_score ?? 0,
-    riskLabel: RISK_LEVEL_LABEL[riskLevel],
+    riskScore,
+    riskLabel: resolveBriefRiskLabel(riskScore, riskLevel),
     coverTheme: categoryToCoverTheme(record.category ?? ''),
     featuredImage: resolveAssetUrl(record.featured_image_url),
     sourceCount: record.alerts_count,
@@ -75,14 +83,17 @@ export function mapApiDetailToSubscriberBriefCard(
 }
 
 export function mapApiDetailToBriefDetail(record: SubscriberBriefDetailApi): BriefDetail {
+  const riskScore = mapRiskScore(record.risk_score);
+  const riskLevel = riskLevelToDetailRiskLevel(record.risk_level);
   return {
     id: String(record.id),
     slug: record.slug,
     title: record.title,
     category: record.category ?? '',
     coverTheme: categoryToCoverTheme(record.category ?? ''),
-    riskScore: record.risk_score ?? 0,
-    riskLevel: riskLevelToDetailRiskLevel(record.risk_level),
+    riskScore,
+    // Prefer score-derived level so gauge/badge match the number Ken sees.
+    riskLevel: riskScore > 0 ? riskScoreToDetailLevel(riskScore) : riskLevel,
     confidenceLevel:
       record.confidence_level === 'high' || record.confidence_level === 'low'
         ? record.confidence_level
