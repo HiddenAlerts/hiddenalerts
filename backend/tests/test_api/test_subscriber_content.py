@@ -358,7 +358,7 @@ class TestSubscriberAlertDetail:
 
 @pytest.mark.asyncio
 class TestSubscriberStats:
-    async def test_shape_matches_public(
+    async def test_reuses_public_total_and_categories_adds_critical(
         self, client: AsyncClient, db_session: AsyncSession
     ):
         await _seed_published_alert(db_session, signal_score=18, category="Cybercrime")
@@ -370,7 +370,11 @@ class TestSubscriberStats:
         with _patch_validator(_claims(sub=sub_id)):
             sub = await client.get("/api/v1/subscriber/alerts/stats", headers=_AUTH)
         assert public.status_code == 200 and sub.status_code == 200
-        assert sub.json() == public.json()
+        pub_j, sub_j = public.json(), sub.json()
+        # Subscriber stats add critical_count (V1 bands); total + categories are shared.
+        assert "critical_count" in sub_j
+        assert sub_j["total_alerts"] == pub_j["total_alerts"]
+        assert sub_j["category_breakdown"] == pub_j["category_breakdown"]
 
     async def test_requires_active_subscription(self, client: AsyncClient):
         with _patch_validator(_claims(sub=f"stats-nosub-{uuid.uuid4()}")):
@@ -519,3 +523,110 @@ class TestSubscriberSearch:
                 "/api/v1/subscriber/search/alerts?q=test", headers=_AUTH
             )
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Risk-band filter + stats (Critical/High/Medium/Low, matching the badges)
+# ---------------------------------------------------------------------------
+
+from app.api.subscriber import (  # noqa: E402
+    _BAND_CRITICAL_MIN,
+    _BAND_HIGH_MIN,
+    _BAND_MEDIUM_MIN,
+)
+from app.pipeline.publishing.risk_bands import compute_risk_band  # noqa: E402
+
+
+def test_subscriber_band_constants_match_risk_bands():
+    # The mirrored SQL thresholds must agree with the canonical band logic.
+    assert compute_risk_band(_BAND_CRITICAL_MIN).value == "critical"
+    assert compute_risk_band(_BAND_CRITICAL_MIN - 1).value == "high"
+    assert compute_risk_band(_BAND_HIGH_MIN).value == "high"
+    assert compute_risk_band(_BAND_HIGH_MIN - 1).value == "medium"
+    assert compute_risk_band(_BAND_MEDIUM_MIN).value == "medium"
+    assert compute_risk_band(_BAND_MEDIUM_MIN - 1).value == "below_60"
+
+
+@pytest.mark.asyncio
+class TestSubscriberRiskBandFilter:
+    async def _active(self, db_session):
+        sub_id = f"band-{uuid.uuid4()}"
+        await _seed_profile_with_subscription(db_session, sub_id=sub_id, status="active")
+        return sub_id
+
+    @pytest.mark.parametrize(
+        "risk_level, score, band",
+        [("critical", 21, "critical"), ("high", 19, "high"),
+         ("medium", 16, "medium"), ("low", 10, "below_60")],
+    )
+    async def test_band_filter_selects_only_its_band(
+        self, client: AsyncClient, db_session: AsyncSession, risk_level, score, band
+    ):
+        cat = f"BandCat-{uuid.uuid4().hex[:8]}"
+        # One published alert in each band, all under a unique category.
+        crit = await _seed_published_alert(db_session, category=cat, signal_score=21)
+        high = await _seed_published_alert(db_session, category=cat, signal_score=19)
+        med = await _seed_published_alert(db_session, category=cat, signal_score=16)
+        low = await _seed_published_alert(db_session, category=cat, signal_score=10)
+        wanted = {"critical": crit, "high": high, "medium": med, "low": low}[risk_level]
+
+        sub_id = await self._active(db_session)
+        with _patch_validator(_claims(sub=sub_id)):
+            resp = await client.get(
+                f"/api/v1/subscriber/alerts?category={cat}&risk_level={risk_level}",
+                headers=_AUTH,
+            )
+        assert resp.status_code == 200
+        alerts = resp.json()["alerts"]
+        assert [a["id"] for a in alerts] == [wanted.id]
+        assert alerts[0]["risk_band"] == band
+
+    async def test_critical_is_excluded_from_high(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        cat = f"BandCat-{uuid.uuid4().hex[:8]}"
+        crit = await _seed_published_alert(db_session, category=cat, signal_score=22)
+        high = await _seed_published_alert(db_session, category=cat, signal_score=18)
+        sub_id = await self._active(db_session)
+        with _patch_validator(_claims(sub=sub_id)):
+            resp = await client.get(
+                f"/api/v1/subscriber/alerts?category={cat}&risk_level=high", headers=_AUTH
+            )
+        ids = [a["id"] for a in resp.json()["alerts"]]
+        assert high.id in ids and crit.id not in ids
+
+    async def test_invalid_risk_level_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        sub_id = await self._active(db_session)
+        with _patch_validator(_claims(sub=sub_id)):
+            resp = await client.get(
+                "/api/v1/subscriber/alerts?risk_level=extreme", headers=_AUTH
+            )
+        assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+class TestSubscriberStatsCritical:
+    async def _active(self, db_session):
+        sub_id = f"stats-{uuid.uuid4()}"
+        await _seed_profile_with_subscription(db_session, sub_id=sub_id, status="active")
+        return sub_id
+
+    async def test_stats_exposes_critical_count(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        sub_id = await self._active(db_session)
+        # Delta-based so leaked committed rows from other tests don't matter.
+        with _patch_validator(_claims(sub=sub_id)):
+            before = (await client.get("/api/v1/subscriber/alerts/stats", headers=_AUTH)).json()
+        assert "critical_count" in before
+
+        await _seed_published_alert(db_session, signal_score=21)  # critical band
+        await _seed_published_alert(db_session, signal_score=19)  # high band
+
+        with _patch_validator(_claims(sub=sub_id)):
+            after = (await client.get("/api/v1/subscriber/alerts/stats", headers=_AUTH)).json()
+
+        assert after["critical_count"] == before["critical_count"] + 1
+        assert after["high_count"] == before["high_count"] + 1  # critical not double-counted
