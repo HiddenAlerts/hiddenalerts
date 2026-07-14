@@ -51,7 +51,18 @@ export async function apiRequest<TResponse>(
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const res = await fetch(url, { ...rest, body, headers });
+  let res: Response;
+  try {
+    res = await fetch(url, { ...rest, body, headers });
+  } catch (cause) {
+    // Normalize browser network failures so callers always get an Error.message
+    // (often "Failed to fetch" — CORS, offline, bad host, or connection reset).
+    const message =
+      cause instanceof Error && cause.message.trim()
+        ? cause.message
+        : 'Failed to fetch';
+    throw new Error(message, { cause });
+  }
 
   if (res.status === 204) {
     return undefined as TResponse;

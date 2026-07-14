@@ -62,11 +62,13 @@ export function ImageUpload({
         >
           {value ? (
             // Local preview or server-hosted URL; no fixed remote host to optimize via next/image.
+            // object-contain: tall CMS covers (infographics) must stay fully visible —
+            // object-cover zooms into dark centers and looks like a missing image.
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={value}
               alt="Featured image preview"
-              className="size-full object-cover"
+              className="size-full object-contain"
             />
           ) : (
             <ImageIcon className="text-muted size-8" aria-hidden />
