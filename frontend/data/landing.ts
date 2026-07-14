@@ -14,6 +14,8 @@ import {
   MAILERLITE_FOOTER_ANCHOR,
   MAILERLITE_PRICING_ANCHOR,
 } from '@/data/mailerlite';
+import { ACCOUNT_TAKEOVER_ECONOMY_BRIEF } from '@/data/sampleBriefs/accountTakeoverEconomy';
+import { SAMPLE_INTELLIGENCE_BRIEFS } from '@/data/sampleIntelligenceBriefs';
 
 /** Routes / anchors used across the landing page. Centralised so links stay in sync. */
 export const LANDING_LINKS = {
@@ -21,7 +23,7 @@ export const LANDING_LINKS = {
   login: '/login',
   subscribe: '/subscribe',
   /** External Elementor sample brief (client-maintained). */
-  sampleBrief: 'https://hiddenalerts.ai/operation-winter-shield',
+  sampleBrief: 'https://hiddenalerts.ai/account-takeover-economy',
   pricing: '#pricing',
   howItWorks: '#how-it-works',
   faq: '#faq',
@@ -102,33 +104,31 @@ export type LiveAlert = {
   timestamp: string;
 };
 
+/** Marketing alerts card — three sample Intelligence Briefs (preview only). */
 export const LIVE_ALERTS: ReadonlyArray<LiveAlert> = [
   {
-    score: 84,
+    score: SAMPLE_INTELLIGENCE_BRIEFS[0].riskScore,
     level: 'CRITICAL',
-    title:
-      'Owner of Durable Medical Equipment Company Sentenced for $59M Medicare Fraud',
-    category: 'Medicare Fraud',
+    title: SAMPLE_INTELLIGENCE_BRIEFS[0].title,
+    category: SAMPLE_INTELLIGENCE_BRIEFS[0].category,
     categoryTone: 'danger',
-    timestamp: 'May 20, 2026 · 2:11 PM UTC',
+    timestamp: 'June 10, 2026 · 12:55 PM UTC',
   },
   {
-    score: 78,
-    level: 'HIGH',
-    title:
-      'Operation Winter SHIELD: FBI Philadelphia on Protecting the Transportation Sector',
-    category: 'Cybercrime',
+    score: SAMPLE_INTELLIGENCE_BRIEFS[1].riskScore,
+    level: 'CRITICAL',
+    title: SAMPLE_INTELLIGENCE_BRIEFS[1].title,
+    category: SAMPLE_INTELLIGENCE_BRIEFS[1].category,
     categoryTone: 'info',
-    timestamp: 'May 19, 2026 · 4:50 PM UTC',
+    timestamp: 'June 6, 2026',
   },
   {
-    score: 74,
-    level: 'HIGH',
-    title:
-      'Former Coal Company Executive Convicted in International Bribery and Money Laundering',
-    category: 'Money Laundering',
+    score: SAMPLE_INTELLIGENCE_BRIEFS[2].riskScore,
+    level: 'CRITICAL',
+    title: SAMPLE_INTELLIGENCE_BRIEFS[2].title,
+    category: SAMPLE_INTELLIGENCE_BRIEFS[2].category,
     categoryTone: 'warning',
-    timestamp: 'May 18, 2026 · 6:30 AM UTC',
+    timestamp: 'June 5, 2026',
   },
 ] as const;
 
@@ -139,25 +139,26 @@ export const LIVE_ALERTS_PANEL = {
     'Additional real-time alerts are available to subscribers.',
 } as const;
 
+/** Landing teaser only — full sample body is not rendered here. Sample #1 of three. */
 export const INTELLIGENCE_BRIEF_PREVIEW = {
   eyebrow: 'Intelligence Brief Preview',
-  score: 84,
-  title:
-    'Operation Winter SHIELD: FBI Philadelphia on Protecting the Transportation Sector',
-  date: 'March 3, 2026 · 4:50 PM UTC',
-  summary:
-    'Operation Winter SHIELD, led by the FBI Philadelphia, focuses on protecting the transportation and logistics sector from cyber threats, particularly phishing attacks. The initiative aims to raise awareness, provide resources, and enhance cybersecurity measures to safeguard critical infrastructure.',
+  score: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.riskScore,
+  riskLevel: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.riskLevel,
+  category: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.category,
+  title: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.title,
+  date: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.publishedLabel,
+  summary: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.landingPreviewSummary,
   includesTitle: 'This brief includes:',
   includes: [
-    'Key Intelligence & Threat Actors',
-    'Attack Methods & Tactics',
-    'Risk Assessment & Impact',
-    'Indicators to Watch',
-    'Recommended Actions',
-    'Sources & References',
+    'Key Findings',
+    'Key Signals',
+    'Key Actors & Affiliations',
+    'Geographic Focus',
+    'Risk Assessment',
+    'Business Impact',
   ],
   cta: {
-    label: 'View Sample Intelligence Brief',
+    label: 'View Full Example Intelligence Brief',
     href: LANDING_LINKS.sampleBrief,
   },
   ctaFootnote: 'Full access included with paid plans.',

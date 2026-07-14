@@ -180,13 +180,22 @@ export async function fetchAdminBriefDetail(
  * shareable link, so this resolves it via a list scan (accurate as long as
  * the library stays under the list endpoint's 200-item max) then fetches the
  * full detail by id.
+ *
+ * Prefer `q=slug` first so archived / filtered items are more likely to appear,
+ * then fall back to an unfiltered page.
  */
 export async function fetchAdminBriefBySlug(
   slug: string,
   token: string,
 ): Promise<AdminBrief> {
-  const { items } = await fetchAdminBriefsPage({ limit: 200 }, token);
-  const match = items.find(item => item.slug === slug);
+  const searched = await fetchAdminBriefsPage({ limit: 200, q: slug }, token);
+  let match = searched.items.find(item => item.slug === slug);
+
+  if (!match) {
+    const unfiltered = await fetchAdminBriefsPage({ limit: 200 }, token);
+    match = unfiltered.items.find(item => item.slug === slug);
+  }
+
   if (!match) {
     const notFound = new Error('Brief not found') as HttpRequestError;
     notFound.name = 'HttpRequestError';

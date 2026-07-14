@@ -57,15 +57,22 @@ export function LandingIntelligencePreview() {
             <span className="text-primary-400 text-xs font-semibold tracking-[0.14em] uppercase">
               {brief.eyebrow}
             </span>
-            <span className="border-danger/40 bg-danger-muted text-danger rounded-full border px-3 py-1 text-xs font-semibold">
-              Risk Score: {brief.score}/100
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="border-danger/40 bg-danger-muted text-danger rounded-full border px-3 py-1 text-xs font-semibold">
+                Risk Score: {brief.score}/100
+              </span>
+              <span className="border-danger/40 bg-danger-muted text-danger rounded-full border px-3 py-1 text-xs font-semibold uppercase">
+                {brief.riskLevel}
+              </span>
+            </div>
           </div>
 
           <h3 className="text-foreground mt-4 text-base leading-snug font-semibold sm:text-lg">
             {brief.title}
           </h3>
-          <p className="text-muted-foreground mt-2 text-xs">{brief.date}</p>
+          <p className="text-muted-foreground mt-2 text-xs">
+            {brief.category} · Published: {brief.date}
+          </p>
 
           <p className="text-body mt-4 text-sm leading-relaxed">{brief.summary}</p>
 
@@ -73,7 +80,7 @@ export function LandingIntelligencePreview() {
             <p className="text-foreground text-sm font-semibold">
               {brief.includesTitle}
             </p>
-            <ul className="mt-3 grid gap-2">
+            <ul className="mt-3 grid gap-2 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-2">
               {brief.includes.map(item => (
                 <li
                   key={item}

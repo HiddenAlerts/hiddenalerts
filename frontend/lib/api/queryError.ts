@@ -42,7 +42,18 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
       }
       return STATUS_MESSAGES[e.status] ?? `The server returned an error (${e.status}). ${e.message}`;
     }
-    return error.message;
+
+    // Browser `fetch` network failures (CORS, offline, wrong API host, aborted):
+    // message is typically "Failed to fetch" with no HTTP status.
+    const msg = error.message.trim();
+    if (/failed to fetch|networkerror|load failed|network request failed/i.test(msg)) {
+      return (
+        'Could not reach the server (network error). Check your connection, ' +
+        'confirm you are still signed in, and try again. If this keeps happening, ' +
+        'ask your developer to check the API URL / CORS settings.'
+      );
+    }
+    return msg || fallback;
   }
   return fallback;
 }

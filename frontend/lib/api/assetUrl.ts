@@ -22,7 +22,9 @@ function assetOrigin(): string {
  */
 export function resolveAssetUrl(path: string | null | undefined): string | undefined {
   if (!path) return undefined;
-  if (/^https?:\/\//i.test(path)) return path;
+  const trimmed = path.trim();
+  if (!trimmed) return undefined;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
   const origin = assetOrigin();
-  return `${origin}${path.startsWith('/') ? '' : '/'}${path}`;
+  return `${origin}${trimmed.startsWith('/') ? '' : '/'}${trimmed}`;
 }
