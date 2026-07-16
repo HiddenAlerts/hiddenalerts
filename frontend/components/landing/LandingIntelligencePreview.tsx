@@ -23,9 +23,9 @@ export function LandingIntelligencePreview() {
         {/* Ken mockup — full-width featured brief preview */}
         <LandingBriefPreviewCard />
 
-        {/* Alerts + Analyst — taller row so the portrait isn’t face-cropped */}
+        {/* Alerts + Analyst — taller portrait so Ken’s full headshot is visible */}
         <div className="grid items-stretch gap-5 lg:grid-cols-2 lg:gap-5">
-          <div className="border-border bg-background-alt/80 flex min-h-[480px] flex-col rounded-2xl border p-5 sm:min-h-[520px] sm:p-6 lg:min-h-[560px]">
+          <div className="border-border bg-background-alt/80 flex min-h-[560px] flex-col rounded-2xl border p-5 sm:min-h-[600px] sm:p-6 lg:min-h-[640px]">
             <div className="flex flex-wrap items-center gap-2">
               <h2
                 id="alerts-heading"
@@ -49,16 +49,17 @@ export function LandingIntelligencePreview() {
             </p>
           </div>
 
-          <div className="border-border bg-background-alt/80 flex min-h-[480px] flex-col overflow-hidden rounded-2xl border sm:min-h-[520px] lg:min-h-[560px]">
-            <div className="relative min-h-[320px] w-full flex-1 overflow-hidden sm:min-h-[360px]">
+          <div className="border-border bg-background-alt/80 flex min-h-[560px] flex-col overflow-hidden rounded-2xl border sm:min-h-[600px] lg:min-h-[640px]">
+            {/* Portrait-oriented frame + object-top keeps the full head in view */}
+            <div className="relative aspect-[3/4] w-full shrink-0 overflow-hidden sm:aspect-[4/5] lg:aspect-auto lg:min-h-[420px] lg:flex-1">
               {/* eslint-disable-next-line @next/next/no-img-element -- marketing portrait asset */}
               <img
                 src={analyst.portraitSrc}
                 alt={analyst.portraitAlt}
-                className="absolute inset-0 size-full object-cover object-[center_18%]"
+                className="absolute inset-0 size-full object-cover object-top"
               />
               <div
-                className="absolute inset-0 bg-gradient-to-t from-[#070d19] via-[#070d19]/50 to-transparent"
+                className="absolute inset-0 bg-gradient-to-t from-[#070d19] via-[#070d19]/45 to-transparent"
                 aria-hidden
               />
               <div className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
@@ -72,7 +73,7 @@ export function LandingIntelligencePreview() {
               </div>
             </div>
 
-            <ul className="space-y-2.5 border-border/60 border-t p-5 sm:p-6">
+            <ul className="shrink-0 space-y-2.5 border-border/60 border-t p-5 sm:p-6">
               {analyst.credentials.map(item => (
                 <li
                   key={item}

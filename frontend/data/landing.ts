@@ -177,9 +177,10 @@ export const ANALYST_CONTENT = {
     'Professional portrait of Ken W. Sather, Founder & Chief Intelligence Analyst at HiddenAlerts',
   credentials: [
     'Former FDIC Bank Examiner',
+    'Certified Regulatory Compliance Manager (CRCM)',
     'Financial Crime Investigator',
-    'BSA/AML Compliance Expert',
-    '30+ Years of Banking & Financial Crime Experience',
+    'BSA/AML & Consumer Compliance Specialist',
+    '30+ Years Banking & Financial Crime Experience',
   ],
 } as const;
 
