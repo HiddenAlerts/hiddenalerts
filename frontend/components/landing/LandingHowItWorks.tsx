@@ -9,15 +9,16 @@ export function LandingHowItWorks() {
     <LandingSection
       id="how-it-works"
       ariaLabelledby="how-it-works-heading"
-      className="border-border-subtle border-t"
+      className="border-border-subtle border-t py-6 md:py-8"
     >
       <SectionHeading
         id="how-it-works-heading"
         title={HOW_IT_WORKS.title}
         subtitle={HOW_IT_WORKS.subtitle}
+        className="gap-2"
       />
 
-      <ol className="mt-8 grid gap-8 sm:grid-cols-2 lg:grid-cols-4 lg:gap-6">
+      <ol className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
         {HOW_IT_WORKS.steps.map((step, index) => {
           const Icon = step.icon;
           return (
@@ -33,10 +34,10 @@ export function LandingHowItWorks() {
                 <Icon className="size-6" aria-hidden />
               </span>
 
-              <h3 className="text-foreground mt-4 text-sm font-semibold sm:text-base">
+              <h3 className="text-foreground mt-3 text-sm font-semibold sm:text-base">
                 {step.step}. {step.title}
               </h3>
-              <p className="text-muted mt-2 max-w-[220px] text-sm leading-relaxed">
+              <p className="text-muted mt-1.5 max-w-[220px] text-sm leading-relaxed">
                 {step.description}
               </p>
             </li>

@@ -17,9 +17,9 @@ export function LandingIntelligencePreview() {
     <LandingSection
       id="alerts"
       ariaLabelledby="alerts-heading"
-      className="border-border-subtle border-t py-10 md:py-12"
+      className="border-border-subtle border-t py-8 md:py-10"
     >
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-5">
         {/* Ken mockup — full-width featured brief preview */}
         <LandingBriefPreviewCard />
 

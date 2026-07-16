@@ -24,7 +24,7 @@ export function LandingBriefPreviewCard() {
   return (
     <div id="intelligence-brief" className="scroll-mt-24">
       {/* Section label */}
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-3 flex items-center gap-3">
         <Crosshair className="text-primary-500 size-4 shrink-0" aria-hidden />
         <h2 className="text-primary-500 text-xs font-bold tracking-[0.18em] uppercase">
           {brief.eyebrow}
@@ -62,26 +62,27 @@ export function LandingBriefPreviewCard() {
         </div>
 
         {/* Body: summary + metadata */}
-        <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[1fr_200px] lg:gap-8 lg:p-7">
+        <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[1fr_200px] lg:gap-6 lg:p-6">
           <div className="min-w-0">
             <p className="text-primary-400 flex items-center gap-2 text-xs font-semibold tracking-[0.12em] uppercase">
               <Shield className="size-3.5 shrink-0" aria-hidden />
               {brief.categories}
             </p>
 
-            <h3 className="font-heading text-foreground mt-3 text-xl leading-snug font-bold tracking-tight text-balance sm:text-2xl">
+            <h3 className="font-heading text-foreground mt-2.5 text-xl leading-snug font-bold tracking-tight text-balance sm:text-2xl">
               {brief.title}
             </h3>
             <span
-              className="bg-primary-500 mt-3 block h-0.5 w-12"
+              className="bg-primary-500 mt-2.5 block h-0.5 w-12"
               aria-hidden
             />
 
-            <p className="text-body mt-4 text-sm leading-relaxed sm:text-[0.95rem]">
+            {/* Executive Summary — tighter gap before the supporting callout */}
+            <p className="text-body mt-2.5 text-sm leading-relaxed sm:text-[0.95rem]">
               {brief.summary}
             </p>
 
-            <div className="border-border/70 bg-surface/50 mt-5 flex items-start gap-3 rounded-lg border px-3.5 py-3">
+            <div className="border-border/70 bg-surface/50 mt-3 flex items-start gap-3 rounded-lg border px-3.5 py-3">
               <span className="bg-primary-500/15 text-primary-400 flex size-8 shrink-0 items-center justify-center rounded-full">
                 <Crosshair className="size-3.5" aria-hidden />
               </span>
@@ -101,7 +102,7 @@ export function LandingBriefPreviewCard() {
               rel="noopener noreferrer"
               className={cn(
                 buttonVariants({ variant: 'default', size: 'md' }),
-                'mt-6 inline-flex h-11 w-full gap-2.5 px-5 text-sm font-semibold tracking-wide sm:w-fit',
+                'mt-5 inline-flex h-11 w-full gap-2.5 px-5 text-sm font-semibold tracking-wide sm:w-fit',
               )}
             >
               <FileText className="size-4 shrink-0 opacity-90" aria-hidden />
@@ -135,7 +136,7 @@ export function LandingBriefPreviewCard() {
         </div>
       </article>
 
-      <p className="text-muted-foreground mt-4 flex items-center justify-center gap-2 text-center text-xs sm:text-sm">
+      <p className="text-muted-foreground mt-3 flex items-center justify-center gap-2 text-center text-xs sm:text-sm">
         <ShieldCheck className="size-3.5 shrink-0 opacity-80" aria-hidden />
         {brief.footer}
       </p>

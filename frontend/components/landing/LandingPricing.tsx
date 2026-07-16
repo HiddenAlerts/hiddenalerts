@@ -19,7 +19,7 @@ export function LandingPricing() {
     <LandingSection
       id="pricing"
       ariaLabelledby="pricing-heading"
-      className="border-border-subtle border-t"
+      className="border-border-subtle border-t py-8 md:py-10"
     >
       <div className="relative grid gap-5 lg:grid-cols-[1fr_auto_1.15fr] lg:items-stretch lg:gap-0">
         <article className="border-info/50 bg-background-alt/60 flex flex-col rounded-2xl border-2 p-6 sm:p-7">
