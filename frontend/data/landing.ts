@@ -17,7 +17,16 @@ import {
 import { ACCOUNT_TAKEOVER_ECONOMY_BRIEF } from '@/data/sampleBriefs/accountTakeoverEconomy';
 import { SAMPLE_INTELLIGENCE_BRIEFS } from '@/data/sampleIntelligenceBriefs';
 
-/** Routes / anchors used across the landing page. Centralised so links stay in sync. */
+/** Routes / anchors used across the landing page. Centralised so links stay in sync.
+ *
+ * Verified destinations (Task 7):
+ * - Alerts → #alerts (alerts card)
+ * - Intelligence Briefs → #intelligence-brief (brief preview)
+ * - Pricing → #pricing | FAQ → #faq | How It Works → #how-it-works
+ * - Join Free… → #newsletter-signup (custom MailerLite API form)
+ * - Subscribe Now → /subscribe (auth Stripe checkout; Payment Links deferred)
+ * - Sample brief CTA → https://hiddenalerts.ai/account-takeover-economy
+ */
 export const LANDING_LINKS = {
   signup: '/signup',
   login: '/login',

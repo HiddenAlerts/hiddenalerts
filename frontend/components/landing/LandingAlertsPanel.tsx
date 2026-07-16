@@ -118,7 +118,10 @@ export function LandingAlertsPanel() {
   const rows = showSkeleton ? LIVE_ALERTS : alerts;
 
   return (
-    <div className="border-border bg-background-alt/80 flex min-h-[560px] flex-col rounded-2xl border p-5 sm:min-h-[600px] sm:p-6 lg:min-h-[640px]">
+    <div
+      id="alerts"
+      className="border-border bg-background-alt/80 flex min-h-[560px] scroll-mt-24 flex-col rounded-2xl border p-5 sm:min-h-[600px] sm:p-6 lg:min-h-[640px]"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <h2
           id="alerts-heading"

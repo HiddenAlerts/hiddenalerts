@@ -11,7 +11,6 @@ export function LandingIntelligencePreview() {
 
   return (
     <LandingSection
-      id="alerts"
       ariaLabelledby="alerts-heading"
       className="border-border-subtle border-t py-8 md:py-10"
     >
