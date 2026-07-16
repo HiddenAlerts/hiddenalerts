@@ -11,8 +11,8 @@ import {
 } from 'lucide-react';
 
 import {
-  MAILERLITE_FOOTER_ANCHOR,
-  MAILERLITE_PRICING_ANCHOR,
+  NEWSLETTER_FOOTER_ANCHOR,
+  NEWSLETTER_PRICING_ANCHOR,
 } from '@/data/mailerlite';
 import { ACCOUNT_TAKEOVER_ECONOMY_BRIEF } from '@/data/sampleBriefs/accountTakeoverEconomy';
 import { SAMPLE_INTELLIGENCE_BRIEFS } from '@/data/sampleIntelligenceBriefs';
@@ -31,10 +31,10 @@ export const LANDING_LINKS = {
   alerts: '#alerts',
   briefs: '#intelligence-brief',
   contactSales: 'mailto:hello@hiddenalerts.com',
-  /** Free newsletter — MailerLite on pricing + footer (not hero). */
-  newsletter: MAILERLITE_PRICING_ANCHOR,
-  heroSubscribe: MAILERLITE_PRICING_ANCHOR,
-  footerNewsletter: MAILERLITE_FOOTER_ANCHOR,
+  /** Free newsletter — custom form on pricing + footer (not hero). */
+  newsletter: NEWSLETTER_PRICING_ANCHOR,
+  heroSubscribe: NEWSLETTER_PRICING_ANCHOR,
+  footerNewsletter: NEWSLETTER_FOOTER_ANCHOR,
 } as const;
 
 export type LandingNavItem = { label: string; href: string };
@@ -244,7 +244,8 @@ export const FREE_PLAN = {
     'Intelligence Brief Preview',
     'Email Delivery',
   ],
-  footnote: 'Get your first Intelligence Brief this Friday.',
+  footnote:
+    'Receive actionable fraud intelligence and early warning alerts before they become headlines.',
 } as const;
 
 export const PROFESSIONAL_PLAN = {
@@ -298,7 +299,7 @@ export const FOOTER_CONTENT = {
   tagline: 'Early fraud intelligence. Early detection. Actionable protection.',
   newsletterTitle: 'Get Free Intelligence Updates',
   newsletterDescription:
-    'Get the weekly intelligence brief and high-risk alert preview.',
+    'Receive actionable fraud intelligence and early warning alerts before they become headlines.',
   securityNote: 'Built for financial institutions. Secured for intelligence.',
   productLinks: [
     { label: 'How It Works', href: LANDING_LINKS.howItWorks },

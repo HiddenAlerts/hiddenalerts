@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
 import { FOOTER_CONTENT } from '@/data/landing';
 
 import { LandingLogo } from './LandingLogo';
-import { LandingMailerLiteForm } from './LandingMailerLiteForm';
+import { LandingNewsletterForm } from './LandingNewsletterForm';
 import { LinkedInIcon, XIcon } from './SocialIcons';
 
 const linkClass =
@@ -159,10 +159,11 @@ export function LandingFooter() {
               {c.newsletterDescription}
             </p>
           </div>
-          <LandingMailerLiteForm
+          <LandingNewsletterForm
             id="newsletter"
-            className="w-full lg:max-w-md"
+            className="w-full lg:max-w-lg"
             ariaLabel="Footer newsletter signup"
+            variant="compact"
           />
         </div>
 

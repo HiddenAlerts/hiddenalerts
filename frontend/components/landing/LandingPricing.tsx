@@ -7,7 +7,7 @@ import { Check, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 
-import { LandingMailerLiteForm } from './LandingMailerLiteForm';
+import { LandingNewsletterForm } from './LandingNewsletterForm';
 import { LandingSection } from './LandingSection';
 
 export function LandingPricing() {
@@ -44,7 +44,7 @@ export function LandingPricing() {
           </ul>
 
           <div className="mt-6">
-            <LandingMailerLiteForm
+            <LandingNewsletterForm
               id="newsletter-signup"
               ariaLabel="Join free intelligence updates"
             />
