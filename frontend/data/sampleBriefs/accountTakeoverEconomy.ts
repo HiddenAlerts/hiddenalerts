@@ -9,12 +9,18 @@ export const ACCOUNT_TAKEOVER_ECONOMY_BRIEF = {
     'The Account Takeover Economy: How Criminal Networks Are Targeting Mobile Banking',
   riskScore: 80,
   riskLevel: 'Critical',
-  publishedLabel: 'June 10, 2026 · 12:55 PM',
+  publishedLabel: 'June 10, 2026',
   category: 'Financial Crime',
+  categoriesLabel: 'Cybercrime • Financial Crime',
   thumbnailSrc: '/images/briefs/account-takeover-economy.png',
-  /** Short copy used on the landing preview card. */
+  sourceCount: 11,
+  timeHorizon: '6 – 12 Months',
+  /**
+   * Landing preview Executive Summary — first two sentences from the
+   * published brief (Ken: keep preview to two sentences).
+   */
   landingPreviewSummary:
-    'Financial institutions are experiencing a sustained increase in account takeover (ATO) attempts targeting mobile banking applications. Criminal actors are leveraging stolen credentials, phishing campaigns, Infostealer Malware, SIM swapping, social engineering, and credential marketplaces to gain unauthorized access to customer accounts.',
+    'Account takeover attacks continue to increase as organized criminal groups industrialize credential theft and underground account marketplaces. Financial institutions face growing exposure from phishing, SIM swapping, malware, and credential resale operations.',
   threatSnapshot: [
     'Financial institutions are experiencing a sustained increase in account takeover (ATO) attempts targeting mobile banking applications. Criminal actors are leveraging stolen credentials, phishing campaigns, Infostealer Malware, SIM swapping, social engineering, and credential marketplaces to gain unauthorized access to customer accounts.',
     'The growing adoption of mobile banking has shifted fraud activity toward mobile platforms, which now serve as a primary access point for consumers to manage accounts, transfer funds, and conduct financial transactions.',

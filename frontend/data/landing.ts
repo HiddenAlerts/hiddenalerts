@@ -139,29 +139,33 @@ export const LIVE_ALERTS_PANEL = {
     'Additional real-time alerts are available to subscribers.',
 } as const;
 
-/** Landing teaser only — full sample body is not rendered here. Sample #1 of three. */
+/**
+ * Landing Intelligence Brief Preview card (Ken mockup).
+ * Copy/metadata come from the published Account Takeover brief.
+ * Full brief body is not rendered here — CTA opens the published page.
+ */
 export const INTELLIGENCE_BRIEF_PREVIEW = {
   eyebrow: 'Intelligence Brief Preview',
+  coverSrc: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.thumbnailSrc,
+  coverAlt:
+    'Cover art for The Account Takeover Economy intelligence brief',
   score: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.riskScore,
   riskLevel: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.riskLevel,
-  category: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.category,
+  categories: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.categoriesLabel,
   title: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.title,
-  date: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.publishedLabel,
   summary: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.landingPreviewSummary,
-  includesTitle: 'This brief includes:',
-  includes: [
-    'Key Findings',
-    'Key Signals',
-    'Key Actors & Affiliations',
-    'Geographic Focus',
-    'Risk Assessment',
-    'Business Impact',
-  ],
+  highlightLead: 'Learn how',
+  highlightBrand: 'HiddenAlerts',
+  highlightTrail:
+    'identifies these emerging fraud signals before they become major losses.',
+  publishedLabel: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.publishedLabel,
+  sourceCount: String(ACCOUNT_TAKEOVER_ECONOMY_BRIEF.sourceCount),
+  timeHorizon: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.timeHorizon,
   cta: {
-    label: 'View Full Example Intelligence Brief',
+    label: 'View Full Intelligence Brief',
     href: LANDING_LINKS.sampleBrief,
   },
-  ctaFootnote: 'Full access included with paid plans.',
+  footer: 'Actionable intelligence. Before it impacts your institution.',
 } as const;
 
 export const ANALYST_CONTENT = {

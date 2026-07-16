@@ -1,4 +1,5 @@
 export { LandingBuiltFor } from './LandingBuiltFor';
+export { LandingBriefPreviewCard } from './LandingBriefPreviewCard';
 export { LandingFAQ } from './LandingFAQ';
 export { LandingFooter } from './LandingFooter';
 export { LandingHeader } from './LandingHeader';
