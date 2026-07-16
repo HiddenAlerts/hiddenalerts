@@ -104,7 +104,7 @@ export type LiveAlert = {
   timestamp: string;
 };
 
-/** Marketing alerts card — three sample Intelligence Briefs (preview only). */
+/** Fallback rows when public `/alerts` is empty or unavailable. */
 export const LIVE_ALERTS: ReadonlyArray<LiveAlert> = [
   {
     score: SAMPLE_INTELLIGENCE_BRIEFS[0].riskScore,
@@ -134,9 +134,17 @@ export const LIVE_ALERTS: ReadonlyArray<LiveAlert> = [
 
 export const LIVE_ALERTS_PANEL = {
   title: 'Latest High-Risk Alerts',
-  badge: 'Subscriber Preview',
+  badge: 'Live Feed',
   footnote:
     'Additional real-time alerts are available to subscribers.',
+} as const;
+
+/** Shown when public `/alerts` returns nothing or is unavailable. */
+export const SAMPLE_ALERTS_PANEL = {
+  title: 'Sample Intelligence Alerts',
+  badge: 'Preview',
+  footnote:
+    'Sample intelligence for illustration. Live alerts unlock with a Professional subscription.',
 } as const;
 
 /**
