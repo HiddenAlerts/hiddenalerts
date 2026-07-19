@@ -326,7 +326,6 @@ export const FOOTER_CONTENT = {
   ],
   contactLinks: [
     { label: 'Contact Us', href: 'mailto:hello@hiddenalerts.com' },
-    { label: 'hello@hiddenalerts.com', href: 'mailto:hello@hiddenalerts.com' },
   ],
   socialLinks: [
     {
