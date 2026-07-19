@@ -79,7 +79,7 @@ export const FeaturedBriefCard: FC<FeaturedBriefCardProps> = ({
           <img
             src={brief.featuredImage}
             alt=""
-            className="absolute inset-0 size-full object-cover"
+            className="absolute inset-0 size-full object-cover object-top"
           />
           <div className="absolute inset-0 bg-black/55" aria-hidden />
           {heroContent}

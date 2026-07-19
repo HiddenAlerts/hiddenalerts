@@ -28,7 +28,10 @@ export function useDashboardBriefsPreviewQuery(options?: { enabled?: boolean }) 
         { limit: DASHBOARD_BRIEFS_PREVIEW_LIMIT, offset: 0 },
         token!,
       ),
-    staleTime: 60_000,
+    // CMS publishes/uploads must be reflected whenever the dashboard mounts.
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     enabled,
   });
 }

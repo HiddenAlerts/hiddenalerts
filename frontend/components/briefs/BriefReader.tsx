@@ -194,7 +194,7 @@ export const BriefReader: FC<BriefReaderProps> = ({
               'bg-surface-muted w-full rounded-lg',
               topBar === 'preview'
                 ? 'object-contain'
-                : 'aspect-[16/9] max-h-[22rem] object-cover object-center sm:max-h-[26rem]',
+                : 'aspect-[16/9] max-h-[22rem] object-cover object-top sm:max-h-[26rem]',
             )}
           />
         ) : (

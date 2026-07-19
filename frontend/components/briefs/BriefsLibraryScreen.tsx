@@ -153,11 +153,14 @@ export const BriefsLibraryScreen: FC = () => {
           {showHighlights ? (
             <RecentAdditions
               briefs={overviewQuery.data?.recent ?? []}
-              viewAllHref="/briefs"
+              viewAllHref="/briefs#brief-library-results"
             />
           ) : null}
 
-          <div className="space-y-3">
+          <div
+            id="brief-library-results"
+            className="scroll-mt-24 space-y-3"
+          >
             {showFetchingIndicator ? (
               <div
                 role="status"

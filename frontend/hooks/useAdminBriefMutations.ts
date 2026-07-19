@@ -22,7 +22,11 @@ function requireAdminToken(): string {
   return token;
 }
 
-/** Invalidates both the list and the (now-stale) detail entry for a brief. */
+/**
+ * Invalidates admin and subscriber brief surfaces after every CMS mutation.
+ * This keeps dashboard/library cards and newly uploaded thumbnails current
+ * when an admin saves, publishes, archives, or features a brief.
+ */
 function useInvalidateAdminBriefQueries() {
   const queryClient = useQueryClient();
   return (brief: AdminBrief) => {
@@ -30,6 +34,7 @@ function useInvalidateAdminBriefQueries() {
     void queryClient.invalidateQueries({
       queryKey: adminBriefBySlugQueryKey(brief.slug),
     });
+    void queryClient.invalidateQueries({ queryKey: ['subscriber-briefs'] });
   };
 }
 

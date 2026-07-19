@@ -48,7 +48,7 @@ export const BriefCard: FC<BriefCardProps> = ({
         <img
           src={brief.featuredImage}
           alt=""
-          className="size-full object-cover"
+          className="size-full object-cover object-top"
         />
       ) : (
         <BriefCover theme={brief.coverTheme} className="size-full" />

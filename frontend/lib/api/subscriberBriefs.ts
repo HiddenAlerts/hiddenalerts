@@ -24,8 +24,14 @@ export const SUBSCRIBER_BRIEFS_PAGE_SIZE = 8;
 export const SUBSCRIBER_BRIEFS_OVERVIEW_LIMIT = 100;
 
 function riskLevelToDetailRiskLevel(level: string | null): BriefDetailRiskLevel {
-  if (level === 'critical' || level === 'high' || level === 'medium' || level === 'low') {
-    return level;
+  const normalized = level?.trim().toLowerCase();
+  if (
+    normalized === 'critical' ||
+    normalized === 'high' ||
+    normalized === 'medium' ||
+    normalized === 'low'
+  ) {
+    return normalized;
   }
   return 'unknown';
 }
