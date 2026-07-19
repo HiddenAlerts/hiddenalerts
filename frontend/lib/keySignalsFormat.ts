@@ -8,9 +8,15 @@
 export function keySignalsHtmlToArray(html: string): string[] {
   if (!html.trim()) return [];
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  return Array.from(doc.body.querySelectorAll('li, p'))
+  const fromBlocks = Array.from(doc.body.querySelectorAll('li, p'))
     .map(el => el.textContent?.trim() ?? '')
     .filter(Boolean);
+  if (fromBlocks.length > 0) return fromBlocks;
+
+  // TipTap / paste edge cases sometimes store plain text without <p>/<li>.
+  // Keep that content so a save never silently empties Key Signals.
+  const fallback = doc.body.textContent?.trim() ?? '';
+  return fallback ? [fallback] : [];
 }
 
 /** String array -> a bullet list HTML string the rich text editor can display. */

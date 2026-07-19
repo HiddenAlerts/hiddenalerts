@@ -1,3 +1,4 @@
+import { API_ALERT_CATEGORY_OPTIONS } from './apiAlertCategories';
 import { BRIEF_CATEGORY_OPTIONS } from './briefCategories';
 
 export const ADMIN_STATUS_OPTIONS = [
@@ -35,8 +36,16 @@ export const ADMIN_TIME_HORIZON_OPTIONS = [
   { value: 'long_term', label: 'Long-term' },
 ] as const;
 
-/** Category options without the "all" sentinel, for create/edit forms. */
+/** Brief category options without the "all" sentinel, for create/edit forms. */
 export const ADMIN_CATEGORY_FORM_OPTIONS = BRIEF_CATEGORY_OPTIONS;
+
+/**
+ * Alert taxonomy — must match the backend six categories used by the
+ * subscriber alerts feed (`API_ALERT_CATEGORY_OPTIONS`).
+ */
+export const ADMIN_ALERT_CATEGORY_FORM_OPTIONS = API_ALERT_CATEGORY_OPTIONS.filter(
+  option => option.value !== 'all',
+);
 
 export const ADMIN_RISK_LEVEL_OPTIONS = [
   { value: 'all', label: 'All Risk Levels' },
@@ -46,9 +55,16 @@ export const ADMIN_RISK_LEVEL_OPTIONS = [
   { value: 'low', label: 'Low' },
 ] as const;
 
+/** Brief list/filter categories (intelligence briefs, not alerts). */
 export const ADMIN_CATEGORY_OPTIONS = [
   { value: 'all', label: 'All Categories' },
   ...BRIEF_CATEGORY_OPTIONS,
+];
+
+/** Alert list/filter categories — backend taxonomy. */
+export const ADMIN_ALERT_CATEGORY_OPTIONS = [
+  { value: 'all', label: 'All Categories' },
+  ...ADMIN_ALERT_CATEGORY_FORM_OPTIONS,
 ];
 
 export type AdminStatusFilter =

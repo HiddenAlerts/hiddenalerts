@@ -10,8 +10,8 @@ import {
   StatusTag,
 } from '@/components';
 import {
+  ADMIN_ALERT_CATEGORY_OPTIONS,
   ADMIN_ALERT_STATUS_OPTIONS,
-  ADMIN_CATEGORY_OPTIONS,
   ADMIN_RISK_LEVEL_OPTIONS,
 } from '@/data/adminFilterOptions';
 import {
@@ -132,7 +132,7 @@ export const AdminAlertsScreen: FC = () => {
             id: 'alerts-category',
             value: category,
             ariaLabel: 'Filter by category',
-            options: ADMIN_CATEGORY_OPTIONS,
+            options: ADMIN_ALERT_CATEGORY_OPTIONS,
             onChange: value => {
               setCategory(value);
               resetPage();

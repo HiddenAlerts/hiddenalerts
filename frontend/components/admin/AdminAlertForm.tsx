@@ -9,7 +9,7 @@ import {
   TagsInput,
   Textarea,
 } from '@/components';
-import { ADMIN_CATEGORY_FORM_OPTIONS } from '@/data/adminFilterOptions';
+import { ADMIN_ALERT_CATEGORY_FORM_OPTIONS } from '@/data/adminFilterOptions';
 import { ADMIN_MOCK_BRIEFS } from '@/data/adminMockBriefs';
 import type { AdminAlert } from '@/types/admin';
 import { Feather } from 'lucide-react';
@@ -23,7 +23,7 @@ const EMPTY_ALERT: AdminAlert = {
   id: '',
   title: '',
   riskScore: 0,
-  category: ADMIN_CATEGORY_FORM_OPTIONS[0].value,
+  category: ADMIN_ALERT_CATEGORY_FORM_OPTIONS[0].value,
   date: new Date().toISOString().slice(0, 10),
   summary: '',
   briefId: undefined,
@@ -115,7 +115,7 @@ export const AdminAlertForm: FC<AdminAlertFormProps> = ({
               label="Category"
               required
               addAsterisk
-              options={ADMIN_CATEGORY_FORM_OPTIONS}
+              options={ADMIN_ALERT_CATEGORY_FORM_OPTIONS}
               value={alert.category}
               onChange={e => update('category', e.target.value)}
             />

@@ -307,14 +307,23 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
 
   /** Create-or-update, then upload/remove the image if it changed. Returns the saved brief on success. */
   async function persist(): Promise<AdminBrief | undefined> {
+    const previousPreview = imagePreview;
     try {
       const saved = await saveMutation.mutateAsync({
         brief,
         imageFile,
         removeImage,
       });
-      setBrief(saved);
-      setImagePreview(saved.featuredImage);
+      // Merge API result into local form, but never wipe Key Signals / image
+      // when the response omits them after a partial or legacy payload.
+      setBrief(prev => ({
+        ...saved,
+        keySignals: saved.keySignals || prev.keySignals,
+        featuredImage: saved.featuredImage || (removeImage ? undefined : prev.featuredImage),
+      }));
+      setImagePreview(
+        saved.featuredImage || (removeImage ? undefined : previousPreview),
+      );
       setImageFile(undefined);
       setRemoveImage(false);
       return saved;
@@ -375,9 +384,15 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
 
   async function handleArchive() {
     if (!brief.id) return;
+    const confirmed = window.confirm(
+      'Archive this brief? It will leave the subscriber library and can be found later under Archived in the CMS list.',
+    );
+    if (!confirmed) return;
+
     setPendingAction('archive');
     try {
-      await archiveMutation.mutateAsync(brief.id);
+      const archived = await archiveMutation.mutateAsync(brief.id);
+      setBrief(archived);
       toast.success('Brief archived.');
       router.push(returnHref);
     } catch (err) {
