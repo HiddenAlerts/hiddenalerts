@@ -3,7 +3,7 @@
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Check, Loader2, Mail } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useId, useState, type FormEvent } from 'react';
 
 type LandingNewsletterFormProps = {
   /** Anchor target for header / in-page CTAs. */
@@ -26,13 +26,23 @@ export function LandingNewsletterForm({
   ariaLabel = 'Join free intelligence updates',
   variant = 'default',
 }: LandingNewsletterFormProps) {
+  const generatedId = useId();
   const [email, setEmail] = useState('');
   const [state, setState] = useState<SubmitState>('idle');
   const [error, setError] = useState<string | null>(null);
+  const fieldId = `${id ?? generatedId}-email`;
+  const errorId = `${fieldId}-error`;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (state === 'loading') return;
+
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) {
+      setState('error');
+      setError('Please enter a valid email address.');
+      return;
+    }
 
     setState('loading');
     setError(null);
@@ -41,7 +51,7 @@ export function LandingNewsletterForm({
       const res = await fetch('/api/newsletter', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: normalizedEmail }),
       });
       const data = (await res.json().catch(() => null)) as {
         error?: string;
@@ -88,24 +98,30 @@ export function LandingNewsletterForm({
     >
       <form
         onSubmit={onSubmit}
-        className={cn(
-          'flex w-full gap-2',
-          variant === 'compact' ? 'flex-col sm:flex-row' : 'flex-col',
-        )}
+        className="flex w-full flex-col gap-2 sm:flex-row sm:items-stretch"
+        aria-busy={state === 'loading'}
       >
-        <label className="sr-only" htmlFor={`${id ?? 'newsletter'}-email`}>
+        <label className="sr-only" htmlFor={fieldId}>
           Email address
         </label>
         <input
-          id={`${id ?? 'newsletter'}-email`}
+          id={fieldId}
           type="email"
           name="email"
           autoComplete="email"
           required
           value={email}
-          onChange={e => setEmail(e.target.value)}
+          onChange={e => {
+            setEmail(e.target.value);
+            if (state === 'error') {
+              setState('idle');
+              setError(null);
+            }
+          }}
           placeholder="Enter your email"
           disabled={state === 'loading'}
+          aria-invalid={state === 'error'}
+          aria-describedby={error ? errorId : undefined}
           className="border-border bg-surface text-foreground placeholder:text-muted-foreground focus-visible:ring-primary-500 h-11 w-full min-w-0 rounded-md border px-3 text-sm outline-none focus-visible:ring-2 disabled:opacity-60"
         />
         <button
@@ -113,8 +129,8 @@ export function LandingNewsletterForm({
           disabled={state === 'loading'}
           className={cn(
             buttonVariants({ variant: 'default', size: 'md' }),
-            'h-11 shrink-0 gap-2 px-4 text-sm font-semibold',
-            variant === 'compact' ? 'sm:w-auto' : 'w-full',
+            'h-11 w-full shrink-0 gap-2 px-4 text-sm font-semibold sm:w-auto',
+            variant === 'compact' && 'sm:px-5',
           )}
         >
           {state === 'loading' ? (
@@ -122,11 +138,13 @@ export function LandingNewsletterForm({
           ) : (
             <Mail className="size-4" aria-hidden />
           )}
-          Join Free Intelligence Updates
+          {state === 'loading'
+            ? 'Joining…'
+            : 'Join Free Intelligence Updates'}
         </button>
       </form>
       {error ? (
-        <p className="text-danger mt-2 text-xs" role="alert">
+        <p id={errorId} className="text-danger mt-2 text-xs" role="alert">
           {error}
         </p>
       ) : null}
