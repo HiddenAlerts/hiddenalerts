@@ -15,7 +15,8 @@ export type PublicAlertsListResponse = {
   alerts: PublicAlertListItem[];
 };
 
-export const LANDING_ALERTS_LIMIT = 5;
+/** Approved mockup shows three most recent high-risk alerts. */
+export const LANDING_ALERTS_LIMIT = 3;
 
 /**
  * Published alerts for the anonymous landing feed.

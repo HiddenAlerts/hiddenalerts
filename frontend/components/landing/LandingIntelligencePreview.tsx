@@ -1,11 +1,14 @@
-import { Check } from 'lucide-react';
-
 import { ANALYST_CONTENT } from '@/data/landing';
+import { Check } from 'lucide-react';
 
 import { LandingAlertsPanel } from './LandingAlertsPanel';
 import { LandingBriefPreviewCard } from './LandingBriefPreviewCard';
 import { LandingSection } from './LandingSection';
 
+/**
+ * Approved final mockup: three equal columns —
+ * Latest High-Risk Alerts | Intelligence Brief Preview | Lead Analyst.
+ */
 export function LandingIntelligencePreview() {
   const analyst = ANALYST_CONTENT;
 
@@ -13,55 +16,58 @@ export function LandingIntelligencePreview() {
     <LandingSection
       ariaLabelledby="alerts-heading"
       className="border-border-subtle border-t py-8 md:py-10"
+      containerClassName="max-w-7xl"
     >
-      <div className="flex flex-col gap-5">
-        {/* Ken mockup — full-width featured brief preview */}
+      <div className="grid items-stretch gap-4 lg:grid-cols-3 lg:gap-5">
+        <LandingAlertsPanel />
         <LandingBriefPreviewCard />
 
-        {/* Alerts + Analyst — taller portrait so Ken’s full headshot is visible */}
-        <div className="grid items-stretch gap-5 lg:grid-cols-2 lg:gap-5">
-          <LandingAlertsPanel />
+        <aside className="border-border bg-background-alt/80 flex h-full min-h-[320px] flex-col overflow-hidden rounded-xl border p-5 sm:p-6">
+          <h2 className="text-info shrink-0 text-[0.7rem] font-bold tracking-[0.16em] uppercase">
+            {analyst.eyebrow}
+          </h2>
 
-          <div className="border-border bg-background-alt/80 flex min-h-[560px] flex-col overflow-hidden rounded-2xl border sm:min-h-[600px] lg:min-h-[640px]">
-            {/* Portrait-oriented frame + object-top keeps the full head in view */}
-            <div className="relative aspect-[3/4] w-full shrink-0 overflow-hidden sm:aspect-[4/5] lg:aspect-auto lg:min-h-[420px] lg:flex-1">
+          {/* Portrait fills full remaining height; wider left column */}
+          <div className="mt-4 flex min-h-0 flex-1 items-stretch gap-4 sm:gap-5">
+            <div className="relative w-[56%] min-w-[160px] shrink-0 overflow-hidden rounded-md sm:w-[58%]">
               {/* eslint-disable-next-line @next/next/no-img-element -- marketing portrait asset */}
               <img
                 src={analyst.portraitSrc}
                 alt={analyst.portraitAlt}
-                className="absolute inset-0 size-full object-cover object-top"
+                className="absolute inset-0 size-full object-cover object-[center_15%]"
               />
               <div
-                className="absolute inset-0 bg-gradient-to-t from-[#070d19] via-[#070d19]/45 to-transparent"
+                className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-[#070d19] via-[#070d19]/50 to-transparent"
                 aria-hidden
               />
-              <div className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
-                <p className="text-primary-400 text-[0.65rem] font-semibold tracking-[0.14em] uppercase">
-                  {analyst.eyebrow}
-                </p>
-                <h3 className="text-foreground mt-2 text-xl font-semibold tracking-tight">
-                  {analyst.name}
-                </h3>
-                <p className="text-muted mt-1 text-sm">{analyst.title}</p>
-              </div>
             </div>
 
-            <ul className="shrink-0 space-y-2.5 border-border/60 border-t p-5 sm:p-6">
-              {analyst.credentials.map(item => (
-                <li
-                  key={item}
-                  className="text-body flex items-start gap-2.5 text-sm"
-                >
-                  <Check
-                    className="text-info mt-0.5 size-4 shrink-0"
-                    aria-hidden
-                  />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
+            <div className="flex min-w-0 flex-1 flex-col py-1">
+              <h3 className="text-foreground text-lg font-semibold tracking-tight sm:text-xl">
+                {analyst.name}
+              </h3>
+              <p className="text-muted mt-1 text-sm leading-snug">
+                {analyst.title}
+              </p>
+
+              <ul className="mt-4 space-y-2.5">
+                {analyst.credentials.map(item => (
+                  <li
+                    key={item}
+                    className="text-foreground flex items-start gap-2 text-sm leading-snug"
+                  >
+                    <Check
+                      className="text-info mt-0.5 size-4 shrink-0"
+                      strokeWidth={2.5}
+                      aria-hidden
+                    />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
-        </div>
+        </aside>
       </div>
     </LandingSection>
   );

@@ -16,11 +16,10 @@ export const ACCOUNT_TAKEOVER_ECONOMY_BRIEF = {
   sourceCount: 11,
   timeHorizon: '6 – 12 Months',
   /**
-   * Landing preview Executive Summary — first two sentences from the
-   * published brief (Ken: keep preview to two sentences).
+   * Landing preview executive summary — matches approved mockup teaser.
    */
   landingPreviewSummary:
-    'Account takeover attacks continue to increase as organized criminal groups industrialize credential theft and underground account marketplaces. Financial institutions face growing exposure from phishing, SIM swapping, malware, and credential resale operations.',
+    'Financial institutions are experiencing a sustained increase in account takeover (ATO) attempts targeting mobile banking applications.',
   threatSnapshot: [
     'Financial institutions are experiencing a sustained increase in account takeover (ATO) attempts targeting mobile banking applications. Criminal actors are leveraging stolen credentials, phishing campaigns, Infostealer Malware, SIM swapping, social engineering, and credential marketplaces to gain unauthorized access to customer accounts.',
     'The growing adoption of mobile banking has shifted fraud activity toward mobile platforms, which now serve as a primary access point for consumers to manage accounts, transfer funds, and conduct financial transactions.',

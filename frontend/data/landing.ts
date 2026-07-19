@@ -143,46 +143,46 @@ export const LIVE_ALERTS: ReadonlyArray<LiveAlert> = [
 
 export const LIVE_ALERTS_PANEL = {
   title: 'Latest High-Risk Alerts',
-  badge: 'Live Feed',
-  footnote:
-    'Additional real-time alerts are available to subscribers.',
+  badge: 'Subscriber Preview',
+  footnoteLead: 'Real threats. Verified sources. Updated continuously.',
+  footnoteCta: 'More real-time alerts available with a subscription.',
 } as const;
 
 /** Shown when public `/alerts` returns nothing or is unavailable. */
 export const SAMPLE_ALERTS_PANEL = {
-  title: 'Sample Intelligence Alerts',
-  badge: 'Preview',
-  footnote:
-    'Sample intelligence for illustration. Live alerts unlock with a Professional subscription.',
+  title: 'Latest High-Risk Alerts',
+  badge: 'Subscriber Preview',
+  footnoteLead: 'Real threats. Verified sources. Updated continuously.',
+  footnoteCta: 'More real-time alerts available with a subscription.',
 } as const;
 
 /**
- * Landing Intelligence Brief Preview card (Ken mockup).
- * Copy/metadata come from the published Account Takeover brief.
+ * Landing Intelligence Brief Preview card (Ken mockup — final).
+ * Text-first layout — no large cover thumbnail.
  * Full brief body is not rendered here — CTA opens the published page.
  */
 export const INTELLIGENCE_BRIEF_PREVIEW = {
   eyebrow: 'Intelligence Brief Preview',
-  coverSrc: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.thumbnailSrc,
-  coverAlt:
-    'Cover art for The Account Takeover Economy intelligence brief',
   score: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.riskScore,
-  riskLevel: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.riskLevel,
-  categories: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.categoriesLabel,
   title: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.title,
+  publishedLabel: 'June 10, 2026 • 12:55 PM UTC',
   summary: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.landingPreviewSummary,
-  highlightLead: 'Learn how',
-  highlightBrand: 'HiddenAlerts',
-  highlightTrail:
-    'identifies these emerging fraud signals before they become major losses.',
-  publishedLabel: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.publishedLabel,
-  sourceCount: String(ACCOUNT_TAKEOVER_ECONOMY_BRIEF.sourceCount),
-  timeHorizon: ACCOUNT_TAKEOVER_ECONOMY_BRIEF.timeHorizon,
+  includesLabel: 'This brief includes:',
+  /** Left / right columns as shown in the approved mockup. */
+  includesLeft: [
+    'Key Findings',
+    'Key Signals',
+    'Key Actors & Affiliations',
+  ] as const,
+  includesRight: [
+    'Geographic Focus',
+    'Risk Assessment',
+    'Business Impact',
+  ] as const,
   cta: {
-    label: 'View Full Intelligence Brief',
+    label: 'View Full Example Intelligence Brief',
     href: LANDING_LINKS.sampleBrief,
   },
-  footer: 'Actionable intelligence. Before it impacts your institution.',
 } as const;
 
 export const ANALYST_CONTENT = {
@@ -194,10 +194,9 @@ export const ANALYST_CONTENT = {
     'Professional portrait of Ken W. Sather, Founder & Chief Intelligence Analyst at HiddenAlerts',
   credentials: [
     'Former FDIC Bank Examiner',
-    'Certified Regulatory Compliance Manager (CRCM)',
     'Financial Crime Investigator',
-    'BSA/AML & Consumer Compliance Specialist',
-    '30+ Years Banking & Financial Crime Experience',
+    'BSA/AML Compliance Expert',
+    '30+ Years of Banking & Financial Crime Experience',
   ],
 } as const;
 

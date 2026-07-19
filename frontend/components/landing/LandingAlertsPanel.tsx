@@ -18,16 +18,21 @@ import { LandingLiveAlertRow } from './LandingLiveAlertRow';
 
 type PanelMode = 'loading' | 'live' | 'sample';
 
+/** Align with agreed MVP bands: Critical 80–100, High 70–79. */
 function mapRiskLevel(raw: string, score: number): RiskLevel {
   const level = raw.toLowerCase();
-  if (level === 'critical' || score >= 85) return 'CRITICAL';
+  if (level === 'critical' || score >= 80) return 'CRITICAL';
   if (level === 'high' || score >= 70) return 'HIGH';
   return 'MEDIUM';
 }
 
 function categoryTone(category: string): LiveAlert['categoryTone'] {
   const lower = category.toLowerCase();
-  if (lower.includes('cyber') || lower.includes('crypto') || lower.includes('emerging')) {
+  if (
+    lower.includes('cyber') ||
+    lower.includes('crypto') ||
+    lower.includes('emerging')
+  ) {
     return 'info';
   }
   if (
@@ -65,9 +70,7 @@ function mapPublicAlert(item: PublicAlertListItem): LiveAlert {
 }
 
 /**
- * Landing alerts column.
- * Prefers public `GET /alerts?limit=5&risk_level=high`, then any published,
- * then clearly labeled sample rows — never leaves the card blank.
+ * Left column — three most recent high-risk alerts (approved final mockup).
  */
 export function LandingAlertsPanel() {
   const [mode, setMode] = useState<PanelMode>('loading');
@@ -78,7 +81,6 @@ export function LandingAlertsPanel() {
 
     async function load() {
       try {
-        // Prefer high-risk for the “Latest High-Risk Alerts” framing.
         let response = await fetchPublicAlerts({
           limit: LANDING_ALERTS_LIMIT,
           riskLevel: 'high',
@@ -102,7 +104,7 @@ export function LandingAlertsPanel() {
       }
 
       if (!cancelled) {
-        setAlerts(LIVE_ALERTS);
+        setAlerts(LIVE_ALERTS.slice(0, LANDING_ALERTS_LIMIT));
         setMode('sample');
       }
     }
@@ -115,26 +117,29 @@ export function LandingAlertsPanel() {
 
   const panel = mode === 'live' ? LIVE_ALERTS_PANEL : SAMPLE_ALERTS_PANEL;
   const showSkeleton = mode === 'loading';
-  const rows = showSkeleton ? LIVE_ALERTS : alerts;
+  const rows = (showSkeleton ? LIVE_ALERTS : alerts).slice(
+    0,
+    LANDING_ALERTS_LIMIT,
+  );
 
   return (
     <div
       id="alerts"
-      className="border-border bg-background-alt/80 flex min-h-[560px] scroll-mt-24 flex-col rounded-2xl border p-5 sm:min-h-[600px] sm:p-6 lg:min-h-[640px]"
+      className="border-border bg-background-alt/80 flex h-full scroll-mt-24 flex-col rounded-xl border p-5 sm:p-6"
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2
           id="alerts-heading"
-          className="text-primary-400 text-xs font-semibold tracking-[0.14em] uppercase"
+          className="text-primary-500 text-[0.7rem] font-bold tracking-[0.16em] uppercase"
         >
           {showSkeleton ? LIVE_ALERTS_PANEL.title : panel.title}
         </h2>
-        <span className="text-info border-info/30 bg-info/10 rounded-full border px-2 py-0.5 text-[0.65rem] font-semibold tracking-wide">
+        <span className="text-info text-[0.7rem] font-semibold tracking-wide">
           {showSkeleton ? LIVE_ALERTS_PANEL.badge : panel.badge}
         </span>
       </div>
 
-      <div className="mt-2 flex flex-1 flex-col justify-center">
+      <div className="mt-2 flex flex-1 flex-col">
         {rows.map((alert, i) => (
           <LandingLiveAlertRow
             key={`${alert.title}-${i}`}
@@ -144,9 +149,14 @@ export function LandingAlertsPanel() {
         ))}
       </div>
 
-      <p className="text-muted-foreground mt-4 border-border/50 border-t pt-3 text-xs leading-relaxed">
-        {showSkeleton ? LIVE_ALERTS_PANEL.footnote : panel.footnote}
-      </p>
+      <div className="text-muted-foreground mt-auto border-border/50 border-t pt-3 text-xs leading-relaxed">
+        <p>
+          {showSkeleton ? LIVE_ALERTS_PANEL.footnoteLead : panel.footnoteLead}
+        </p>
+        <p className="text-foreground mt-1.5 font-medium">
+          {showSkeleton ? LIVE_ALERTS_PANEL.footnoteCta : panel.footnoteCta}
+        </p>
+      </div>
     </div>
   );
 }
