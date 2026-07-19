@@ -76,7 +76,6 @@ export const DashboardAlertListItem: FC<DashboardAlertListItemProps> = ({
   className,
 }) => {
   const tone = scoreVisualTone(
-    alert.signalScore,
     alert.riskLevelLabel,
     alert.riskBand,
   );

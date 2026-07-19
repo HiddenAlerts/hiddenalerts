@@ -13,6 +13,7 @@ const riskScoreTone: Record<BriefRiskLabel, string> = {
   High: 'text-warning',
   Medium: 'text-warning',
   Low: 'text-success',
+  Unknown: 'text-muted',
 };
 
 export type BriefCardProps = {

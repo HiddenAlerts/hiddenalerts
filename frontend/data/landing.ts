@@ -102,7 +102,7 @@ export const VALUE_PROPS: ReadonlyArray<ValueProp> = [
   },
 ] as const;
 
-export type RiskLevel = 'CRITICAL' | 'HIGH' | 'MEDIUM';
+export type RiskLevel = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
 export type LiveAlert = {
   score: number;

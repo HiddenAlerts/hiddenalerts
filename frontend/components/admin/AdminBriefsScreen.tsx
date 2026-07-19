@@ -60,7 +60,9 @@ const columns: DataTableColumn<AdminBriefListItem>[] = [
   {
     id: 'riskScore',
     header: 'Risk Score',
-    cell: row => <ScoreBadge score={row.riskScore} />,
+    cell: row => (
+      <ScoreBadge score={row.riskScore} riskLevel={row.riskLevel} />
+    ),
     className: 'w-[120px]',
   },
   {

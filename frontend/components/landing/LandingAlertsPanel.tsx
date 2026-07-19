@@ -18,11 +18,12 @@ import { LandingLiveAlertRow } from './LandingLiveAlertRow';
 
 type PanelMode = 'loading' | 'live' | 'sample';
 
-/** Align with agreed MVP bands: Critical 80–100, High 70–79. */
-function mapRiskLevel(raw: string, score: number): RiskLevel {
+/** Display the classification returned by the public alerts API. */
+function mapRiskLevel(raw: string): RiskLevel {
   const level = raw.toLowerCase();
-  if (level === 'critical' || score >= 80) return 'CRITICAL';
-  if (level === 'high' || score >= 70) return 'HIGH';
+  if (level === 'critical') return 'CRITICAL';
+  if (level === 'high') return 'HIGH';
+  if (level === 'low') return 'LOW';
   return 'MEDIUM';
 }
 
@@ -61,7 +62,8 @@ function mapPublicAlert(item: PublicAlertListItem): LiveAlert {
   const score = Math.round(Number(item.signal_score) || 0);
   return {
     score,
-    level: mapRiskLevel(item.risk_level, score),
+    // Prefer risk_band when present; otherwise display risk_level as-is.
+    level: mapRiskLevel(item.risk_band || item.risk_level),
     title: item.title,
     category: item.category,
     categoryTone: categoryTone(item.category),

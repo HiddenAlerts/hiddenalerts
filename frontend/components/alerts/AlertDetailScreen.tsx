@@ -151,9 +151,8 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
   }
 
   const riskBandBadge = getRiskBandBadgeLabel(data.risk_band);
-  const riskBandLabel = formatRiskBandLabel(data.risk_band);
+  const riskBandLabel = formatRiskBandLabel(data.risk_band, data.risk_level);
   const scoreTone = scoreVisualTone(
-    data.signal_score,
     formatRiskLevelLabel(data.risk_level),
     data.risk_band,
   );

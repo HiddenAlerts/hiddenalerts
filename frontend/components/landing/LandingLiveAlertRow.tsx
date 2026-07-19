@@ -10,6 +10,7 @@ const levelTone: Record<LiveAlert['level'], string> = {
   CRITICAL: 'text-primary-500',
   HIGH: 'text-primary-500',
   MEDIUM: 'text-warning',
+  LOW: 'text-success',
 };
 
 function ScoreCircle({ score, level }: { score: number; level: LiveAlert['level'] }) {

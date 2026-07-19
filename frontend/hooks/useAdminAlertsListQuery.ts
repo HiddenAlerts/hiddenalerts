@@ -31,7 +31,7 @@ function mapRiskFilter(risk: string): Pick<
   'risk_level' | 'risk_band'
 > {
   if (risk === 'critical') return { risk_band: 'critical' };
-  if (risk === 'high') return { risk_level: 'high' };
+  if (risk === 'high') return { risk_band: 'high' };
   if (risk === 'medium') return { risk_level: 'medium' };
   if (risk === 'low') return { risk_level: 'low' };
   return {};

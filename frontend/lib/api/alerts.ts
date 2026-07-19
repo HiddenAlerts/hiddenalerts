@@ -183,21 +183,25 @@ export async function fetchAlertsSearch(
 export function mapAlertsStatsToRiskCounts(
   data: AlertsStatsResponse,
 ): Partial<Record<AlertsRiskFilterValue, number>> {
-  // Backend `high_count` is score ≥ ~70 (Critical + High combined).
-  const criticalPlusHigh = data.high_count;
+  // V1 bands are mutually exclusive: critical_count and high_count are separate.
   const critical =
     typeof data.critical_count === 'number' &&
     Number.isFinite(data.critical_count)
       ? data.critical_count
       : undefined;
+  const high =
+    typeof data.high_count === 'number' && Number.isFinite(data.high_count)
+      ? data.high_count
+      : undefined;
+
+  const all =
+    critical !== undefined && high !== undefined
+      ? critical + high
+      : high;
 
   return {
-    // “All” = Critical + High only (not medium/low from `total_alerts`).
-    all: criticalPlusHigh,
+    ...(all !== undefined ? { all } : {}),
     ...(critical !== undefined ? { critical } : {}),
-    high:
-      critical !== undefined
-        ? Math.max(0, criticalPlusHigh - critical)
-        : criticalPlusHigh,
+    ...(high !== undefined ? { high } : {}),
   };
 }

@@ -7,6 +7,7 @@ const toneClasses: Record<BriefRiskLabel, string> = {
   High: 'bg-warning text-secondary-900',
   Medium: 'bg-warning/80 text-secondary-900',
   Low: 'bg-success text-secondary-900',
+  Unknown: 'bg-surface-muted text-muted',
 };
 
 export type BriefRiskTagProps = {

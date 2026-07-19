@@ -1,4 +1,4 @@
-export type BriefRiskLabel = 'Critical' | 'High' | 'Medium' | 'Low';
+export type BriefRiskLabel = 'Critical' | 'High' | 'Medium' | 'Low' | 'Unknown';
 
 /**
  * Visual theme key used to render an inline gradient + icon cover for a brief.
@@ -57,7 +57,12 @@ export type BriefCountItem = {
   count: number;
 };
 
-export type BriefDetailRiskLevel = 'critical' | 'high' | 'medium' | 'low';
+export type BriefDetailRiskLevel =
+  | 'critical'
+  | 'high'
+  | 'medium'
+  | 'low'
+  | 'unknown';
 
 export type BriefDetailConfidenceLevel = 'high' | 'medium' | 'low';
 

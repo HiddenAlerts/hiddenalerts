@@ -54,7 +54,6 @@ export const AlertRow: FC<AlertRowProps> = ({
   const sourceShort = alert.sourceDisplayLabel ?? alert.sourceLabel;
   const categoryLine = formatDashboardAlertTypeLabel(alert.category);
   const tone = scoreVisualTone(
-    alert.signalScore,
     alert.riskLevelLabel,
     alert.riskBand,
   );

@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthProvider';
 import {
-  SUBSCRIBER_ALERTS_API_RISK_LEVEL,
+  subscriberAlertsApiRiskLevel,
   type AlertsRiskFilterValue,
 } from '@/data/alertRiskFilterOptions';
 import { ALERTS_PAGE_SIZE, fetchAlertsPage } from '@/lib/api/alerts';
@@ -17,9 +17,9 @@ export function alertsListQueryKey(args: {
 }
 
 /**
- * Subscriber browse list — always requests the Critical+High API pool
- * (`risk_level=high`). Critical vs High pills are applied client-side from
- * `risk_band` (backend list has no `critical` risk_level).
+ * Subscriber browse list — forwards the selected V1 risk band to the API
+ * (`risk_level=critical|high`). "All" omits the param so the published
+ * Critical+High pool is returned.
  */
 export function useAlertsPageQuery(
   page: number,
@@ -30,6 +30,7 @@ export function useAlertsPageQuery(
   const offset = (page - 1) * ALERTS_PAGE_SIZE;
   const { getAccessToken } = useAuth();
   const token = getAccessToken();
+  const riskLevel = subscriberAlertsApiRiskLevel(risk);
 
   return useQuery({
     queryKey: alertsListQueryKey({ page, risk, category }),
@@ -38,7 +39,7 @@ export function useAlertsPageQuery(
         {
           limit: ALERTS_PAGE_SIZE,
           offset,
-          risk_level: SUBSCRIBER_ALERTS_API_RISK_LEVEL,
+          ...(riskLevel ? { risk_level: riskLevel } : {}),
           ...(category !== 'all' ? { category } : {}),
         },
         token!,

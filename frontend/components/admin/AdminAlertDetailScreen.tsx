@@ -177,7 +177,11 @@ export const AdminAlertDetailScreen: FC<AdminAlertDetailScreenProps> = ({
         <div className="space-y-5">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <AdminDetailField label="Risk Score">
-              <ScoreBadge score={alert.riskScore} />
+              <ScoreBadge
+                score={alert.riskScore}
+                riskLevel={alert.riskLevel}
+                riskBand={alert.riskBand}
+              />
             </AdminDetailField>
             <AdminDetailField label="Risk Band">
               {formatEnumLabel(alert.riskBand)}

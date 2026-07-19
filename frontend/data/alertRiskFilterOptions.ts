@@ -14,12 +14,23 @@ export const ALERTS_RISK_FILTER_OPTIONS = [
 export type AlertsRiskFilterValue =
   (typeof ALERTS_RISK_FILTER_OPTIONS)[number]['value'];
 
-/** API `risk_level` for the Critical+High pool (backend has no `critical` level filter). */
-export const SUBSCRIBER_ALERTS_API_RISK_LEVEL = 'high' as const;
+/**
+ * Maps the UI risk pill to the subscriber list `risk_level` query param.
+ * Backend V1 bands are mutually exclusive: critical / high / medium / low.
+ * - critical → risk_level=critical
+ * - high → risk_level=high
+ * - all → omit param (published Critical+High pool; client still filters)
+ */
+export function subscriberAlertsApiRiskLevel(
+  risk: AlertsRiskFilterValue | string,
+): 'critical' | 'high' | undefined {
+  if (risk === 'critical' || risk === 'high') return risk;
+  return undefined;
+}
 
-/** True when the alert is Critical or High by `risk_band` / score. */
+/** True when backend classification marks the alert Critical or High. */
 export function isSubscriberVisibleAlert(record: AlertApiRecord): boolean {
-  const band = resolveAlertRiskBand(record.risk_band, record.signal_score);
+  const band = resolveAlertRiskBand(record.risk_band, record.risk_level);
   return band === 'critical' || band === 'high';
 }
 
@@ -28,7 +39,7 @@ export function alertMatchesSubscriberRiskFilter(
   record: AlertApiRecord,
   risk: AlertsRiskFilterValue,
 ): boolean {
-  const band = resolveAlertRiskBand(record.risk_band, record.signal_score);
+  const band = resolveAlertRiskBand(record.risk_band, record.risk_level);
   if (risk === 'all') return band === 'critical' || band === 'high';
   if (risk === 'critical') return band === 'critical';
   if (risk === 'high') return band === 'high';

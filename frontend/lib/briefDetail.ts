@@ -29,6 +29,7 @@ export const RISK_LEVEL_LABEL: Record<BriefDetailRiskLevel, BriefRiskLabel> = {
   high: 'High',
   medium: 'Medium',
   low: 'Low',
+  unknown: 'Unknown',
 };
 
 export const CONFIDENCE_LEVEL_LABEL: Record<BriefDetailConfidenceLevel, string> = {

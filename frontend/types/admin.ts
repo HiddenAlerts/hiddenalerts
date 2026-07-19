@@ -77,6 +77,8 @@ export type AdminAlert = {
   id: string;
   title: string;
   riskScore: number;
+  riskLevel?: string;
+  riskBand?: string;
   category: string;
   date: string;
   summary: string;

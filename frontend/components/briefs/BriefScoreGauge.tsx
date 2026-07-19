@@ -1,6 +1,7 @@
-import { formatBriefRiskScore, riskScoreToLabel } from '@/lib/briefs';
+import { RISK_LEVEL_LABEL } from '@/lib/briefDetail';
+import { formatBriefRiskScore } from '@/lib/briefs';
 import { cn } from '@/lib/utils';
-import type { BriefRiskLabel } from '@/types/briefs';
+import type { BriefDetailRiskLevel, BriefRiskLabel } from '@/types/briefs';
 import type { FC } from 'react';
 
 const TONE_CLASSES: Record<BriefRiskLabel, { text: string; bar: string }> = {
@@ -8,21 +9,24 @@ const TONE_CLASSES: Record<BriefRiskLabel, { text: string; bar: string }> = {
   High: { text: 'text-warning', bar: 'bg-warning' },
   Medium: { text: 'text-warning', bar: 'bg-warning' },
   Low: { text: 'text-success', bar: 'bg-success' },
+  Unknown: { text: 'text-body', bar: 'bg-surface-muted' },
 };
 
 export type BriefScoreGaugeProps = {
   score: number;
+  riskLevel: BriefDetailRiskLevel;
   className?: string;
 };
 
-/** "RISK SCORE 94/100" box with a colored horizontal progress bar. */
+/** Score meter whose visual tone follows the backend-provided risk level. */
 export const BriefScoreGauge: FC<BriefScoreGaugeProps> = ({
   score,
+  riskLevel,
   className,
 }) => {
   const hasScore =
     typeof score === 'number' && Number.isFinite(score) && score > 0;
-  const tone = TONE_CLASSES[riskScoreToLabel(hasScore ? score : 0)];
+  const tone = TONE_CLASSES[RISK_LEVEL_LABEL[riskLevel]];
   const pct = hasScore ? Math.max(0, Math.min(100, score)) : 0;
   const display = formatBriefRiskScore(score);
   const [main, denom] = display.includes('/')

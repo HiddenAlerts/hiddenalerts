@@ -2,20 +2,21 @@ import type { AlertItem } from '@/types/alert';
 
 export type AlertRiskLevel = 'high' | 'medium' | 'low';
 
-/** Maps badge tones and `risk_band` to dashboard risk columns. */
+/** Maps backend classification fields to dashboard risk columns. */
 export function getAlertRisk(alert: AlertItem): AlertRiskLevel {
   const band = alert.riskBand?.trim().toLowerCase();
-  if (band === 'critical' || band === 'high' || alert.riskBandLabel === 'HIGH' || alert.riskBandLabel === 'CRITICAL') {
+  if (
+    band === 'critical' ||
+    band === 'high' ||
+    alert.riskBandLabel === 'HIGH' ||
+    alert.riskBandLabel === 'CRITICAL'
+  ) {
     return 'high';
   }
-  switch (alert.badgeTone) {
-    case 'danger':
-      return 'high';
-    case 'warning':
-      return 'medium';
-    default:
-      return 'low';
-  }
+  const level = alert.riskLevelLabel.trim().toLowerCase();
+  if (level === 'critical' || level === 'high') return 'high';
+  if (level === 'medium') return 'medium';
+  return 'low';
 }
 
 export function partitionAlertsByRisk(alerts: AlertItem[]) {

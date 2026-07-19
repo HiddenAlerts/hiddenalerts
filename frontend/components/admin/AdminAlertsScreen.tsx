@@ -55,7 +55,13 @@ const columns: DataTableColumn<AdminAlert>[] = [
   {
     id: 'riskScore',
     header: 'Risk Score',
-    cell: row => <ScoreBadge score={row.riskScore} />,
+    cell: row => (
+      <ScoreBadge
+        score={row.riskScore}
+        riskLevel={row.riskLevel}
+        riskBand={row.riskBand}
+      />
+    ),
     className: 'w-[120px]',
   },
   {

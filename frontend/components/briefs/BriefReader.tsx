@@ -176,7 +176,10 @@ export const BriefReader: FC<BriefReaderProps> = ({
             ) : null}
           </div>
 
-          <BriefScoreGauge score={brief.riskScore} />
+          <BriefScoreGauge
+            score={brief.riskScore}
+            riskLevel={brief.riskLevel}
+          />
         </div>
 
         {brief.featuredImage ? (

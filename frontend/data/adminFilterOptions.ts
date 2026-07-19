@@ -56,15 +56,3 @@ export type AdminStatusFilter =
 
 export type AdminRiskLevelFilter =
   (typeof ADMIN_RISK_LEVEL_OPTIONS)[number]['value'];
-
-/**
- * Maps a numeric risk score to a coarse risk level used by the risk filter.
- */
-export function riskScoreToLevel(
-  score: number,
-): 'critical' | 'high' | 'medium' | 'low' {
-  if (score >= 81) return 'critical';
-  if (score >= 71) return 'high';
-  if (score >= 61) return 'medium';
-  return 'low';
-}

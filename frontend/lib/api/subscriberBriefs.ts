@@ -1,5 +1,5 @@
 import { categoryToCoverTheme } from '@/lib/briefDetail';
-import { resolveBriefRiskLabel, riskScoreToDetailLevel } from '@/lib/briefs';
+import { resolveBriefRiskLabel } from '@/lib/briefs';
 import { stripHtmlToText } from '@/lib/htmlText';
 import { keySignalsArrayToHtml } from '@/lib/keySignalsFormat';
 import type { BriefDetail, BriefDetailRiskLevel, SubscriberBrief } from '@/types/briefs';
@@ -27,7 +27,7 @@ function riskLevelToDetailRiskLevel(level: string | null): BriefDetailRiskLevel 
   if (level === 'critical' || level === 'high' || level === 'medium' || level === 'low') {
     return level;
   }
-  return 'low';
+  return 'unknown';
 }
 
 /** Pass through API score; null → 0 only as a typed sentinel (UI shows "—" for ≤0). */
@@ -48,7 +48,7 @@ export function mapApiListItemToSubscriberBrief(
     coverageAreas: record.tags ?? [],
     date: record.published_at ? record.published_at.slice(0, 10) : '',
     riskScore,
-    riskLabel: resolveBriefRiskLabel(riskScore, riskLevel),
+    riskLabel: resolveBriefRiskLabel(riskLevel),
     coverTheme: categoryToCoverTheme(record.category ?? ''),
     featuredImage: resolveAssetUrl(record.featured_image_url),
     sourceCount: record.alerts_count,
@@ -72,7 +72,7 @@ export function mapApiDetailToSubscriberBriefCard(
     coverageAreas: record.tags ?? [],
     date: record.published_at ? record.published_at.slice(0, 10) : '',
     riskScore,
-    riskLabel: resolveBriefRiskLabel(riskScore, riskLevel),
+    riskLabel: resolveBriefRiskLabel(riskLevel),
     coverTheme: categoryToCoverTheme(record.category ?? ''),
     featuredImage: resolveAssetUrl(record.featured_image_url),
     sourceCount: record.alerts_count,
@@ -92,8 +92,7 @@ export function mapApiDetailToBriefDetail(record: SubscriberBriefDetailApi): Bri
     category: record.category ?? '',
     coverTheme: categoryToCoverTheme(record.category ?? ''),
     riskScore,
-    // Prefer score-derived level so gauge/badge match the number Ken sees.
-    riskLevel: riskScore > 0 ? riskScoreToDetailLevel(riskScore) : riskLevel,
+    riskLevel,
     confidenceLevel:
       record.confidence_level === 'high' || record.confidence_level === 'low'
         ? record.confidence_level

@@ -11,8 +11,10 @@ export type RiskCountPillVariant =
 
 const VARIANT_STYLES: Record<RiskCountPillVariant, string> = {
   all: 'bg-surface-muted text-muted-foreground',
+  /** Match Critical filter label (`text-danger`). */
   critical: 'bg-danger text-white',
-  high: 'bg-danger-muted text-danger',
+  /** Match High filter label (`text-warning`). */
+  high: 'bg-warning text-secondary-900',
   medium: 'bg-warning-muted text-warning',
   low: 'bg-success-muted text-success',
 };

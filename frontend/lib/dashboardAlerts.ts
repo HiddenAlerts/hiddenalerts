@@ -1,16 +1,12 @@
-import { scoreToRiskBand } from '@/lib/alertDisplay';
 import type { AlertApiRecord } from '@/types/alertsApi';
 
-/** True when an alert is Critical or High (band, level, or 0–100 score). */
+/** True when backend classification marks an alert Critical or High. */
 export function isCriticalOrHighAlert(record: AlertApiRecord): boolean {
   const band = record.risk_band?.trim().toLowerCase();
   if (band === 'critical' || band === 'high') return true;
 
   const level = record.risk_level?.trim().toLowerCase();
-  if (level === 'critical' || level === 'high') return true;
-
-  const fromScore = scoreToRiskBand(record.signal_score);
-  return fromScore === 'critical' || fromScore === 'high';
+  return level === 'critical' || level === 'high';
 }
 
 function alertOccurredMs(record: AlertApiRecord): number {

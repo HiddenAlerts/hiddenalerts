@@ -5,7 +5,10 @@ export type PublicAlertListItem = {
   id: number;
   title: string;
   category: string;
+  /** Backend classification (`high` / `medium` / `low`; may include `critical`). */
   risk_level: string;
+  /** More specific band when the public API provides it. */
+  risk_band?: string | null;
   signal_score: number;
   source_published_at?: string | null;
   published_at?: string | null;
