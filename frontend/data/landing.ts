@@ -235,7 +235,7 @@ export const HOW_IT_WORKS = {
     {
       step: 4,
       icon: Shield,
-      title: 'Act',
+      title: 'Deliver',
       description:
         'You receive real-time alerts and in-depth briefs to take action before losses occur.',
     },
