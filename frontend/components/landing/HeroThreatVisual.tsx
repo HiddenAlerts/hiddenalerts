@@ -14,7 +14,7 @@ const HOTSPOTS = [
 
 function ThreatGlobe() {
   return (
-    <div className="relative mx-auto aspect-square w-full max-w-md" aria-hidden>
+    <div className="relative mx-auto aspect-square w-full max-w-[17.5rem] sm:max-w-xs lg:max-w-[20rem]" aria-hidden>
       <div className="bg-primary-500/20 absolute inset-[12%] rounded-full blur-3xl" />
 
       <svg
@@ -127,7 +127,7 @@ export function HeroThreatVisual({ className }: { className?: string }) {
       />
       <ThreatGlobe />
 
-      <div className="border-border bg-background-alt/90 shadow-lg sm:absolute sm:right-0 sm:bottom-4 mt-6 w-full rounded-xl border p-5 backdrop-blur sm:mt-0 sm:max-w-[280px]">
+      <div className="border-border bg-background-alt/90 shadow-lg sm:absolute sm:right-0 sm:bottom-0 mt-4 w-full rounded-xl border p-4 backdrop-blur sm:mt-0 sm:max-w-[240px]">
         <div className="flex items-center gap-2">
           <span className="bg-primary-500 inline-flex size-2 animate-pulse rounded-full" />
           <span className="text-primary-300 text-[0.65rem] font-semibold tracking-[0.12em] uppercase">
@@ -135,16 +135,16 @@ export function HeroThreatVisual({ className }: { className?: string }) {
           </span>
         </div>
 
-        <p className="text-primary-500 font-heading mt-3 text-5xl leading-none font-bold tracking-tight tabular-nums">
+        <p className="text-primary-500 font-heading mt-2 text-4xl leading-none font-bold tracking-tight tabular-nums">
           {THREAT_SIGNAL_STAT.value}
         </p>
-        <p className="text-foreground mt-2 text-sm font-medium">
+        <p className="text-foreground mt-1.5 text-sm font-medium">
           {THREAT_SIGNAL_STAT.headline}
         </p>
 
-        <StatSparkline className="mt-3" />
+        <StatSparkline className="mt-2" />
 
-        <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
+        <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
           {THREAT_SIGNAL_STAT.caption}
         </p>
       </div>
