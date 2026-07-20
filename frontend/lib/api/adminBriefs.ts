@@ -1,4 +1,8 @@
-import { keySignalsArrayToHtml, keySignalsHtmlToArray } from '@/lib/keySignalsFormat';
+import { keySignalsArrayToHtml } from '@/lib/keySignalsFormat';
+import {
+  mapAdminBriefToCreatePayload,
+  mapAdminBriefToUpdatePayload,
+} from '@/lib/adminBriefWritePayload';
 import type {
   AdminBrief,
   AdminBriefListItem,
@@ -11,9 +15,6 @@ import type {
   AdminBriefApiRecord,
   AdminBriefListItemApi,
   AdminBriefListResponse,
-  BriefWritePayload,
-  CreateBriefPayload,
-  UpdateBriefPayload,
 } from '@/types/adminBriefsApi';
 
 import { resolveAssetUrl } from './assetUrl';
@@ -117,45 +118,10 @@ export function mapApiBriefListItemToAdminBriefListItem(
   };
 }
 
-/** Fields shared by create and update — `brief_type` is always fixed. */
-function mapAdminBriefToWritePayload(brief: AdminBrief): BriefWritePayload {
-  return {
-    title: brief.title,
-    slug: brief.slug || undefined,
-    category: brief.category || undefined,
-    risk_score: brief.riskScore,
-    risk_level: brief.riskLevel,
-    primary_entities: brief.primaryEntities,
-    tags: brief.tags,
-    time_horizon: brief.timeHorizon,
-    executive_summary: brief.executiveSummary || undefined,
-    why_this_matters: brief.whyThisMatters || undefined,
-    key_signals: keySignalsHtmlToArray(brief.keySignals),
-    risk_assessment: brief.riskAssessment || undefined,
-    what_others_miss: brief.whatOthersMiss || undefined,
-    implications: brief.implications || undefined,
-    main_intelligence_brief: brief.mainBrief || undefined,
-    analyst_notes: brief.analystNotes || undefined,
-    // Persist Name (API `title`) + URL; drop incomplete rows with no URL.
-    supporting_alerts: brief.supportingAlerts
-      .filter(a => a.url.trim())
-      .map(a => ({
-        url: a.url.trim(),
-        title: a.title?.trim() || undefined,
-      })),
-    confidence_level: brief.confidenceLevel,
-    brief_type: 'intelligence_brief',
-    is_premium: brief.isPremium,
-  };
-}
-
-export function mapAdminBriefToCreatePayload(brief: AdminBrief): CreateBriefPayload {
-  return { ...mapAdminBriefToWritePayload(brief), title: brief.title };
-}
-
-export function mapAdminBriefToUpdatePayload(brief: AdminBrief): UpdateBriefPayload {
-  return mapAdminBriefToWritePayload(brief);
-}
+export {
+  mapAdminBriefToCreatePayload,
+  mapAdminBriefToUpdatePayload,
+} from '@/lib/adminBriefWritePayload';
 
 export async function fetchAdminBriefsPage(
   params: FetchAdminBriefsParams,

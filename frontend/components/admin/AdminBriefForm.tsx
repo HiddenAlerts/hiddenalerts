@@ -34,13 +34,7 @@ import type { AdminBrief, AdminPublishStatus } from '@/types/admin';
 import { Archive, Eye, Feather, FileEdit } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  type FC,
-  type FormEvent,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { type FC, type FormEvent, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -134,7 +128,10 @@ const SECTION_CLASSNAME =
 const SECTION_HEADING_CLASSNAME =
   'font-heading text-foreground text-sm font-semibold tracking-wide uppercase';
 
-const STATUS_TONE: Record<AdminPublishStatus, 'success' | 'neutral' | 'warning'> = {
+const STATUS_TONE: Record<
+  AdminPublishStatus,
+  'success' | 'neutral' | 'warning'
+> = {
   published: 'success',
   draft: 'neutral',
   archived: 'warning',
@@ -231,7 +228,8 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
 
   useEffect(
     () => () => {
-      if (localPreviewUrlRef.current) URL.revokeObjectURL(localPreviewUrlRef.current);
+      if (localPreviewUrlRef.current)
+        URL.revokeObjectURL(localPreviewUrlRef.current);
     },
     [],
   );
@@ -274,7 +272,12 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
 
   function handleTitleChange(nextTitle: string) {
     clearFieldError('title');
-    setBrief(prev => ({ ...prev, title: nextTitle, slug: slugify(nextTitle) }));
+    setBrief(prev => ({
+      ...prev,
+      title: nextTitle,
+
+      slug: prev.id ? prev.slug : slugify(nextTitle),
+    }));
   }
 
   function handleImageSelect(file: File) {
@@ -282,7 +285,8 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
       toast.error('That image is too large — please choose a file under 2MB.');
       return;
     }
-    if (localPreviewUrlRef.current) URL.revokeObjectURL(localPreviewUrlRef.current);
+    if (localPreviewUrlRef.current)
+      URL.revokeObjectURL(localPreviewUrlRef.current);
     const url = URL.createObjectURL(file);
     localPreviewUrlRef.current = url;
     setImageFile(file);
@@ -291,7 +295,8 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
   }
 
   function handleImageRemove() {
-    if (localPreviewUrlRef.current) URL.revokeObjectURL(localPreviewUrlRef.current);
+    if (localPreviewUrlRef.current)
+      URL.revokeObjectURL(localPreviewUrlRef.current);
     localPreviewUrlRef.current = undefined;
     setImageFile(undefined);
     setImagePreview(undefined);
@@ -301,7 +306,10 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
   /** Stay on the edit URL after create so a refresh reloads the saved draft. */
   function stayOnSavedBrief(saved: AdminBrief) {
     const editHref = briefEditHref(saved.slug);
-    if (typeof window !== 'undefined' && window.location.pathname !== editHref) {
+    if (
+      typeof window !== 'undefined' &&
+      window.location.pathname !== editHref
+    ) {
       router.replace(editHref);
     }
   }
@@ -309,24 +317,37 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
   /** Create-or-update, then upload/remove the image if it changed. Returns the saved brief on success. */
   async function persist(): Promise<AdminBrief | undefined> {
     const previousPreview = imagePreview;
+    const hadPendingImage = Boolean(imageFile);
+    const wasRemovingImage = removeImage;
     try {
-      const saved = await saveMutation.mutateAsync({
+      const result = await saveMutation.mutateAsync({
         brief,
         imageFile,
         removeImage,
       });
-      // Merge API result into local form, but never wipe Key Signals / image
-      // when the response omits them after a partial or legacy payload.
-      setBrief(prev => ({
-        ...saved,
-        keySignals: saved.keySignals || prev.keySignals,
-        featuredImage: saved.featuredImage || (removeImage ? undefined : prev.featuredImage),
-      }));
-      setImagePreview(
-        saved.featuredImage || (removeImage ? undefined : previousPreview),
-      );
-      setImageFile(undefined);
-      setRemoveImage(false);
+      const saved = result.brief;
+
+      // Trust the API response — never mask empty Key Signals / image with
+      // stale local state (that hid wipes until reopen).
+      setBrief(saved);
+
+      if (result.imageWarning) {
+        toast.warning(result.imageWarning);
+        // Content saved; keep local preview so the admin can retry the image.
+        setImagePreview(
+          saved.featuredImage ||
+            (wasRemovingImage ? undefined : previousPreview),
+        );
+        if (!hadPendingImage) {
+          setImageFile(undefined);
+          setRemoveImage(false);
+        }
+      } else {
+        setImagePreview(saved.featuredImage);
+        setImageFile(undefined);
+        setRemoveImage(false);
+      }
+
       return saved;
     } catch (err) {
       // Keep in-memory form values — never clear the form on API failure.
@@ -348,7 +369,9 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
     setPendingAction(null);
     if (!saved) return;
 
-    toast.success(saved.status === 'published' ? 'Changes saved.' : 'Draft saved.');
+    toast.success(
+      saved.status === 'published' ? 'Changes saved.' : 'Draft saved.',
+    );
     stayOnSavedBrief(saved);
   }
 
@@ -356,7 +379,9 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
     const errors = getPublishFieldErrors(brief);
     if (Object.keys(errors).length > 0) {
       showFieldErrors(errors);
-      toast.error('Complete the highlighted required fields before publishing.');
+      toast.error(
+        'Complete the highlighted required fields before publishing.',
+      );
       return;
     }
 
@@ -411,17 +436,22 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
       {
         onSuccess: saved => {
           setBrief(prev => ({ ...prev, featured: saved.featured }));
-          toast.success(next ? 'Marked as featured.' : 'Removed from featured.');
+          toast.success(
+            next ? 'Marked as featured.' : 'Removed from featured.',
+          );
         },
         onError: err =>
-          toast.error(getApiErrorMessage(err, 'Could not update featured state.')),
+          toast.error(
+            getApiErrorMessage(err, 'Could not update featured state.'),
+          ),
       },
     );
   }
 
   const canArchive = Boolean(brief.id) && brief.status !== 'archived';
   const canPublish = brief.status !== 'published';
-  const saveLabel = brief.status === 'published' ? 'Save Changes' : 'Save Draft';
+  const saveLabel =
+    brief.status === 'published' ? 'Save Changes' : 'Save Draft';
   const canFeature = Boolean(brief.id);
   const errorCount = Object.keys(fieldErrors).length;
 
@@ -628,7 +658,10 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div id={FIELD_DOM_IDS.primaryEntities} className={FIELD_ANCHOR_CLASS}>
+          <div
+            id={FIELD_DOM_IDS.primaryEntities}
+            className={FIELD_ANCHOR_CLASS}
+          >
             <TagsInput
               label="Primary Entities"
               required
@@ -661,7 +694,10 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         <h2 className={SECTION_HEADING_CLASSNAME}>2. Intelligence Content</h2>
 
         <div className="grid gap-5 lg:grid-cols-2">
-          <div id={FIELD_DOM_IDS.executiveSummary} className={FIELD_ANCHOR_CLASS}>
+          <div
+            id={FIELD_DOM_IDS.executiveSummary}
+            className={FIELD_ANCHOR_CLASS}
+          >
             <RichTextEditor
               label="Executive Summary"
               required
@@ -812,9 +848,9 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         </div>
 
         <p className="border-border text-muted border-t pt-4 text-xs">
-          Published Date will be set automatically when the brief is
-          published. Featured and Premium are optional and are not required to
-          save or publish.
+          Published Date will be set automatically when the brief is published.
+          Featured and Premium are optional and are not required to save or
+          publish.
         </p>
       </div>
 

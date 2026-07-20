@@ -46,37 +46,58 @@ export type SaveAdminBriefInput = {
   removeImage?: boolean;
 };
 
-/**
- * Composite save: create-or-update the brief, then conditionally upload or
- * remove its featured image — one loading state and one error surface for
- * what is, from the admin's perspective, a single "Save" action.
- */
+export type SaveAdminBriefResult = {
+  brief: AdminBrief;
+  imageWarning?: string;
+};
+
 export function useSaveAdminBriefMutation() {
   const invalidate = useInvalidateAdminBriefQueries();
 
   return useMutation({
-    mutationFn: async ({ brief, imageFile, removeImage }: SaveAdminBriefInput) => {
+    mutationFn: async ({
+      brief,
+      imageFile,
+      removeImage,
+    }: SaveAdminBriefInput): Promise<SaveAdminBriefResult> => {
       const token = requireAdminToken();
       let saved = brief.id
         ? await updateAdminBrief(brief.id, brief, token)
         : await createAdminBrief(brief, token);
 
       if (imageFile) {
-        saved = await uploadAdminBriefImage(saved.id, imageFile, token);
+        try {
+          saved = await uploadAdminBriefImage(saved.id, imageFile, token);
+        } catch {
+          return {
+            brief: saved,
+            imageWarning:
+              'Brief content was saved, but the thumbnail upload failed. Try uploading the image again.',
+          };
+        }
       } else if (removeImage) {
-        saved = await removeAdminBriefImage(saved.id, token);
+        try {
+          saved = await removeAdminBriefImage(saved.id, token);
+        } catch {
+          return {
+            brief: saved,
+            imageWarning:
+              'Brief content was saved, but removing the thumbnail failed. Try again.',
+          };
+        }
       }
 
-      return saved;
+      return { brief: saved };
     },
-    onSuccess: saved => invalidate(saved),
+    onSuccess: result => invalidate(result.brief),
   });
 }
 
 export function usePublishAdminBriefMutation() {
   const invalidate = useInvalidateAdminBriefQueries();
   return useMutation({
-    mutationFn: (briefId: string) => publishAdminBrief(briefId, requireAdminToken()),
+    mutationFn: (briefId: string) =>
+      publishAdminBrief(briefId, requireAdminToken()),
     onSuccess: saved => invalidate(saved),
   });
 }
@@ -84,7 +105,8 @@ export function usePublishAdminBriefMutation() {
 export function useArchiveAdminBriefMutation() {
   const invalidate = useInvalidateAdminBriefQueries();
   return useMutation({
-    mutationFn: (briefId: string) => archiveAdminBrief(briefId, requireAdminToken()),
+    mutationFn: (briefId: string) =>
+      archiveAdminBrief(briefId, requireAdminToken()),
     onSuccess: saved => invalidate(saved),
   });
 }
