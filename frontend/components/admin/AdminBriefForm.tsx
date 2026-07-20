@@ -215,6 +215,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
   const [brief, setBrief] = useState<AdminBrief>(initial ?? EMPTY_BRIEF);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<
     'draft' | 'publish' | 'archive' | null
   >(null);
@@ -382,17 +383,19 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
     void handlePublish();
   }
 
-  async function handleArchive() {
+  function handleArchive() {
     if (!brief.id) return;
-    const confirmed = window.confirm(
-      'Archive this brief? It will leave the subscriber library and can be found later under Archived in the CMS list.',
-    );
-    if (!confirmed) return;
+    setArchiveConfirmOpen(true);
+  }
+
+  async function confirmArchive() {
+    if (!brief.id) return;
 
     setPendingAction('archive');
     try {
       const archived = await archiveMutation.mutateAsync(brief.id);
       setBrief(archived);
+      setArchiveConfirmOpen(false);
       toast.success('Brief archived.');
       router.push(returnHref);
     } catch (err) {
@@ -502,6 +505,49 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
           topBar="preview"
           onClose={() => setPreviewOpen(false)}
         />
+      </Modal>
+
+      <Modal
+        open={archiveConfirmOpen}
+        onClose={() => {
+          if (pendingAction === 'archive') return;
+          setArchiveConfirmOpen(false);
+        }}
+        labelledBy="archive-brief-title"
+        className="max-w-md p-6"
+      >
+        <h2
+          id="archive-brief-title"
+          className="font-heading text-foreground text-lg font-semibold tracking-tight"
+        >
+          Archive this brief?
+        </h2>
+        <p className="text-muted mt-2 text-sm leading-relaxed">
+          It will leave the subscriber library and can be found later under
+          Archived in the CMS list.
+        </p>
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            type="button"
+            size="md"
+            variant="outline"
+            disabled={pendingAction === 'archive'}
+            onClick={() => setArchiveConfirmOpen(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            size="md"
+            variant="danger"
+            loading={pendingAction === 'archive'}
+            disabled={pendingAction !== null && pendingAction !== 'archive'}
+            onClick={confirmArchive}
+            leftIcon={<Archive className="size-4" aria-hidden />}
+          >
+            Archive Brief
+          </Button>
+        </div>
       </Modal>
 
       {/* 1. Basic Information */}
