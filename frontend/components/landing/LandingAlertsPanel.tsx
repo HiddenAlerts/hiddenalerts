@@ -6,9 +6,7 @@ import {
   type PublicAlertListItem,
 } from '@/lib/api/publicAlerts';
 import {
-  LIVE_ALERTS,
   LIVE_ALERTS_PANEL,
-  SAMPLE_ALERTS_PANEL,
   type LiveAlert,
   type RiskLevel,
 } from '@/data/landing';
@@ -16,7 +14,7 @@ import { useEffect, useState } from 'react';
 
 import { LandingLiveAlertRow } from './LandingLiveAlertRow';
 
-type PanelMode = 'loading' | 'live' | 'sample';
+type PanelMode = 'loading' | 'live' | 'empty';
 
 /** Display the classification returned by the public alerts API. */
 function mapRiskLevel(raw: string): RiskLevel {
@@ -73,10 +71,11 @@ function mapPublicAlert(item: PublicAlertListItem): LiveAlert {
 
 /**
  * Left column — three most recent high-risk alerts (approved final mockup).
+ * API-only: never pads with hardcoded sample alerts.
  */
 export function LandingAlertsPanel() {
   const [mode, setMode] = useState<PanelMode>('loading');
-  const [alerts, setAlerts] = useState<ReadonlyArray<LiveAlert>>(LIVE_ALERTS);
+  const [alerts, setAlerts] = useState<ReadonlyArray<LiveAlert>>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,12 +101,12 @@ export function LandingAlertsPanel() {
           return;
         }
       } catch {
-        // Network / API failure — fall through to sample labeling.
+        // Network / API failure — show empty, never fake rows.
       }
 
       if (!cancelled) {
-        setAlerts(LIVE_ALERTS.slice(0, LANDING_ALERTS_LIMIT));
-        setMode('sample');
+        setAlerts([]);
+        setMode('empty');
       }
     }
 
@@ -117,12 +116,8 @@ export function LandingAlertsPanel() {
     };
   }, []);
 
-  const panel = mode === 'live' ? LIVE_ALERTS_PANEL : SAMPLE_ALERTS_PANEL;
+  const panel = LIVE_ALERTS_PANEL;
   const showSkeleton = mode === 'loading';
-  const rows = (showSkeleton ? LIVE_ALERTS : alerts).slice(
-    0,
-    LANDING_ALERTS_LIMIT,
-  );
 
   return (
     <div
@@ -134,30 +129,43 @@ export function LandingAlertsPanel() {
           id="alerts-heading"
           className="text-primary-500 text-[0.7rem] font-bold tracking-[0.16em] uppercase"
         >
-          {showSkeleton ? LIVE_ALERTS_PANEL.title : panel.title}
+          {panel.title}
         </h2>
         <span className="text-info text-[0.7rem] font-semibold tracking-wide">
-          {showSkeleton ? LIVE_ALERTS_PANEL.badge : panel.badge}
+          {panel.badge}
         </span>
       </div>
 
       <div className="mt-2 flex flex-1 flex-col">
-        {rows.map((alert, i) => (
-          <LandingLiveAlertRow
-            key={`${alert.title}-${i}`}
-            alert={alert}
-            className={showSkeleton ? 'opacity-60' : undefined}
-          />
-        ))}
+        {showSkeleton ? (
+          <div className="space-y-3 py-2" aria-busy="true" aria-label="Loading alerts">
+            {Array.from({ length: LANDING_ALERTS_LIMIT }).map((_, i) => (
+              <div
+                key={i}
+                className="border-border/50 flex items-start gap-3 border-b py-3.5 last:border-b-0"
+              >
+                <div className="bg-surface-muted size-11 shrink-0 animate-pulse rounded-full sm:size-12" />
+                <div className="min-w-0 flex-1 space-y-2 pt-0.5">
+                  <div className="bg-surface-muted h-3 w-[80%] animate-pulse rounded" />
+                  <div className="bg-surface-muted h-2.5 w-1/2 animate-pulse rounded" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : mode === 'empty' ? (
+          <p className="text-muted flex flex-1 items-center py-8 text-sm leading-relaxed">
+            High-risk alerts will appear here when available.
+          </p>
+        ) : (
+          alerts.map((alert, i) => (
+            <LandingLiveAlertRow key={`${alert.title}-${i}`} alert={alert} />
+          ))
+        )}
       </div>
 
       <div className="text-muted-foreground mt-auto border-border/50 border-t pt-3 text-xs leading-relaxed">
-        <p>
-          {showSkeleton ? LIVE_ALERTS_PANEL.footnoteLead : panel.footnoteLead}
-        </p>
-        <p className="text-foreground mt-1.5 font-medium">
-          {showSkeleton ? LIVE_ALERTS_PANEL.footnoteCta : panel.footnoteCta}
-        </p>
+        <p>{panel.footnoteLead}</p>
+        <p className="text-foreground mt-1.5 font-medium">{panel.footnoteCta}</p>
       </div>
     </div>
   );

@@ -10,12 +10,11 @@ import {
   UserRound,
 } from 'lucide-react';
 
+import { ACCOUNT_TAKEOVER_ECONOMY_BRIEF } from '@/data/sampleBriefs/accountTakeoverEconomy';
 import {
   NEWSLETTER_FOOTER_ANCHOR,
   NEWSLETTER_PRICING_ANCHOR,
 } from '@/data/mailerlite';
-import { ACCOUNT_TAKEOVER_ECONOMY_BRIEF } from '@/data/sampleBriefs/accountTakeoverEconomy';
-import { SAMPLE_INTELLIGENCE_BRIEFS } from '@/data/sampleIntelligenceBriefs';
 
 /** Routes / anchors used across the landing page. Centralised so links stay in sync.
  *
@@ -113,43 +112,7 @@ export type LiveAlert = {
   timestamp: string;
 };
 
-/** Fallback rows when public `/alerts` is empty or unavailable. */
-export const LIVE_ALERTS: ReadonlyArray<LiveAlert> = [
-  {
-    score: SAMPLE_INTELLIGENCE_BRIEFS[0].riskScore,
-    level: 'CRITICAL',
-    title: SAMPLE_INTELLIGENCE_BRIEFS[0].title,
-    category: SAMPLE_INTELLIGENCE_BRIEFS[0].category,
-    categoryTone: 'danger',
-    timestamp: 'June 10, 2026 · 12:55 PM UTC',
-  },
-  {
-    score: SAMPLE_INTELLIGENCE_BRIEFS[1].riskScore,
-    level: 'CRITICAL',
-    title: SAMPLE_INTELLIGENCE_BRIEFS[1].title,
-    category: SAMPLE_INTELLIGENCE_BRIEFS[1].category,
-    categoryTone: 'info',
-    timestamp: 'June 6, 2026',
-  },
-  {
-    score: SAMPLE_INTELLIGENCE_BRIEFS[2].riskScore,
-    level: 'CRITICAL',
-    title: SAMPLE_INTELLIGENCE_BRIEFS[2].title,
-    category: SAMPLE_INTELLIGENCE_BRIEFS[2].category,
-    categoryTone: 'warning',
-    timestamp: 'June 5, 2026',
-  },
-] as const;
-
 export const LIVE_ALERTS_PANEL = {
-  title: 'Latest High-Risk Alerts',
-  badge: 'Subscriber Preview',
-  footnoteLead: 'Real threats. Verified sources. Updated continuously.',
-  footnoteCta: 'More real-time alerts available with a subscription.',
-} as const;
-
-/** Shown when public `/alerts` returns nothing or is unavailable. */
-export const SAMPLE_ALERTS_PANEL = {
   title: 'Latest High-Risk Alerts',
   badge: 'Subscriber Preview',
   footnoteLead: 'Real threats. Verified sources. Updated continuously.',
