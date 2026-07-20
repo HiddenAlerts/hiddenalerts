@@ -26,7 +26,8 @@ const TAG_PALETTE = [
 /** Deterministic color rotation so tags read as distinct without per-tag color data. */
 function tagTone(tag: string): string {
   let hash = 0;
-  for (let i = 0; i < tag.length; i += 1) hash = (hash * 31 + tag.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < tag.length; i += 1)
+    hash = (hash * 31 + tag.charCodeAt(i)) >>> 0;
   return TAG_PALETTE[hash % TAG_PALETTE.length];
 }
 
@@ -37,7 +38,10 @@ const RichSection: FC<{ title: string; html: string }> = ({ title, html }) => (
     </h2>
     {html ? (
       <div
-        className={cn('text-body max-w-none text-sm leading-relaxed', TIPTAP_CONTENT_CLASSNAME)}
+        className={cn(
+          'text-body max-w-none text-sm leading-relaxed',
+          TIPTAP_CONTENT_CLASSNAME,
+        )}
         dangerouslySetInnerHTML={{ __html: html }}
       />
     ) : (
@@ -46,14 +50,16 @@ const RichSection: FC<{ title: string; html: string }> = ({ title, html }) => (
   </div>
 );
 
-const MetaRow: FC<{ label: string; value: string; valueClassName?: string }> = ({
-  label,
-  value,
-  valueClassName,
-}) => (
+const MetaRow: FC<{
+  label: string;
+  value: string;
+  valueClassName?: string;
+}> = ({ label, value, valueClassName }) => (
   <div className="flex items-center justify-between gap-3 px-4 py-3">
     <span className="text-muted text-sm">{label}</span>
-    <span className={cn('text-foreground text-sm font-semibold', valueClassName)}>
+    <span
+      className={cn('text-foreground text-sm font-semibold', valueClassName)}
+    >
       {value}
     </span>
   </div>
@@ -67,11 +73,6 @@ export type BriefReaderProps = {
   backHref?: string;
 };
 
-/**
- * Renders a brief exactly as a subscriber would read it. Shared by the
- * subscriber detail page, the admin detail page, and the admin form's live
- * "Preview" overlay — only `topBar` changes between them.
- */
 export const BriefReader: FC<BriefReaderProps> = ({
   brief,
   topBar = 'subscriber',
@@ -92,7 +93,8 @@ export const BriefReader: FC<BriefReaderProps> = ({
   }
 
   const riskLabel = RISK_LEVEL_LABEL[brief.riskLevel];
-  const isHighRisk = brief.riskLevel === 'critical' || brief.riskLevel === 'high';
+  const isHighRisk =
+    brief.riskLevel === 'critical' || brief.riskLevel === 'high';
 
   return (
     <div>
@@ -183,19 +185,10 @@ export const BriefReader: FC<BriefReaderProps> = ({
         </div>
 
         {brief.featuredImage ? (
-          // Local/uploaded image URL; no remote host to optimize via next/image.
-          // Subscriber detail: capped 16:9 hero so Executive Summary starts sooner.
-          // CMS Preview: full natural height so tall infographics stay reviewable.
-          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={brief.featuredImage}
             alt=""
-            className={cn(
-              'bg-surface-muted w-full rounded-lg',
-              topBar === 'preview'
-                ? 'object-contain'
-                : 'aspect-[16/9] max-h-[22rem] object-cover object-top sm:max-h-[26rem]',
-            )}
+            className="bg-surface-muted h-auto w-full rounded-lg object-contain"
           />
         ) : (
           <BriefCover
@@ -206,13 +199,19 @@ export const BriefReader: FC<BriefReaderProps> = ({
 
         <div className="grid gap-6 lg:grid-cols-3 lg:gap-8">
           <div className="space-y-6 lg:col-span-2">
-            <RichSection title="Executive Summary" html={brief.executiveSummary} />
+            <RichSection
+              title="Executive Summary"
+              html={brief.executiveSummary}
+            />
             <RichSection title="Why This Matters" html={brief.whyThisMatters} />
             <RichSection title="Key Signals" html={brief.keySignals} />
             <RichSection title="Risk Assessment" html={brief.riskAssessment} />
             <RichSection title="What Others Miss" html={brief.whatOthersMiss} />
             <RichSection title="Implications" html={brief.implications} />
-            <RichSection title="Detailed Intelligence Analysis" html={brief.mainBrief} />
+            <RichSection
+              title="Detailed Intelligence Analysis"
+              html={brief.mainBrief}
+            />
           </div>
 
           <div className="space-y-6">
@@ -227,12 +226,17 @@ export const BriefReader: FC<BriefReaderProps> = ({
                 label="Confidence Level"
                 value={CONFIDENCE_LEVEL_LABEL[brief.confidenceLevel]}
               />
-              <MetaRow label="Sources" value={String(brief.supportingAlerts.length)} />
+              <MetaRow
+                label="Sources"
+                value={String(brief.supportingAlerts.length)}
+              />
             </div>
 
             {brief.tags.length > 0 ? (
               <div>
-                <p className="text-foreground mb-2 text-sm font-semibold">Tags</p>
+                <p className="text-foreground mb-2 text-sm font-semibold">
+                  Tags
+                </p>
                 <div className="flex flex-wrap gap-1.5">
                   {brief.tags.map(tag => (
                     <span
