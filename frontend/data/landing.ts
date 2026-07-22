@@ -22,7 +22,7 @@ import {
  * - Alerts → #alerts (alerts card)
  * - Intelligence Briefs → #intelligence-brief (brief preview)
  * - Pricing → #pricing | FAQ → #faq | How It Works → #how-it-works
- * - Join Free… → #newsletter-signup (custom MailerLite API form)
+ * - Join Free… → #newsletter-signup (Free Plan card start; custom MailerLite form)
  * - Subscribe Now → /subscribe (auth Stripe checkout; Payment Links deferred)
  * - Sample brief CTA → https://hiddenalerts.ai/account-takeover-economy
  */

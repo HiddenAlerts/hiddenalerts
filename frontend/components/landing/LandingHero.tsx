@@ -2,9 +2,9 @@ import { buttonVariants } from '@/components/ui/button';
 import { HERO_CONTENT, LANDING_LINKS } from '@/data/landing';
 import { cn } from '@/lib/utils';
 import { Mail } from 'lucide-react';
-import Link from 'next/link';
 
 import { HeroThreatVisual } from './HeroThreatVisual';
+import { LandingHashLink } from './LandingHashLink';
 
 export function LandingHero() {
   return (
@@ -33,7 +33,7 @@ export function LandingHero() {
           </p>
 
           <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Link
+            <LandingHashLink
               href={LANDING_LINKS.heroSubscribe}
               className={cn(
                 buttonVariants({ variant: 'default', size: 'md' }),
@@ -42,7 +42,7 @@ export function LandingHero() {
             >
               <Mail className="size-4" aria-hidden />
               {HERO_CONTENT.ctaLabel}
-            </Link>
+            </LandingHashLink>
             <p className="text-muted-foreground text-xs sm:max-w-xs">
               {HERO_CONTENT.emailFootnote}
             </p>

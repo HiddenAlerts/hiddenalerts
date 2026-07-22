@@ -3,6 +3,7 @@ export { LandingBriefPreviewCard } from './LandingBriefPreviewCard';
 export { LandingAlertsPanel } from './LandingAlertsPanel';
 export { LandingFAQ } from './LandingFAQ';
 export { LandingFooter } from './LandingFooter';
+export { LandingHashLink } from './LandingHashLink';
 export { LandingHeader } from './LandingHeader';
 export { LandingHero } from './LandingHero';
 export { LandingHowItWorks } from './LandingHowItWorks';

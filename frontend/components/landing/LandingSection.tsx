@@ -28,7 +28,7 @@ export function LandingSection({
     <section
       id={id}
       aria-labelledby={ariaLabelledby}
-      className={cn('scroll-mt-20 px-4 py-10 md:px-6 md:py-12', className)}
+      className={cn('scroll-mt-24 px-4 py-10 md:px-6 md:py-12', className)}
     >
       <div className={cn('mx-auto w-full max-w-6xl', containerClassName)}>
         {children}

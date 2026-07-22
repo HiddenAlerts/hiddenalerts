@@ -22,7 +22,10 @@ export function LandingPricing() {
       className="border-border-subtle border-t py-8 md:py-10"
     >
       <div className="relative grid gap-5 lg:grid-cols-[1fr_auto_1.15fr] lg:items-stretch lg:gap-0">
-        <article className="border-info/50 bg-background-alt/60 flex flex-col rounded-2xl border-2 p-6 sm:p-7">
+        <article
+          id="newsletter-signup"
+          className="border-info/50 bg-background-alt/60 flex scroll-mt-24 flex-col rounded-2xl border-2 p-6 sm:p-7"
+        >
           <h2
             id="pricing-heading"
             className="text-info text-sm font-bold tracking-[0.12em] uppercase"
@@ -44,10 +47,7 @@ export function LandingPricing() {
           </ul>
 
           <div className="mt-6">
-            <LandingNewsletterForm
-              id="newsletter-signup"
-              ariaLabel="Join free intelligence updates"
-            />
+            <LandingNewsletterForm ariaLabel="Join free intelligence updates" />
           </div>
           <p className="text-muted-foreground mt-3 text-xs">{FREE_PLAN.footnote}</p>
         </article>

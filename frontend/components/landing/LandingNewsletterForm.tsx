@@ -76,7 +76,7 @@ export function LandingNewsletterForm({
       <div
         id={id}
         className={cn(
-          'scroll-mt-20 rounded-lg border border-success/40 bg-success-muted/40 px-4 py-3',
+          'scroll-mt-24 rounded-lg border border-success/40 bg-success-muted/40 px-4 py-3',
           className,
         )}
         role="status"
@@ -93,7 +93,7 @@ export function LandingNewsletterForm({
   return (
     <div
       id={id}
-      className={cn('scroll-mt-20 w-full min-w-0', className)}
+      className={cn('scroll-mt-24 w-full min-w-0', className)}
       aria-label={ariaLabel}
     >
       <form

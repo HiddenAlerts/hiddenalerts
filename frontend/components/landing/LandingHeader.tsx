@@ -8,6 +8,7 @@ import { useState } from 'react';
 
 import { LANDING_LINKS, type LandingNavItem } from '@/data/landing';
 
+import { LandingHashLink } from './LandingHashLink';
 import { LandingLogo } from './LandingLogo';
 
 type LandingHeaderProps = {
@@ -50,13 +51,13 @@ export function LandingHeader({
               aria-label="Primary"
             >
               {navItems!.map(item => (
-                <Link
+                <LandingHashLink
                   key={item.href}
                   href={item.href}
                   className="hover:text-foreground focus-visible:ring-primary-500 rounded-sm transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 >
                   {item.label}
-                </Link>
+                </LandingHashLink>
               ))}
             </nav>
 
@@ -67,9 +68,12 @@ export function LandingHeader({
               >
                 Log in
               </Link>
-              <Link href={primaryCta.href} className={ctaClass('default')}>
+              <LandingHashLink
+                href={primaryCta.href}
+                className={ctaClass('default')}
+              >
                 {primaryCta.label}
-              </Link>
+              </LandingHashLink>
             </div>
 
             <button
@@ -109,13 +113,13 @@ export function LandingHeader({
           <ul className="flex flex-col gap-1">
             {navItems!.map(item => (
               <li key={item.href}>
-                <Link
+                <LandingHashLink
                   href={item.href}
                   className="text-muted hover:text-foreground hover:bg-surface/40 block rounded-md px-3 py-2.5 text-sm font-medium transition-colors"
                   onClick={() => setMobileOpen(false)}
                 >
                   {item.label}
-                </Link>
+                </LandingHashLink>
               </li>
             ))}
             <li className="border-border-subtle mt-2 border-t pt-3">
@@ -128,13 +132,13 @@ export function LandingHeader({
               </Link>
             </li>
             <li className="mt-2 px-3">
-              <Link
+              <LandingHashLink
                 href={primaryCta.href}
                 className={cn(ctaClass('default'), 'w-full justify-center')}
                 onClick={() => setMobileOpen(false)}
               >
                 {primaryCta.label}
-              </Link>
+              </LandingHashLink>
             </li>
           </ul>
         </nav>

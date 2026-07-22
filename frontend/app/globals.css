@@ -43,6 +43,13 @@ html {
   height: 100%;
   /* Next.js injects --font-manrope / --font-figtree via layout; set default text face here */
   font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }
 
 input:-webkit-autofill,
