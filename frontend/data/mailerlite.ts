@@ -2,7 +2,10 @@
  * Newsletter signup anchors.
  *
  * Client: custom HiddenAlerts form → POST /api/newsletter
- * Server: MailerLite API with MAILERLITE_API_TOKEN (email upsert only).
+ * Server: MailerLite API with:
+ *   - MAILERLITE_API_TOKEN
+ *   - MAILERLITE_GROUP_ID (HiddenAlerts Intelligence group)
+ * Success UI only after MailerLite accepts the subscriber into that group.
  * No embed script, popup, or MailerLite branding on the landing page.
  */
 

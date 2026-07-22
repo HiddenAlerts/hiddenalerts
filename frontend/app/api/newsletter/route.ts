@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
-const MAILERLITE_API = 'https://connect.mailerlite.com/api/subscribers';
+const MAILERLITE_SUBSCRIBERS_URL =
+  'https://connect.mailerlite.com/api/subscribers';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -8,6 +9,15 @@ type NewsletterBody = {
   email?: unknown;
 };
 
+/**
+ * Newsletter signup → MailerLite create/upsert into the configured group.
+ *
+ * Env (server-only, set in Vercel Production + Preview):
+ * - MAILERLITE_API_TOKEN
+ * - MAILERLITE_GROUP_ID  (HiddenAlerts Intelligence group)
+ *
+ * Success is returned only after MailerLite accepts the subscriber.
+ */
 export async function POST(request: Request) {
   let body: NewsletterBody;
   try {
@@ -30,8 +40,12 @@ export async function POST(request: Request) {
   }
 
   const token = process.env.MAILERLITE_API_TOKEN?.trim();
-  if (!token) {
-    console.error('[newsletter] Missing MAILERLITE_API_TOKEN');
+  const groupId = process.env.MAILERLITE_GROUP_ID?.trim();
+
+  if (!token || !groupId) {
+    console.error(
+      '[newsletter] Missing MAILERLITE_API_TOKEN or MAILERLITE_GROUP_ID',
+    );
     return NextResponse.json(
       { error: 'Newsletter signup is temporarily unavailable.' },
       { status: 503 },
@@ -39,17 +53,20 @@ export async function POST(request: Request) {
   }
 
   try {
-    const res = await fetch(MAILERLITE_API, {
+    const res = await fetch(MAILERLITE_SUBSCRIBERS_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({
+        email,
+        groups: [groupId],
+      }),
     });
 
-    // 201 created, 200 already exists / updated
+    // 201 created, 200 already exists / updated (group assignment included)
     if (res.ok) {
       return NextResponse.json({ ok: true });
     }
