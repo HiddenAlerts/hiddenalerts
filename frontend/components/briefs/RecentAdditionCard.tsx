@@ -29,7 +29,7 @@ export const RecentAdditionCard: FC<RecentAdditionCardProps> = ({
       <img
         src={brief.featuredImage}
         alt=""
-        className="size-14 shrink-0 rounded-md object-cover object-top"
+        className="bg-surface-muted size-14 shrink-0 rounded-md object-contain object-center"
       />
     ) : (
       <BriefCover

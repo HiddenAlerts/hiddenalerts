@@ -15,6 +15,10 @@ export function useSubscriberFeaturedBriefQuery() {
   return useQuery({
     queryKey: subscriberFeaturedBriefQueryKey(),
     queryFn: () => fetchFeaturedSubscriberBrief(token!),
+    // CMS feature/image updates must show on the library hero immediately.
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     enabled: Boolean(token),
   });
 }

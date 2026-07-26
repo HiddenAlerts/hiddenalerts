@@ -39,16 +39,18 @@ export const BriefCard: FC<BriefCardProps> = ({
   >
     <div
       className={cn(
-        'relative w-full overflow-hidden',
+        'bg-surface-muted relative w-full overflow-hidden',
         imageClassName ?? 'aspect-[16/10]',
       )}
     >
       {brief.featuredImage ? (
+        // object-contain: CMS covers are often tall infographics — cover crops
+        // them into an unrecognizable (or wrong-looking) thumbnail.
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={brief.featuredImage}
           alt=""
-          className="size-full object-cover object-top"
+          className="bg-surface-muted size-full object-contain object-center"
         />
       ) : (
         <BriefCover theme={brief.coverTheme} className="size-full" />
