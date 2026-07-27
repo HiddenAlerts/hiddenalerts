@@ -380,3 +380,20 @@ class PublicAlertStatsResponse(BaseModel):
     medium_count: int
     low_count: int
     category_breakdown: list[PublicCategoryBreakdown]
+
+
+class SubscriberAlertStatsResponse(BaseModel):
+    """Published-alert stats for the paid subscriber feed.
+
+    Unlike the public stats, the buckets use the V1 risk bands the subscriber UI
+    renders as badges (Critical 80–100, High 70–79, Medium 60–69 on the 0–100
+    scale), so ``critical_count`` is reported separately and the four bands are
+    mutually exclusive.
+    """
+
+    total_alerts: int
+    critical_count: int
+    high_count: int
+    medium_count: int
+    low_count: int
+    category_breakdown: list[PublicCategoryBreakdown]

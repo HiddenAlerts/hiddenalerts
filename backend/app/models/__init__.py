@@ -1,6 +1,7 @@
 from app.models.base import Base
 from app.models.billing_checkout_attempt import BillingCheckoutAttempt
 from app.models.event import Event, EventSource
+from app.models.intelligence_brief import IntelligenceBrief
 from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.review import AlertReview
@@ -19,6 +20,7 @@ __all__ = [
     "ProcessedAlert",
     "Event",
     "EventSource",
+    "IntelligenceBrief",
     "AlertReview",
     "User",
     "WeeklyReport",

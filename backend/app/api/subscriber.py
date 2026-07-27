@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import public_alerts as public_alerts_api
@@ -32,13 +32,15 @@ from app.auth.supabase import SubscriberContext, get_current_subscriber
 from app.config import settings
 from app.database import get_db
 from app.models.processed_alert import ProcessedAlert
+from app.models.raw_item import RawItem
+from app.models.source import Source
 from app.models.subscription import Subscription
 from app.schemas.alert import (
-    PublicAlertStatsResponse,
     PublicAlertsResponse,
     SubscriberAlertDetail,
     SubscriberAlertRead,
     SubscriberAlertsResponse,
+    SubscriberAlertStatsResponse,
 )
 from app.schemas.search import SearchResponse
 from app.schemas.subscriber import (
@@ -138,13 +140,69 @@ async def get_subscriber_access(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/alerts/stats", response_model=PublicAlertStatsResponse)
+# Internal signal_score_total lower bounds per V1 risk band. Source of truth is
+# app.pipeline.publishing.risk_bands.compute_risk_band; mirrored here so the SQL
+# filter/counts bucket alerts exactly like the badges the subscriber UI renders
+# (Critical 80–100, High 70–79, Medium 60–69 on the 0–100 scale). Kept in sync by
+# tests/test_api/test_subscriber_content.py.
+_BAND_CRITICAL_MIN = 20
+_BAND_HIGH_MIN = 18
+_BAND_MEDIUM_MIN = 15
+
+# risk_level values the subscriber feed accepts (mutually exclusive V1 bands).
+_SUBSCRIBER_RISK_LEVELS = frozenset({"critical", "high", "medium", "low"})
+
+
+def _subscriber_risk_band_filter(risk_level: str):
+    """Return a SQL predicate on ``signal_score_total`` for a subscriber risk band."""
+    score = ProcessedAlert.signal_score_total
+    rl = risk_level.strip().lower()
+    if rl == "critical":
+        return score >= _BAND_CRITICAL_MIN
+    if rl == "high":
+        return and_(score >= _BAND_HIGH_MIN, score < _BAND_CRITICAL_MIN)
+    if rl == "medium":
+        return and_(score >= _BAND_MEDIUM_MIN, score < _BAND_HIGH_MIN)
+    # "low" == below_60
+    return score < _BAND_MEDIUM_MIN
+
+
+@router.get("/alerts/stats", response_model=SubscriberAlertStatsResponse)
 async def subscriber_alert_stats(
     _: ActiveSubscriberContext = Depends(require_active_subscription),
     db: AsyncSession = Depends(get_db),
-) -> PublicAlertStatsResponse:
-    """Published-alert aggregate stats — mirrors GET /api/alerts/stats."""
-    return await public_alerts_api.published_stats_impl(db)
+) -> SubscriberAlertStatsResponse:
+    """Published-alert aggregate stats for subscribers.
+
+    Counts use the V1 risk bands (adds ``critical_count``); ``total_alerts`` and
+    ``category_breakdown`` reuse the shared published-stats implementation.
+    """
+    base = await public_alerts_api.published_stats_impl(db)
+
+    score = ProcessedAlert.signal_score_total
+    row = (
+        await db.execute(
+            select(
+                func.count(case((score >= _BAND_CRITICAL_MIN, 1))).label("critical"),
+                func.count(
+                    case((and_(score >= _BAND_HIGH_MIN, score < _BAND_CRITICAL_MIN), 1))
+                ).label("high"),
+                func.count(
+                    case((and_(score >= _BAND_MEDIUM_MIN, score < _BAND_HIGH_MIN), 1))
+                ).label("medium"),
+                func.count(case((score < _BAND_MEDIUM_MIN, 1))).label("low"),
+            ).where(ProcessedAlert.is_published.is_(True))
+        )
+    ).one()
+
+    return SubscriberAlertStatsResponse(
+        total_alerts=base.total_alerts,
+        critical_count=row.critical,
+        high_count=row.high,
+        medium_count=row.medium,
+        low_count=row.low,
+        category_breakdown=base.category_breakdown,
+    )
 
 
 @router.get("/alerts/top", response_model=PublicAlertsResponse)
@@ -158,7 +216,7 @@ async def subscriber_top_alerts(
 
 @router.get("/alerts", response_model=SubscriberAlertsResponse)
 async def subscriber_alerts(
-    risk_level: str | None = Query(None, description="Filter: low, medium, high"),
+    risk_level: str | None = Query(None, description="Filter by V1 band: critical, high, medium, low"),
     category: str | None = Query(None, description="Filter by category (exact match)"),
     source: str | None = Query(None, description="Partial source name search"),
     limit: int = Query(50, ge=1, le=500),
@@ -166,15 +224,40 @@ async def subscriber_alerts(
     _: ActiveSubscriberContext = Depends(require_active_subscription),
     db: AsyncSession = Depends(get_db),
 ) -> SubscriberAlertsResponse:
-    """Published-alerts feed — mirrors GET /api/alerts, plus the V1 `risk_band`
-    (Critical badge) on each item (OPEN-6). Band derived from the 0–100 score."""
-    pub = await public_alerts_api.list_published_alerts_impl(
-        db, risk_level, category, source, limit, offset
+    """Published-alerts feed with the V1 `risk_band` (Critical badge) on each item.
+
+    The `risk_level` filter uses the V1 risk bands (critical/high/medium/low) so it
+    matches the badges — Critical (score 80–100) is selectable and mutually
+    exclusive from High (70–79). Ordering and visibility mirror the published feed.
+    """
+    if risk_level is not None and risk_level.strip().lower() not in _SUBSCRIBER_RISK_LEVELS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Invalid risk_level: {risk_level!r}. Allowed: {sorted(_SUBSCRIBER_RISK_LEVELS)}",
+        )
+
+    stmt = public_alerts_api._published_base_stmt().order_by(
+        ProcessedAlert.published_at.desc().nullslast(),
+        ProcessedAlert.processed_at.desc(),
     )
+    if risk_level is not None:
+        stmt = stmt.where(_subscriber_risk_band_filter(risk_level))
+    if category is not None:
+        stmt = stmt.where(ProcessedAlert.primary_category == category)
+    if source is not None:
+        stmt = (
+            stmt.join(RawItem, RawItem.id == ProcessedAlert.raw_item_id)
+            .join(Source, Source.id == RawItem.source_id)
+            .where(Source.name.ilike(f"%{source}%"))
+        )
+    stmt = stmt.offset(offset).limit(limit)
+
+    alerts = (await db.execute(stmt)).scalars().all()
+    reads = [public_alerts_api._to_public_read(a) for a in alerts]
     return SubscriberAlertsResponse(
         alerts=[
-            SubscriberAlertRead(**a.model_dump(), risk_band=band_from_score100(a.signal_score))
-            for a in pub.alerts
+            SubscriberAlertRead(**r.model_dump(), risk_band=band_from_score100(r.signal_score))
+            for r in reads
         ]
     )
 
