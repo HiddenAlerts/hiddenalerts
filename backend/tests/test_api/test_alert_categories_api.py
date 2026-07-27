@@ -415,6 +415,41 @@ def test_openapi_exposes_both_category_paths():
     assert ADMIN_URL in paths and "get" in paths[ADMIN_URL]
 
 
+def test_openapi_exposes_the_category_enum_and_count_floor():
+    schema = app.openapi()["components"]["schemas"]["AlertCategoryRead"]
+    assert schema["properties"]["value"]["enum"] == EXPECTED_ORDER
+    assert schema["properties"]["count"]["minimum"] == 0
+    response = app.openapi()["components"]["schemas"]["AlertCategoriesResponse"]
+    assert response["properties"]["total"]["minimum"] == 0
+
+
+def test_response_json_shape_is_unchanged():
+    schema = app.openapi()["components"]["schemas"]["AlertCategoryRead"]
+    assert sorted(schema["properties"]) == ["count", "label", "value"]
+    assert sorted(schema["required"]) == ["count", "label", "value"]
+
+
+def test_negative_counts_fail_schema_validation():
+    from pydantic import ValidationError
+
+    from app.schemas.alert_category import AlertCategoriesResponse, AlertCategoryRead
+
+    with pytest.raises(ValidationError):
+        AlertCategoryRead(value="Cybercrime", label="Cybercrime", count=-1)
+
+    with pytest.raises(ValidationError):
+        AlertCategoriesResponse(categories=[], total=-1)
+
+
+def test_value_must_be_a_canonical_category():
+    from pydantic import ValidationError
+
+    from app.schemas.alert_category import AlertCategoryRead
+
+    with pytest.raises(ValidationError):
+        AlertCategoryRead(value="Healthcare Fraud", label="Healthcare Fraud", count=0)
+
+
 def test_existing_alert_paths_are_unchanged():
     paths = app.openapi()["paths"]
     for path in (
@@ -436,6 +471,16 @@ def test_canonical_tuple_matches_expected_values_and_order():
     assert list(ALERT_CATEGORIES) == EXPECTED_ORDER
 
 
+def test_literal_and_ordered_tuple_stay_in_sync():
+    """The type and the runtime sequence are written out separately on purpose;
+    changing one without the other must fail here."""
+    from typing import get_args
+
+    from app.domain.alert_categories import AlertCategory
+
+    assert tuple(get_args(AlertCategory)) == ALERT_CATEGORIES
+
+
 def test_ai_structured_output_allows_exactly_the_canonical_categories():
     from typing import get_args
 
@@ -446,13 +491,47 @@ def test_ai_structured_output_allows_exactly_the_canonical_categories():
     assert schema["properties"]["primary_category"]["enum"] == EXPECTED_ORDER
 
 
-def test_v1_publishable_categories_are_the_five_non_other_values():
+def test_v1_publishable_categories_are_the_five_approved_values():
     from app.pipeline.publishing.publishing_policy import DEFAULT_V1_POLICY
 
-    assert PUBLISHABLE_ALERT_CATEGORIES == frozenset(EXPECTED_ORDER) - {OTHER_CATEGORY}
-    assert len(PUBLISHABLE_ALERT_CATEGORIES) == 5
+    assert PUBLISHABLE_ALERT_CATEGORIES == frozenset(
+        {
+            "Investment Fraud",
+            "Cybercrime",
+            "Consumer Scam",
+            "Money Laundering",
+            "Cryptocurrency Fraud",
+        }
+    )
+    assert OTHER_CATEGORY not in PUBLISHABLE_ALERT_CATEGORIES
     assert DEFAULT_V1_POLICY.approved_categories == PUBLISHABLE_ALERT_CATEGORIES
     assert DEFAULT_V1_POLICY.manual_review_categories == frozenset({OTHER_CATEGORY})
+
+
+def test_publish_allowlist_is_not_derived_from_the_taxonomy():
+    """A category added to the taxonomy must not become auto-publishable on its own.
+
+    Simulates a seventh canonical category and asserts the allowlist does not
+    grow with it, and that such a category routes to review.
+    """
+    from app.pipeline.publishing.constants import (
+        PendingReviewReason,
+        PublishDecisionValue,
+    )
+    from app.pipeline.publishing.publishing_policy import (
+        evaluate_basic_publish_decision,
+    )
+
+    hypothetical = "Healthcare Fraud"
+    assert hypothetical not in PUBLISHABLE_ALERT_CATEGORIES
+
+    decision = evaluate_basic_publish_decision(
+        signal_score_total=23,
+        primary_category=hypothetical,
+        source_credibility=5,
+    )
+    assert decision.action == PublishDecisionValue.REVIEW
+    assert decision.pending_review_reason == PendingReviewReason.BLOCKED_BY_CATEGORY
 
 
 def test_other_still_routes_to_review():

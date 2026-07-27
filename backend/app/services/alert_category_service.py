@@ -13,11 +13,13 @@ from app.schemas.alert_category import AlertCategoriesResponse, AlertCategoryRea
 
 
 def published_alert_filter():
-    """Visibility predicate for the subscriber-facing alert surfaces.
+    """Published-alert predicate shared by the alert list/detail queries and the
+    subscriber category counts.
 
-    Publication is the only gate on the subscriber feed today, so category
-    counts use the same rule and stay consistent with what ``?category=`` on
-    ``GET /api/v1/subscriber/alerts`` actually returns.
+    Publication is the only gate those queries apply, so counting under the same
+    predicate keeps a category's count equal to what ``?category=`` returns from
+    ``GET /api/v1/subscriber/alerts``. Other surfaces (search, stats, top alerts)
+    still build their own filters and are not governed by this function.
     """
     return ProcessedAlert.is_published.is_(True)
 
@@ -39,7 +41,8 @@ async def get_category_metadata(
     if published_only:
         stmt = stmt.where(published_alert_filter())
 
-    counts = {row.primary_category: row.count for row in (await db.execute(stmt)).all()}
+    rows = (await db.execute(stmt)).all()
+    counts = {category: count for category, count in rows}
 
     categories = [
         AlertCategoryRead(value=category, label=category, count=counts.get(category, 0))
