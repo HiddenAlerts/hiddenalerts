@@ -14,6 +14,7 @@ import openai
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.domain.alert_categories import AlertCategory
 
 log = logging.getLogger(__name__)
 
@@ -21,14 +22,8 @@ log = logging.getLogger(__name__)
 # Structured output schema (used with client.beta.chat.completions.parse)
 # ---------------------------------------------------------------------------
 
-FRAUD_CATEGORIES = Literal[
-    "Investment Fraud",
-    "Cybercrime",
-    "Consumer Scam",
-    "Money Laundering",
-    "Cryptocurrency Fraud",
-    "Other",
-]
+# Alias kept for existing importers; the values constrain the OpenAI enum.
+FRAUD_CATEGORIES = AlertCategory
 
 
 class AIArticleAnalysis(BaseModel):

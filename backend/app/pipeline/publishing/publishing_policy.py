@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.domain.alert_categories import OTHER_CATEGORY, PUBLISHABLE_ALERT_CATEGORIES
 from app.pipeline.publishing.constants import (
     PendingReviewReason,
     PublishDecisionValue,
@@ -25,18 +26,10 @@ from app.pipeline.publishing.constants import (
 from app.pipeline.publishing.risk_bands import compute_risk_band
 
 # Approved auto-publish categories (Ken-locked V1 set).
-_APPROVED_CATEGORIES: frozenset[str] = frozenset(
-    {
-        "Cybercrime",
-        "Consumer Scam",
-        "Investment Fraud",
-        "Money Laundering",
-        "Cryptocurrency Fraud",
-    }
-)
+_APPROVED_CATEGORIES: frozenset[str] = PUBLISHABLE_ALERT_CATEGORIES
 
 # Categories that always route to manual review (never auto-publish).
-_MANUAL_REVIEW_CATEGORIES: frozenset[str] = frozenset({"Other"})
+_MANUAL_REVIEW_CATEGORIES: frozenset[str] = frozenset({OTHER_CATEGORY})
 
 
 @dataclass(frozen=True)

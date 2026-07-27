@@ -46,6 +46,7 @@ from app.schemas.alert import (
     PublicAlertStatsResponse,
     PublicCategoryBreakdown,
 )
+from app.services.alert_category_service import published_alert_filter
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/alerts", tags=["public"])
@@ -64,7 +65,7 @@ def _published_base_stmt():
     """
     return (
         select(ProcessedAlert)
-        .where(ProcessedAlert.is_published.is_(True))
+        .where(published_alert_filter())
         .options(
             selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source)
         )
@@ -75,7 +76,7 @@ def _detail_stmt():
     """Detail-endpoint base SELECT — eager-loads event_sources alongside raw_item/source."""
     return (
         select(ProcessedAlert)
-        .where(ProcessedAlert.is_published.is_(True))
+        .where(published_alert_filter())
         .options(
             selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source),
             selectinload(ProcessedAlert.event_sources),

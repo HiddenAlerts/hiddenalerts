@@ -42,12 +42,14 @@ from app.schemas.alert import (
     SubscriberAlertsResponse,
     SubscriberAlertStatsResponse,
 )
+from app.schemas.alert_category import AlertCategoriesResponse
 from app.schemas.search import SearchResponse
 from app.schemas.subscriber import (
     SubscriberAccessResponse,
     SubscriberMeResponse,
     SubscriptionMeRead,
 )
+from app.services import alert_category_service
 from app.services.subscription_service import has_active_subscription_access
 
 log = logging.getLogger(__name__)
@@ -212,6 +214,20 @@ async def subscriber_top_alerts(
 ) -> PublicAlertsResponse:
     """Curated top alerts — mirrors GET /api/alerts/top."""
     return await public_alerts_api.top_alerts_impl(db)
+
+
+@router.get("/alerts/categories", response_model=AlertCategoriesResponse)
+async def subscriber_alert_categories(
+    _: ActiveSubscriberContext = Depends(require_active_subscription),
+    db: AsyncSession = Depends(get_db),
+) -> AlertCategoriesResponse:
+    """Canonical alert categories with published-alert counts.
+
+    Always returns all six categories in canonical order, including any with a
+    count of 0, so the subscriber filter list is stable. `value` is the exact
+    string to pass to the `category` filter on `GET /alerts`.
+    """
+    return await alert_category_service.get_category_metadata(db, published_only=True)
 
 
 @router.get("/alerts", response_model=SubscriberAlertsResponse)
