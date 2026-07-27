@@ -20,7 +20,10 @@ services:
     container_name: hiddenalerts_app
     restart: unless-stopped
     ports:
-      - "8000:8000"
+    # Loopback only — API is reached through the host nginx proxy, never directly. 
+    # Publishing on 0.0.0.0 would bypass nginx and is not filtered by UFW, 
+    # whose rules do not apply to Docker-published ports.
+    - "127.0.0.1:8000:8000"
     env_file: .env
     volumes:
       # Persist admin-uploaded featured images across image rebuilds. The host
