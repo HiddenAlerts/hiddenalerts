@@ -1,25 +1,10 @@
-"""In-process guard preventing overlapping manual collection runs per source.
+"""Guard preventing overlapping manual collection runs for the same source.
 
-Mirrors the locking approach already used for the AI pipeline
-(``app.pipeline.alert_pipeline.is_processing``): a single asyncio primitive held
-for the lifetime of a run, consulted before starting another.
-
-Scope and limits — both deliberate:
-
-* The claim set lives in this process only. The app runs as a single uvicorn
-  worker, so it is authoritative for manual triggers today. It would not cover a
-  multi-worker or multi-container deployment.
-* It tracks *manual* triggers only. The scheduled collection job calls
-  ``run_all_sources`` directly and does not claim a slot, so a manual trigger can
-  still overlap a scheduled run. Closing that requires the guard to move into the
-  collector itself.
-
-Both limits are safe: overlapping runs waste work but cannot corrupt data — the
-``uq_raw_items_url_hash`` constraint and the per-item ``IntegrityError`` handling
-in ``app.pipeline.collector`` already make concurrent collection idempotent.
+Process-local: the claim set is not shared across workers or containers.
+Coordination with scheduled collection runs is not yet implemented — the
+scheduled job calls ``run_all_sources`` without claiming a slot, so a manual
+trigger can still overlap it.
 """
-from __future__ import annotations
-
 import asyncio
 
 _active_source_runs: set[int] = set()

@@ -4,8 +4,6 @@ These routes expose full source configuration, the ingested article corpus and
 internal pipeline counts, and one of them starts outbound collection. They are
 admin-only; ``/api/v1/health`` stays public for deployment probes.
 """
-from __future__ import annotations
-
 import uuid
 
 import pytest
@@ -20,7 +18,7 @@ from app.models.source import Source
 from app.models.user import User
 from app.services import collection_guard
 
-# (method, path) for every route this slice secures.
+# (method, path) for every admin-only internal route, with concrete ids.
 PROTECTED_ROUTES = [
     ("GET", "/api/v1/sources"),
     ("GET", "/api/v1/sources/1"),
@@ -47,11 +45,11 @@ PROTECTED_PATH_TEMPLATES = {
 _PATCH_BODY = {"notes": "audit note"}
 
 
-async def _make_user(db_session, role: str = "admin") -> User:
+async def _make_user(db_session, role: str = "admin", is_active: bool = True) -> User:
     user = User(
         email=f"{role}_{uuid.uuid4().hex[:8]}@test.com",
         password_hash=hash_password("pw"),
-        is_active=True,
+        is_active=is_active,
         role=role,
     )
     db_session.add(user)
@@ -150,8 +148,16 @@ async def test_rejection_happens_before_any_data_is_returned(client):
     assert "raw_text" not in resp.text
 
 
+@pytest.mark.asyncio
+async def test_deactivated_admin_is_rejected(client, db_session):
+    """A valid token for a deactivated admin grants no access."""
+    admin = await _make_user(db_session, is_active=False)
+    resp = await client.get("/api/v1/sources", headers=_auth(admin))
+    assert resp.status_code == 401
+
+
 # ---------------------------------------------------------------------------
-# Admin access — routes still work
+# Admin access
 # ---------------------------------------------------------------------------
 
 
@@ -242,6 +248,37 @@ async def test_admin_can_trigger_collection(client, db_session, no_op_collection
     assert resp.status_code == 202
     assert resp.json()["source_id"] == source.id
     assert no_op_collection == [source.id]
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_trigger_starts_no_collection(
+    client, db_session, no_op_collection
+):
+    """Rejection happens before any collection work is scheduled or claimed."""
+    source = await _make_source(db_session)
+
+    resp = await client.post(f"/api/v1/sources/{source.id}/trigger")
+
+    assert resp.status_code == 401
+    assert no_op_collection == []
+    assert not collection_guard.is_source_collecting(source.id)
+
+
+@pytest.mark.asyncio
+async def test_subscriber_trigger_starts_no_collection(
+    client, db_session, no_op_collection
+):
+    """A non-admin token cannot schedule or claim a collection run either."""
+    subscriber = await _make_user(db_session, role="subscriber")
+    source = await _make_source(db_session)
+
+    resp = await client.post(
+        f"/api/v1/sources/{source.id}/trigger", headers=_auth(subscriber)
+    )
+
+    assert resp.status_code == 403
+    assert no_op_collection == []
+    assert not collection_guard.is_source_collecting(source.id)
 
 
 @pytest.mark.asyncio

@@ -109,8 +109,8 @@ async def trigger_source(
         from app.scheduler.jobs import trigger_source_by_id
         try:
             await trigger_source_by_id(source_id)
-        except Exception as exc:
-            log.error(f"Manual trigger for source {source_id} failed: {exc}", exc_info=True)
+        except Exception:
+            log.exception("Manual collection failed for source %s", source_id)
         finally:
             await release_source_run(source_id)
 
