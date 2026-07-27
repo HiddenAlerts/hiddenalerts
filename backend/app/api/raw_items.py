@@ -1,12 +1,20 @@
+"""Raw-item and internal pipeline-statistics endpoints — admin only.
+
+These expose the full ingested article corpus (including ``raw_text`` and
+``raw_html``) and internal collection counts, so every route requires an admin
+user.
+"""
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_admin
 from app.database import get_db
 from app.models.raw_item import RawItem
 from app.models.source import Source
+from app.models.user import User
 from app.schemas.raw_item import RawItemDetail, RawItemRead
 
 router = APIRouter(tags=["raw-items"])
@@ -20,6 +28,7 @@ async def list_raw_items(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_admin),
 ) -> list[RawItem]:
     stmt = select(RawItem).order_by(RawItem.fetched_at.desc())
     if source_id is not None:
@@ -35,7 +44,11 @@ async def list_raw_items(
 
 
 @router.get("/raw-items/{item_id}", response_model=RawItemDetail)
-async def get_raw_item(item_id: int, db: AsyncSession = Depends(get_db)) -> RawItem:
+async def get_raw_item(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_admin),
+) -> RawItem:
     item = await db.get(RawItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Raw item not found")
@@ -43,7 +56,10 @@ async def get_raw_item(item_id: int, db: AsyncSession = Depends(get_db)) -> RawI
 
 
 @router.get("/stats")
-async def get_stats(db: AsyncSession = Depends(get_db)) -> dict:
+async def get_stats(
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_admin),
+) -> dict:
     total_items = await db.scalar(select(func.count()).select_from(RawItem))
     total_sources = await db.scalar(select(func.count()).select_from(Source))
     active_sources = await db.scalar(
