@@ -10,11 +10,15 @@ uvicorn workers, containers or hosts — the same limitation the collection guar
 carries. Multiple workers would each keep their own spacing, so the effective
 rate against an upstream would multiply by the worker count.
 
+Memory: host state is pruned opportunistically rather than capped. See
+``_SOFT_HOST_LIMIT``.
+
 Intervals are the pace we choose to request at. Sites that publish a preferred
 crawl delay are configured to match it.
 """
 import asyncio
 import logging
+import math
 import time
 from collections.abc import Awaitable, Callable
 
@@ -31,12 +35,36 @@ HOST_INTERVAL_SECONDS: dict[str, float] = {
     "ftc.gov": 5.0,
 }
 
-# Bound on tracked hosts; stale entries are dropped once this is exceeded.
-_MAX_TRACKED_HOSTS = 512
+# Soft bound on tracked hosts. Pruning is opportunistic: it runs when a new host
+# is first seen and only removes entries whose interval has elapsed and whose lock
+# is free, so the map can legitimately exceed this while many hosts are in flight.
+# It is not a hard cap.
+_SOFT_HOST_LIMIT = 512
 
 
 def normalize_host(host: str | None) -> str:
-    return (host or "").strip().lower()
+    """Lowercase, trim, and drop a trailing DNS root dot.
+
+    ``justice.gov.`` and ``justice.gov`` are the same host and must share one
+    limit, or a trailing dot would silently halve the interval.
+    """
+    host = (host or "").strip().lower()
+    if len(host) > 1 and host.endswith("."):
+        host = host.rstrip(".")
+    return host
+
+
+def _validate_interval(seconds: float, label: str) -> float:
+    """Intervals must be real, finite and non-negative."""
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} interval must be a number, got {seconds!r}") from exc
+    if not math.isfinite(value):
+        raise ValueError(f"{label} interval must be finite, got {value!r}")
+    if value < 0:
+        raise ValueError(f"{label} interval must be >= 0, got {value!r}")
+    return value
 
 
 class HostRateLimiter:
@@ -50,8 +78,11 @@ class HostRateLimiter:
         monotonic: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
-        self._default = default_interval
-        self._intervals = dict(intervals) if intervals is not None else dict(HOST_INTERVAL_SECONDS)
+        self._default = _validate_interval(default_interval, "default")
+        raw = dict(intervals) if intervals is not None else dict(HOST_INTERVAL_SECONDS)
+        self._intervals = {
+            normalize_host(h): _validate_interval(v, h) for h, v in raw.items()
+        }
         self._monotonic = monotonic
         self._sleep = sleep
         self._locks: dict[str, asyncio.Lock] = {}
@@ -61,7 +92,8 @@ class HostRateLimiter:
         return self._intervals.get(normalize_host(host), self._default)
 
     def set_interval(self, host: str, seconds: float) -> None:
-        self._intervals[normalize_host(host)] = seconds
+        key = normalize_host(host)
+        self._intervals[key] = _validate_interval(seconds, key)
 
     def _lock_for(self, host: str) -> asyncio.Lock:
         # No await between the check and the insert, so this is atomic under
@@ -73,7 +105,8 @@ class HostRateLimiter:
         return lock
 
     def _prune(self) -> None:
-        if len(self._locks) <= _MAX_TRACKED_HOSTS:
+        """Opportunistic cleanup — best effort, not a hard bound (see module note)."""
+        if len(self._locks) <= _SOFT_HOST_LIMIT:
             return
         now = self._monotonic()
         stale = [h for h, deadline in self._next_allowed.items()

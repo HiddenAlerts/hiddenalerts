@@ -65,6 +65,15 @@ class UnsupportedDocument(ContentTypeMismatch):
     """
 
 
+class EmptyContent(SourceFetchError):
+    """A 2xx response with nothing usable in it.
+
+    Covers a missing or whitespace-only body, and an article page whose extracted
+    text is empty. A valid but empty RSS feed is *not* this: that document parses
+    fine and legitimately has zero entries.
+    """
+
+
 class RedirectLoop(SourceFetchError):
     """The redirect chain revisited a URL."""
 

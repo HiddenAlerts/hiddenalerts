@@ -30,7 +30,7 @@ _CONCLUSIVE = (
     ("akamai_reference", re.compile(r"Reference&#32;&#35;\d|akamai\.net/errorpage", re.I)),
     ("cloudflare_challenge", re.compile(r"cf-browser-verification|cf_chl_|cf-challenge", re.I)),
     ("cloudflare_wait", re.compile(r"Checking if the site connection is secure", re.I)),
-    ("captcha_widget", re.compile(r"g-recaptcha[\"'\s>]|data-sitekey|h-captcha[\"'\s>]|challenge-form", re.I)),
+    ("challenge_form", re.compile(r"challenge-form|captcha-delivery|/cdn-cgi/challenge-platform", re.I)),
 )
 
 # Weaker hints. Any one of these can appear on a legitimate page, so a challenge
@@ -41,6 +41,9 @@ _CORROBORATING = (
     ("access_denied", re.compile(r"access denied|request unsuccessful|you don'?t have permission to access", re.I)),
     ("verification_wording", re.compile(r"verify(?:ing)?\s+you\s+are\s+human|security\s+check|please\s+wait\s+while\s+we\s+verify", re.I)),
     ("bot_wording", re.compile(r"automated\s+access|unusual\s+traffic|bot\s+detection", re.I)),
+    # A widget alone is not proof: healthy pages embed reCAPTCHA in contact and
+    # feedback forms. It only counts alongside a second signal on a small body.
+    ("captcha_widget", re.compile(r"g-recaptcha[\"'\s>]|data-sitekey|h-captcha[\"'\s>]", re.I)),
 )
 
 _MIN_CORROBORATING = 2
@@ -59,16 +62,21 @@ class ChallengeVerdict:
         return self.is_challenge
 
 
-def classify_challenge(body: str, *, content_type: str = "") -> ChallengeVerdict:
+def classify_challenge(
+    body: str, *, content_type: str = "", body_kind: "BodyKind | None" = None
+) -> ChallengeVerdict:
     """Decide whether ``body`` is an anti-bot verification page.
 
-    Only the first 30 KB is scanned; verification shells are tiny and this bounds
-    the cost on large articles.
+    Keyed on what the body *is*, not on what the server said it is: an
+    interstitial served as ``application/xml`` is still an interstitial. Only the
+    first 30 KB is scanned; verification shells are tiny and this bounds the cost
+    on large articles.
     """
     if not body:
         return ChallengeVerdict(False, ())
-    if content_type and _base_type(content_type) not in _HTML_TYPES:
-        # XML/JSON payloads are not interstitials; markers there are content.
+    kind = body_kind if body_kind is not None else sniff_body_kind(body)
+    if kind is not BodyKind.HTML:
+        # Genuine XML/JSON payloads are content, not interstitials.
         return ChallengeVerdict(False, ())
 
     head = body[:30_000]
@@ -127,6 +135,58 @@ class AcceptPolicy(Enum):
             AcceptPolicy.ARTICLE: _HTML_TYPES | _TEXT_TYPES,
             AcceptPolicy.ANY_TEXT: _HTML_TYPES | _FEED_TYPES | _JSON_TYPES | _TEXT_TYPES,
         }[self]
+
+
+class BodyKind(Enum):
+    """What a response body actually looks like, independent of its headers."""
+
+    HTML = "html"
+    XML = "xml"
+    JSON = "json"
+    BINARY = "binary"
+    EMPTY = "empty"
+    UNKNOWN_TEXT = "unknown_text"
+
+
+_XML_PROLOGUE = re.compile(r"^\s*<\?xml|^\s*<(rss|feed|rdf:RDF)\b", re.I)
+_HTML_PROLOGUE = re.compile(r"^\s*<!doctype\s+html|^\s*<html\b", re.I)
+_HTML_ANYWHERE = re.compile(r"<html\b|<head\b|<body\b|<!doctype\s+html", re.I)
+
+
+def sniff_body_kind(body: str, raw: bytes = b"") -> BodyKind:
+    """Classify a body by inspection. Deliberately small — not a MIME framework."""
+    if raw and any(raw.startswith(sig) for sig in _BINARY_SIGNATURES):
+        return BodyKind.BINARY
+    if not body or not body.strip():
+        return BodyKind.EMPTY
+    head = body[:4096]
+    # XML first: an XML document may legitimately mention <html> in content.
+    if _XML_PROLOGUE.search(head):
+        return BodyKind.XML
+    if _HTML_PROLOGUE.search(head) or _HTML_ANYWHERE.search(head):
+        return BodyKind.HTML
+    stripped = body.lstrip()
+    if stripped[:1] in ("{", "["):
+        return BodyKind.JSON
+    if stripped.startswith("<"):
+        return BodyKind.XML
+    return BodyKind.UNKNOWN_TEXT
+
+
+_KIND_TO_TYPES = {
+    BodyKind.HTML: _HTML_TYPES,
+    BodyKind.XML: _FEED_TYPES,
+    BodyKind.JSON: _JSON_TYPES,
+    BodyKind.UNKNOWN_TEXT: _TEXT_TYPES,
+}
+
+
+def body_kind_allowed(kind: BodyKind, policy: AcceptPolicy) -> bool:
+    """True when a sniffed body kind is compatible with the policy."""
+    types = _KIND_TO_TYPES.get(kind)
+    if types is None:
+        return False
+    return bool(types & policy.accepted)
 
 
 def _base_type(content_type: str) -> str:

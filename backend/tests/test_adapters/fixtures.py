@@ -76,3 +76,47 @@ ORDINARY_HTML_LISTING = (
 
 # Minimal but valid PDF bytes, for the mislabelled-content-type case.
 PDF_BYTES = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
+
+# Healthy article that embeds a reCAPTCHA widget in its footer contact form.
+# A widget alone must never mark a real page as blocked.
+ARTICLE_WITH_FOOTER_RECAPTCHA = (
+    "<!DOCTYPE html><html><head><title>Grant Fraud Indictment</title></head><body>"
+    "<article><p>A federal grand jury returned an indictment charging the defendant "
+    "with grant fraud. " + ("Further procedural detail follows in the release. " * 60)
+    + "</p></article>"
+    '<footer><form action="/contact"><div class="g-recaptcha" '
+    'data-sitekey="6LcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"></div>'
+    "<button>Send</button></form></footer></body></html>"
+)
+
+# A genuine captcha interstitial: small, widget plus verification wording.
+CAPTCHA_CHALLENGE = (
+    "<!DOCTYPE html><html><head><title>Security check</title></head><body>"
+    "<h1>Please verify you are human</h1>"
+    '<div class="g-recaptcha" data-sitekey="6LcXXXX"></div>'
+    "</body></html>"
+)
+
+# Cloudflare-style challenge returned with HTTP 403.
+CLOUDFLARE_CHALLENGE = (
+    "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>"
+    '<div class="cf-browser-verification cf-im-under-attack">'
+    "<noscript>Please enable JavaScript and cookies to continue.</noscript>"
+    "</div><p>Checking if the site connection is secure</p></body></html>"
+)
+
+# Valid RSS with zero entries — an empty feed is NOT an empty response.
+EMPTY_RSS_FEED = (
+    '<?xml version="1.0" encoding="utf-8"?><rss version="2.0"><channel>'
+    "<title>News Blog</title><link>https://example.test/</link>"
+    "<description>No items at present.</description></channel></rss>"
+)
+
+# HTML whose extracted text is empty once scripts/styles/chrome are stripped.
+ARTICLE_WITH_NO_TEXT = (
+    "<!DOCTYPE html><html><head><title></title>"
+    "<style>body{color:red}</style></head>"
+    '<body><nav>Home About Contact</nav><div id="root"></div>'
+    '<script>window.__DATA__={};renderApp();</script>'
+    "<footer>All rights reserved</footer></body></html>"
+)

@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import logging
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +16,8 @@ from pydantic import BaseModel
 from app.sources.host_limiter import host_limiter, normalize_host
 from app.sources.http_errors import (
     ChallengeDetected,
+    EmptyContent,
+    SourceFetchError,
     ContentTypeMismatch,
     PermanentFetchError,
     RateLimitedError,
@@ -26,9 +29,12 @@ from app.sources.http_errors import (
 )
 from app.sources.response_policy import (
     AcceptPolicy,
+    BodyKind,
+    body_kind_allowed,
     classify_challenge,
     content_type_allowed,
     is_unsupported_document,
+    sniff_body_kind,
 )
 
 log = logging.getLogger(__name__)
@@ -40,6 +46,12 @@ _ALLOWED_SCHEMES = frozenset({"http", "https"})
 # Never replayed to a different host on a redirect.
 _SENSITIVE_HEADERS = frozenset({"authorization", "cookie", "proxy-authorization", "x-api-key"})
 _MAX_RETRY_AFTER_SECONDS = 30.0
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+# Outcomes no alternative fingerprint or browser can improve on.
+_CONCLUSIVE_ERRORS = (
+    ChallengeDetected, UnsupportedDocument, ContentTypeMismatch, EmptyContent,
+    RedirectLoop, TooManyRedirects, UnsupportedRedirectScheme, RateLimitedError,
+)
 
 # Tier 1: Browser-like UA — works for most sites
 _BROWSER_HEADERS = {
@@ -76,8 +88,9 @@ class RawItemStub(BaseModel):
     """Lightweight descriptor for a discovered article — no full content yet.
 
     Stage 1 of the pipeline: adapters return stubs (just URL + metadata) so the
-    collector can pre-filter by URL hash and publication date before spending HTTP
-    calls on full article fetches.
+    collector can pre-filter by normalized URL hash before spending HTTP calls on
+    full article fetches. ``published_at`` is stored for ordering and health
+    reporting; it never gates ingestion.
     """
 
     source_name: str
@@ -107,32 +120,6 @@ def extract_text_from_html(html: str) -> str:
     return " ".join(text.split())
 
 
-def _is_bot_challenge(html: str) -> bool:
-    """Detect bot-protection challenge pages that return HTTP 200 but no real content.
-
-    Akamai, Cloudflare, and similar CDNs sometimes serve a JS challenge or interstitial
-    page with a 200 status code. These pages are tiny (< 10 KB) and contain telltale
-    markers. When detected, the caller should escalate to Playwright so the challenge
-    can be rendered and bypassed.
-    """
-    if len(html) > 15_000:
-        return False  # Real content pages are large — skip the check
-    markers = (
-        "akamai-privacy",
-        "_cdn.akam.net",
-        "AkamaiGHost",
-        "cf-browser-verification",
-        "Just a moment",
-        "Enable JavaScript and cookies",
-        "Please enable cookies",
-        "Checking if the site connection is secure",
-        "DDoS protection by",
-        "Ray ID",
-    )
-    lower = html.lower()
-    return any(m.lower() in lower for m in markers)
-
-
 @dataclass
 class FetchResult:
     """Structured outcome of a successful fetch."""
@@ -143,6 +130,7 @@ class FetchResult:
     content_type: str
     text: str
     redirects: int = 0
+    #: Distinct hosts touched, in first-seen order — not one entry per hop.
     hosts: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -169,21 +157,18 @@ def _retry_after_seconds(value: str | None) -> float | None:
         return None
 
 
-def _sync_requests_get(url: str, headers: dict, timeout: float) -> tuple[int, str, str, str]:
+def _sync_requests_get(url: str, headers: dict, timeout: float) -> tuple[int, dict, str, bytes]:
     """One synchronous request with redirects disabled.
 
-    Returns (status, content_type, body, location). Runs in a thread pool; the
-    caller owns redirect following and rate limiting.
+    Returns (status, response headers, decoded text, raw bytes). The raw bytes are
+    preserved so magic-byte detection works in this tier too, and the full header
+    map is preserved so Retry-After and Location survive. Runs in a thread pool;
+    the caller owns redirect following and rate limiting.
     """
-    session = _requests.Session()
-    session.headers.update(headers)
-    resp = session.get(url, timeout=timeout, allow_redirects=False)
-    return (
-        resp.status_code,
-        resp.headers.get("content-type", ""),
-        resp.text,
-        resp.headers.get("location", ""),
-    )
+    with _requests.Session() as session:
+        session.headers.update(headers)
+        resp = session.get(url, timeout=timeout, allow_redirects=False)
+        return resp.status_code, dict(resp.headers), resp.text, resp.content
 
 
 def _safe_url(url: str) -> str:
@@ -192,37 +177,95 @@ def _safe_url(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}{parts.path}"
 
 
-def _validate_response(
-    url: str, status: int, content_type: str, body: str, raw: bytes, policy: AcceptPolicy
+def _reject_challenge_or_binary(
+    url: str, status: int, content_type: str, body: str, raw: bytes,
+    kind: BodyKind, policy: AcceptPolicy,
 ) -> None:
-    """Raise the right typed error for a 2xx response we cannot use."""
-    if is_unsupported_document(content_type, raw):
+    """Checks that apply to *any* status, before ordinary error handling.
+
+    A challenge is a challenge whether the CDN labels it 200 or 403, and a PDF is
+    a PDF regardless of the declared type — so both are settled here rather than
+    being mistaken for a retryable status or an acceptable document.
+    """
+    if kind is BodyKind.BINARY or is_unsupported_document(content_type, raw):
         raise UnsupportedDocument(
             "unsupported document type", url=url, status=status,
             content_type=content_type, accepted=tuple(sorted(policy.accepted)),
         )
 
-    verdict = classify_challenge(body, content_type=content_type)
+    verdict = classify_challenge(body, content_type=content_type, body_kind=kind)
     if verdict:
         raise ChallengeDetected(
             "anti-bot verification page", url=url, status=status, signals=verdict.signals
         )
 
-    if not content_type_allowed(content_type, policy):
+
+def _validate_success_body(
+    url: str, status: int, content_type: str, body: str, kind: BodyKind, policy: AcceptPolicy
+) -> None:
+    """Checks that only make sense once the response is known to be a 2xx."""
+    if kind is BodyKind.EMPTY:
+        raise EmptyContent("empty response body", url=url, status=status)
+
+    declared = content_type_allowed(content_type, policy)
+    if not declared:
         raise ContentTypeMismatch(
             "unexpected content type", url=url, status=status,
             content_type=content_type, accepted=tuple(sorted(policy.accepted)),
         )
+    # A declared type we accept can still be contradicted by the body itself, and
+    # a missing type has nothing to check but the body.
+    if not body_kind_allowed(kind, policy):
+        raise ContentTypeMismatch(
+            f"body looks like {kind.value}", url=url, status=status,
+            content_type=content_type, accepted=tuple(sorted(policy.accepted)),
+        )
+
+
+def _origin(url: str) -> tuple[str, str, int]:
+    """(scheme, host, effective port) — the identity that decides header reuse."""
+    parts = urlsplit(url)
+    scheme = (parts.scheme or "").lower()
+    port = parts.port or _DEFAULT_PORTS.get(scheme, 0)
+    return scheme, normalize_host(parts.hostname), port
+
+
+def _is_unsafe_redirect_target(url: str) -> str | None:
+    """Reason a redirect target must not be followed, or None if it is fine.
+
+    Blocks credentials in the URL and literal internal addresses. This is a
+    literal-address check only — a public hostname that *resolves* to a private
+    address is not caught, so full DNS-rebinding protection is NOT implemented.
+    """
+    parts = urlsplit(url)
+    if parts.username or parts.password or "@" in (parts.netloc.split("]")[-1]):
+        return "userinfo in redirect target"
+    host = normalize_host(parts.hostname)
+    if not host:
+        return "redirect target has no host"
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".home.arpa")):
+        return f"internal hostname {host}"
+    try:
+        addr = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return None
+    if (addr.is_private or addr.is_loopback or addr.is_link_local
+            or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
+        return f"non-public address {host}"
+    return None
 
 
 def _resolve_redirect(current_url: str, location: str) -> str:
-    """Resolve a Location header and reject anything not http(s)."""
+    """Resolve a Location header and reject schemes and targets we will not follow."""
     target = urljoin(current_url, (location or "").strip())
     scheme = urlsplit(target).scheme.lower()
     if scheme not in _ALLOWED_SCHEMES:
         raise UnsupportedRedirectScheme(
             f"refusing redirect to {scheme or 'relative'} scheme", url=current_url
         )
+    reason = _is_unsafe_redirect_target(target)
+    if reason:
+        raise UnsupportedRedirectScheme(f"refusing redirect: {reason}", url=current_url)
     return target
 
 
@@ -262,22 +305,38 @@ async def _follow(
         content_type = lowered.get("content-type", "")
         location = lowered.get("location", "")
 
-        if status in _REDIRECT_STATUSES and location:
+        if status in _REDIRECT_STATUSES:
+            if not location:
+                raise PermanentFetchError(
+                    f"HTTP {status} redirect without a Location header",
+                    url=current, status=status,
+                )
             if hop >= MAX_REDIRECTS:
                 raise TooManyRedirects(
                     f"exceeded {MAX_REDIRECTS} redirects", url=current, status=status
                 )
             target = _resolve_redirect(current, location)
             next_host = normalize_host(urlsplit(target).hostname)
-            cross_host = next_host != host
-            if cross_host:
+            if _origin(target) != _origin(current):
                 log.debug(
-                    "%s: redirect %s → %s crosses host, re-applying host policy",
+                    "%s: redirect %s → %s crosses origin, re-applying host policy",
                     source_label, host, next_host,
                 )
                 current_headers = safe_redirect_headers(current_headers, cross_host=True)
             current = target
             continue
+
+        if 300 <= status < 400:
+            # 304/305/306 and friends: we issue no conditional requests, so any
+            # other 3xx here is an upstream contract we do not implement.
+            raise PermanentFetchError(
+                f"unexpected HTTP {status} redirect status", url=current, status=status
+            )
+
+        # Challenge and binary checks run BEFORE status handling: a CDN may serve
+        # an interstitial as 200 or 403, and either way it is conclusive.
+        kind = sniff_body_kind(body, raw)
+        _reject_challenge_or_binary(current, status, content_type, body, raw, kind, policy)
 
         if status == 429:
             raise RateLimitedError(
@@ -289,7 +348,7 @@ async def _follow(
         if status >= 400:
             raise PermanentFetchError(f"HTTP {status}", url=current, status=status)
 
-        _validate_response(current, status, content_type, body, raw, policy)
+        _validate_success_body(current, status, content_type, body, kind, policy)
         return FetchResult(
             url=url, final_url=current, status=status, content_type=content_type,
             text=body, redirects=hop, hosts=tuple(hosts),
@@ -298,12 +357,12 @@ async def _follow(
     raise TooManyRedirects(f"exceeded {MAX_REDIRECTS} redirects", url=current)
 
 
-async def _playwright_get(url: str, timeout: float, *, limiter=None) -> str:
-    """Headless Chromium fetch via Playwright. Last-resort fallback.
+async def _playwright_get(url: str, timeout: float, *, limiter=None) -> tuple[int | None, str, str]:
+    """Headless Chromium fetch. Returns (status, final_url, html).
 
     The host limiter is applied to the initial navigation only. Redirects and
     sub-resources fetched inside the browser cannot be spaced individually
-    without request interception, which this slice deliberately does not add — so
+    without request interception, which is deliberately not implemented — so
     browser mode does not carry the same per-hop guarantee as the direct tiers.
     """
     await (limiter or host_limiter).acquire(normalize_host(urlsplit(url).hostname))
@@ -320,9 +379,12 @@ async def _playwright_get(url: str, timeout: float, *, limiter=None) -> str:
                 extra_http_headers={"Accept-Language": "en-US,en;q=0.5"},
             )
             page = await context.new_page()
-            await page.goto(url, timeout=int(timeout * 1000), wait_until="domcontentloaded")
-            content = await page.content()
-            return content
+            response = await page.goto(
+                url, timeout=int(timeout * 1000), wait_until="domcontentloaded"
+            )
+            status = response.status if response is not None else None
+            final_url = page.url or url
+            return status, final_url, await page.content()
         finally:
             await browser.close()
 
@@ -354,7 +416,14 @@ class BaseSourceAdapter(ABC):
         non-readable page is never mistaken for an article with no text.
         """
         result = await self.fetch(url, accept=AcceptPolicy.ARTICLE)
-        return extract_text_from_html(result.text), result.text
+        text = extract_text_from_html(result.text)
+        if not text.strip():
+            # Nothing readable survived extraction. Raising lets the collector use
+            # the feed summary instead of storing an article with no text.
+            raise EmptyContent(
+                "article has no extractable text", url=result.final_url, status=result.status
+            )
+        return text, result.text
 
     async def fetch(
         self,
@@ -389,11 +458,10 @@ class BaseSourceAdapter(ABC):
                 return r.status_code, r.headers, r.text, r.content
 
         async def _requests_send(target: str, headers: dict):
-            loop = asyncio.get_event_loop()
-            status, ctype, body, location = await loop.run_in_executor(
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
                 _THREAD_POOL, _sync_requests_get, target, headers, timeout,
             )
-            return status, {"content-type": ctype, "location": location}, body, body.encode("utf-8", "replace")
 
         got_403 = False
         last_exc: Exception | None = None
@@ -442,6 +510,10 @@ class BaseSourceAdapter(ABC):
                 f"failed after {retries} attempt(s)", url=url
             ) from last_exc
 
+        # Only an ordinary, non-challenge 403 reaches the fallback tiers. Every
+        # conclusive outcome below is re-raised untouched: a different HTTP
+        # fingerprint or a browser cannot change a PDF, a redirect loop, a rate
+        # limit or a verification page into a usable document.
         for tier, headers in (("2a", _BOT_HEADERS_FULL), ("2b", _BOT_HEADERS_MINIMAL)):
             log.debug("%s: tier %s for %s", label, tier, _safe_url(url))
             try:
@@ -449,22 +521,56 @@ class BaseSourceAdapter(ABC):
                     url, policy=accept, headers=headers, timeout=timeout,
                     send=_requests_send, limiter=limiter, source_label=label,
                 )
-            except (ChallengeDetected, UnsupportedDocument, ContentTypeMismatch):
+            except _CONCLUSIVE_ERRORS:
                 raise
+            except PermanentFetchError as exc:
+                if exc.status != 403:
+                    raise
+                last_exc = exc
             except Exception as exc:
                 last_exc = exc
 
         log.debug("%s: escalating %s to browser rendering", label, _safe_url(url))
         try:
-            text = await _playwright_get(url, timeout=60.0, limiter=limiter)
-            return FetchResult(
-                url=url, final_url=url, status=200, content_type="text/html",
-                text=text, redirects=0, hosts=(normalize_host(urlsplit(url).hostname),),
-            )
+            return await self._browser_fetch(url, accept, limiter, label)
+        except SourceFetchError:
+            # The browser is the last tier, and it classified the response — that
+            # verdict is the answer, not something to flatten into a generic error.
+            raise
         except Exception as exc:
             last_exc = exc
 
         raise PermanentFetchError("all fetch tiers failed", url=url) from last_exc
+
+    async def _browser_fetch(self, url, accept, limiter, label) -> FetchResult:
+        """Render with a browser and validate the result like any other response.
+
+        The rendered page gets the same treatment as a direct fetch: a challenge,
+        an error status, an unsupported document, an unacceptable content kind or
+        an empty page are all rejected rather than reported as a success.
+        """
+        status, final_url, html = await _playwright_get(url, timeout=60.0, limiter=limiter)
+        kind = sniff_body_kind(html)
+        effective_status = status if status is not None else 200
+
+        _reject_challenge_or_binary(
+            final_url, effective_status, "", html, b"", kind, accept
+        )
+        if status is not None and status >= 400:
+            if status in _RETRY_STATUSES:
+                raise TransientFetchError(
+                    "browser navigation failed", url=final_url, status=status
+                )
+            raise PermanentFetchError(
+                f"browser navigation returned HTTP {status}", url=final_url, status=status
+            )
+        _validate_success_body(final_url, effective_status, "", html, kind, accept)
+
+        return FetchResult(
+            url=url, final_url=final_url, status=effective_status,
+            content_type="text/html", text=html, redirects=0,
+            hosts=(normalize_host(urlsplit(final_url).hostname),),
+        )
 
     async def _http_get(self, url: str, retries: int = 3, timeout: float = 30.0) -> str:
         """Body-only wrapper over :meth:`fetch`, kept for existing call sites."""
