@@ -33,8 +33,8 @@ export type FeaturedBriefCardProps = {
 
 /**
  * Large hero card highlighting the featured intelligence brief.
- * The cover sits in its own frame (object-contain) so CMS infographics
- * are not cropped into an unrecognizable strip behind the title.
+ * Heading sits above the cover; the cover uses object-contain so CMS
+ * infographics are not cropped into an unrecognizable strip.
  */
 export const FeaturedBriefCard: FC<FeaturedBriefCardProps> = ({
   brief,
@@ -47,24 +47,7 @@ export const FeaturedBriefCard: FC<FeaturedBriefCardProps> = ({
     )}
     aria-labelledby="featured-brief-heading"
   >
-    {brief.featuredImage ? (
-      <div className="bg-surface-muted relative flex max-h-[22rem] items-center justify-center overflow-hidden sm:max-h-[26rem]">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={brief.featuredImage}
-          alt=""
-          className="max-h-[22rem] w-full object-contain object-center sm:max-h-[26rem]"
-        />
-      </div>
-    ) : (
-      <BriefCover
-        theme={brief.coverTheme}
-        iconSizeClassName="size-48"
-        className="aspect-[16/9] max-h-[22rem] w-full sm:max-h-[26rem]"
-      />
-    )}
-
-    <div className="px-5 py-5 sm:px-7 sm:py-6">
+    <div className="px-5 pt-5 pb-4 sm:px-7 sm:pt-6 sm:pb-5">
       <div className="flex items-start justify-between gap-4">
         <p className="text-danger inline-flex items-center gap-1.5 text-xs font-bold tracking-wide uppercase">
           <ShieldAlert className="size-4" aria-hidden />
@@ -90,6 +73,23 @@ export const FeaturedBriefCard: FC<FeaturedBriefCardProps> = ({
         </h2>
       </Link>
     </div>
+
+    {brief.featuredImage ? (
+      <div className="bg-surface-muted relative flex max-h-[22rem] items-center justify-center overflow-hidden sm:max-h-[26rem]">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={brief.featuredImage}
+          alt=""
+          className="max-h-[22rem] w-full object-contain object-center sm:max-h-[26rem]"
+        />
+      </div>
+    ) : (
+      <BriefCover
+        theme={brief.coverTheme}
+        iconSizeClassName="size-48"
+        className="aspect-[16/9] max-h-[22rem] w-full sm:max-h-[26rem]"
+      />
+    )}
 
     <div className="border-border grid grid-cols-2 gap-4 border-t px-5 py-4 sm:px-7 lg:grid-cols-4">
       <MetaItem
