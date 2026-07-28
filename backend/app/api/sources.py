@@ -17,7 +17,7 @@ from app.models.source import Source
 from app.models.user import User
 from app.schemas.run_log import RunLogRead
 from app.schemas.source import SourceRead, SourceUpdate
-from app.services.collection_guard import claim_source_run, release_source_run
+from app.services.collection_guard import is_source_collecting
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/sources", tags=["sources"])
@@ -96,7 +96,10 @@ async def trigger_source(
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    if not await claim_source_run(source_id):
+    # Advisory check so the caller gets 409 on the response rather than silently
+    # queueing a no-op. The claim itself is taken by the collector, which stays
+    # authoritative if a run starts between this check and the background task.
+    if is_source_collecting(source_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -111,8 +114,6 @@ async def trigger_source(
             await trigger_source_by_id(source_id)
         except Exception:
             log.exception("Manual collection failed for source %s", source_id)
-        finally:
-            await release_source_run(source_id)
 
     background_tasks.add_task(_run)
     return {"message": f"Collection triggered for source '{source.name}'", "source_id": source_id}

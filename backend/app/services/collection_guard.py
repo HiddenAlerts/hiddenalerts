@@ -1,9 +1,12 @@
-"""Guard preventing overlapping manual collection runs for the same source.
+"""Guard preventing overlapping collection runs for the same source.
 
-Process-local: the claim set is not shared across workers or containers.
-Coordination with scheduled collection runs is not yet implemented — the
-scheduled job calls ``run_all_sources`` without claiming a slot, so a manual
-trigger can still overlap it.
+Claimed by ``app.pipeline.collector.collect_source``, the single entry point for
+both scheduled and manual collection, so the two cannot overlap on one source.
+Different sources are independent.
+
+Process-local: the claim set is not shared across workers or containers, which is
+sufficient for the current single-worker deployment. A multi-worker or multi-host
+deployment would need a PostgreSQL advisory lock or a database lease instead.
 """
 import asyncio
 

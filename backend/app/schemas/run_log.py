@@ -12,6 +12,9 @@ class RunLogRead(BaseModel):
     items_fetched: int
     items_new: int
     items_duplicate: int
+    items_skipped_url: int
+    items_skipped_content: int
+    items_skipped_invalid: int
     error_message: str | None
 
     model_config = {"from_attributes": True}

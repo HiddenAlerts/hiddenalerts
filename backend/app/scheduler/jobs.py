@@ -76,14 +76,11 @@ async def _process_new_alerts_job() -> None:
 
 
 async def trigger_source_by_id(source_id: int) -> None:
-    """Manually trigger a collection for a single source (used by API endpoint)."""
-    from app.models.source import Source
-    from sqlalchemy import select
+    """Manually trigger a collection for a single source (used by API endpoint).
 
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Source).where(Source.id == source_id))
-        source = result.scalar_one_or_none()
-        if source is None:
-            raise ValueError(f"Source {source_id} not found")
-        from app.pipeline.collector import run_source
-        await run_source(source, session)
+    Goes through the same claimed entry point as scheduled collection, so a manual
+    trigger can never run alongside a scheduled run of the same source.
+    """
+    from app.pipeline.collector import collect_source
+
+    await collect_source(source_id)
