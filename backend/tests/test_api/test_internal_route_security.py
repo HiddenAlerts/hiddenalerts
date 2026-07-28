@@ -102,11 +102,14 @@ def no_op_collection(monkeypatch):
     """
     calls: list[int] = []
 
-    async def _fake_trigger(source_id: int) -> None:
+    async def _fake_collect(source_id: int):
         calls.append(source_id)
+        await collection_guard.release_source_run(source_id)
+        return None
 
+    # The endpoint binds this name at import time, so patch it where it is used.
     monkeypatch.setattr(
-        "app.scheduler.jobs.trigger_source_by_id", _fake_trigger, raising=True
+        "app.api.sources.collect_reserved_source", _fake_collect, raising=True
     )
     return calls
 

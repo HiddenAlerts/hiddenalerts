@@ -12,6 +12,7 @@ from app.models.source import Source
 from app.pipeline.deduplicator import get_known_url_hashes, is_content_duplicate
 from app.pipeline.normalizer import compute_content_hash, compute_url_hash
 from app.services.collection_guard import claim_source_run, release_source_run
+from app.sources.base import RawItemStub
 from app.sources.registry import get_adapter
 
 log = logging.getLogger(__name__)
@@ -32,6 +33,11 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
 
     Callers must hold the source's collection claim — use :func:`collect_source`
     rather than calling this directly outside tests.
+
+    On a run that completes successfully the counters account for every fetched
+    stub: ``items_fetched == items_new + items_skipped_url + items_skipped_content
+    + items_skipped_invalid``. A run that fails part-way keeps whatever counts it
+    reached, so that identity does not hold for ``status='failed'`` rows.
     """
     run_log = RunLog(
         source_id=source.id,
@@ -60,11 +66,12 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
             return run_log
 
         # ── Pre-filter: URL hash, deduplicated within the batch ──────────────────
-        # Later stubs sharing a normalized URL with an earlier one are dropped here,
-        # so an upstream feed listing the same article twice stores it once.
-        batch: dict[str, object] = {}
+        # A feed listing the same article twice stores it once. The last stub for a
+        # normalized URL wins, matching the dict-comprehension this replaced, so the
+        # metadata a feed revises later in the document is the metadata kept.
+        batch: dict[str, RawItemStub] = {}
         for stub in stubs:
-            url = (getattr(stub, "item_url", "") or "").strip()
+            url = (stub.item_url or "").strip()
             if not url:
                 run_log.items_skipped_invalid += 1
                 log.debug("Source %s: stub with no URL discarded", source.id)
@@ -73,7 +80,6 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
             if url_hash in batch:
                 run_log.items_skipped_url += 1
                 log.debug("Source %s: repeated URL within batch: %s", source.id, url)
-                continue
             batch[url_hash] = stub
 
         known_hashes = await get_known_url_hashes(session, set(batch))
@@ -131,16 +137,19 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
                 fetched_at=datetime.utcnow(),
             )
 
-            session.add(raw_item)
             try:
+                # add() must happen inside the savepoint: begin_nested() flushes
+                # pending state before emitting SAVEPOINT, so an item added first
+                # would raise outside it and poison the outer transaction.
                 async with session.begin_nested():
+                    session.add(raw_item)
                     await session.flush()
                 run_log.items_new += 1
             except IntegrityError:
                 # The unique constraint on url_hash is the final safeguard against a
-                # concurrent writer. One loser must not abort the rest of the run.
+                # concurrent writer. The savepoint rolls back just this insert, so
+                # the run continues and everything already stored stays committed.
                 run_log.items_skipped_url += 1
-                session.expunge(raw_item)
                 log.info(
                     "Source %s: url_hash already present for %s (concurrent insert), skipping",
                     source.id,
@@ -181,18 +190,28 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
     return run_log
 
 
-async def collect_source(source_id: int) -> RunLog | None:
-    """Collect one source under its execution claim.
+async def reserve_source_collection(source_id: int) -> bool:
+    """Atomically reserve a source for collection.
 
-    The single entry point for scheduled and manual collection alike — it owns the
-    per-source claim, so no caller should acquire one itself. Returns ``None``
-    without creating a run log when a collection for this source is already in
-    flight, or when the source no longer exists.
+    For callers that must know the outcome before the work starts — the manual
+    trigger answers 202 or 409 on this. A successful reservation must be handed to
+    :func:`collect_reserved_source`, which releases it; if the caller cannot get
+    that far it must call :func:`release_source_collection` itself.
     """
-    if not await claim_source_run(source_id):
-        log.info("Source %s: collection already in progress, skipping this run", source_id)
-        return None
+    return await claim_source_run(source_id)
 
+
+async def release_source_collection(source_id: int) -> None:
+    """Release a reservation that never reached :func:`collect_reserved_source`."""
+    await release_source_run(source_id)
+
+
+async def collect_reserved_source(source_id: int) -> RunLog | None:
+    """Collect a source whose reservation the caller already holds.
+
+    Always releases the reservation, including on failure and cancellation.
+    Returns ``None`` without creating a run log if the source no longer exists.
+    """
     try:
         async with AsyncSessionLocal() as session:
             source = await session.get(Source, source_id)
@@ -202,6 +221,19 @@ async def collect_source(source_id: int) -> RunLog | None:
             return await run_source(source, session)
     finally:
         await release_source_run(source_id)
+
+
+async def collect_source(source_id: int) -> RunLog | None:
+    """Reserve and collect one source — the scheduler/internal entry point.
+
+    Returns ``None`` without creating a run log when a collection for this source
+    is already in flight, or when the source no longer exists.
+    """
+    if not await reserve_source_collection(source_id):
+        log.info("Source %s: collection already in progress, skipping this run", source_id)
+        return None
+
+    return await collect_reserved_source(source_id)
 
 
 async def run_all_sources() -> list[RunLog]:

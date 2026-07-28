@@ -15,10 +15,10 @@ _claim_lock = asyncio.Lock()
 
 
 async def claim_source_run(source_id: int) -> bool:
-    """Reserve the manual-collection slot for a source.
+    """Claim the collection slot for a source.
 
     Returns True when the slot was free and is now held by the caller, False when
-    a manual run for this source is already in flight. Callers that receive True
+    a collection for this source is already in flight. Callers that receive True
     must pair it with :func:`release_source_run`.
     """
     async with _claim_lock:
@@ -35,5 +35,5 @@ async def release_source_run(source_id: int) -> None:
 
 
 def is_source_collecting(source_id: int) -> bool:
-    """Return True while a manual collection run for this source is in flight."""
+    """Return True while a collection run for this source is in flight."""
     return source_id in _active_source_runs

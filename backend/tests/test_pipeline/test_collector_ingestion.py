@@ -249,6 +249,31 @@ async def test_repeated_url_in_one_batch_stores_one_item(db_session, source, mon
 
 
 @pytest.mark.asyncio
+async def test_last_stub_wins_for_a_repeated_url(db_session, source, monkeypatch):
+    """Matches the dict-comprehension this replaced: later metadata overwrites."""
+    url = "https://example.test/revised"
+    adapter = StubAdapter(
+        source,
+        [
+            _stub(url, title="Early title", published_at=datetime(2026, 1, 1, 8, 0)),
+            _stub(url, title="Corrected title", published_at=datetime(2026, 2, 2, 9, 0)),
+        ],
+    )
+    run = await _run(db_session, source, adapter, monkeypatch)
+
+    assert run.items_new == 1
+    assert run.items_skipped_url == 1
+
+    row = (
+        await db_session.execute(
+            select(RawItem.title, RawItem.published_at).where(RawItem.source_id == source.id)
+        )
+    ).one()
+    assert row.title == "Corrected title"
+    assert row.published_at == datetime(2026, 2, 2, 9, 0)
+
+
+@pytest.mark.asyncio
 async def test_equivalent_urls_in_one_batch_are_treated_as_duplicates(
     db_session, source, monkeypatch
 ):
@@ -305,6 +330,100 @@ async def test_stub_without_url_is_counted_invalid_not_duplicate(
     assert run.items_skipped_invalid == 1
     assert run.items_skipped_url == 0
     assert run.items_new == 1
+
+
+# ---------------------------------------------------------------------------
+# Unique-constraint race
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_unique_constraint_race_is_isolated_to_the_savepoint(
+    db_session, source, monkeypatch
+):
+    """A url_hash inserted by a racing writer must not poison the run.
+
+    The pre-filter is forced to report the conflicting URL as unseen, so the
+    insert reaches the database and trips ``uq_raw_items_url_hash`` exactly as a
+    concurrent writer would. With ``session.add()`` outside the savepoint the
+    flush happens before SAVEPOINT is emitted and the outer transaction dies,
+    taking the later item and the run log with it.
+    """
+    taken_url = "https://example.test/raced"
+    existing = RawItem(
+        source_id=source.id,
+        item_url=taken_url,
+        title="Inserted by the racing writer",
+        raw_text="Original body",
+        content_hash="pre-existing-content-hash",
+        url_hash=compute_url_hash(taken_url),
+        is_duplicate=False,
+        fetched_at=datetime.utcnow(),
+    )
+    db_session.add(existing)
+    await db_session.commit()
+
+    async def _no_known_hashes(session, hashes):
+        return set()
+
+    monkeypatch.setattr(collector, "get_known_url_hashes", _no_known_hashes)
+
+    adapter = StubAdapter(
+        source,
+        [_stub(taken_url, title="Racing loser"), _stub("https://example.test/after-race")],
+    )
+    run = await _run(db_session, source, adapter, monkeypatch)
+
+    # The conflict is counted, not fatal.
+    assert run.status == "success"
+    assert run.items_skipped_url == 1
+    # The outer transaction survived, so the later stub was still stored.
+    assert run.items_new == 1
+    stored = await _stored_urls(db_session, source)
+    assert "https://example.test/after-race" in stored
+    # The racing writer's row is untouched.
+    assert taken_url in stored
+    titles = (
+        await db_session.execute(
+            select(RawItem.title).where(RawItem.item_url == taken_url)
+        )
+    ).scalars().all()
+    assert titles == ["Inserted by the racing writer"]
+
+
+@pytest.mark.asyncio
+async def test_run_log_survives_a_unique_constraint_race(db_session, source, monkeypatch):
+    """The run log must still be committed and readable after a conflict."""
+    taken_url = "https://example.test/raced-runlog"
+    db_session.add(
+        RawItem(
+            source_id=source.id,
+            item_url=taken_url,
+            title="Existing",
+            raw_text="Body",
+            content_hash="another-content-hash",
+            url_hash=compute_url_hash(taken_url),
+            is_duplicate=False,
+            fetched_at=datetime.utcnow(),
+        )
+    )
+    await db_session.commit()
+
+    async def _no_known_hashes(session, hashes):
+        return set()
+
+    monkeypatch.setattr(collector, "get_known_url_hashes", _no_known_hashes)
+
+    run = await _run(
+        db_session, source, StubAdapter(source, [_stub(taken_url)]), monkeypatch
+    )
+
+    persisted = (
+        await db_session.execute(select(RunLog).where(RunLog.id == run.id))
+    ).scalar_one()
+    assert persisted.status == "success"
+    assert persisted.items_skipped_url == 1
+    assert persisted.run_finished_at is not None
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +587,77 @@ async def test_failed_run_records_status_and_message(db_session, source, monkeyp
 
     assert run.status == "failed"
     assert "feed exploded" in run.error_message
+
+
+@pytest.mark.asyncio
+async def test_failed_run_keeps_partial_counters(db_session, source, monkeypatch):
+    """A run that dies part-way is not expected to satisfy the complete-run identity."""
+
+    class HalfWay:
+        async def fetch_item_stubs(self):
+            return [_stub("https://example.test/p1"), _stub("https://example.test/p2")]
+
+        async def fetch_full_article(self, url):
+            if url.endswith("p2"):
+                raise KeyboardInterrupt("simulated hard failure mid-run")
+            return "Body one", "<p>one</p>"
+
+    monkeypatch.setattr(collector, "get_adapter", lambda s: HalfWay())
+    with pytest.raises(KeyboardInterrupt):
+        await collector.run_source(source, db_session)
+
+    run = (
+        await db_session.execute(
+            select(RunLog).where(RunLog.source_id == source.id).order_by(RunLog.id.desc())
+        )
+    ).scalars().first()
+    assert run.items_fetched == 2
+    assert run.items_new <= run.items_fetched
+    total = (
+        run.items_new
+        + run.items_skipped_url
+        + run.items_skipped_content
+        + run.items_skipped_invalid
+    )
+    assert total < run.items_fetched
+
+
+def test_run_log_schema_is_additive_and_backward_compatible():
+    """New counters are appended; existing field names and types are untouched."""
+    from app.schemas.run_log import RunLogRead
+
+    fields = list(RunLogRead.model_fields)
+    assert fields[:8] == [
+        "id",
+        "source_id",
+        "run_started_at",
+        "run_finished_at",
+        "status",
+        "items_fetched",
+        "items_new",
+        "items_duplicate",
+    ]
+    assert set(fields[8:]) == {
+        "items_skipped_url",
+        "items_skipped_content",
+        "items_skipped_invalid",
+        "error_message",
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_log_schema_serializes_historical_rows_as_zero(db_session, source):
+    from app.schemas.run_log import RunLogRead
+
+    run = RunLog(source_id=source.id, run_started_at=datetime.utcnow(), status="success")
+    db_session.add(run)
+    await db_session.commit()
+    await db_session.refresh(run)
+
+    payload = RunLogRead.model_validate(run).model_dump()
+    assert payload["items_skipped_url"] == 0
+    assert payload["items_skipped_content"] == 0
+    assert payload["items_skipped_invalid"] == 0
 
 
 @pytest.mark.asyncio
@@ -656,3 +846,145 @@ async def test_manual_trigger_goes_through_the_shared_boundary(monkeypatch):
     await jobs.trigger_source_by_id(4242)
 
     assert seen == [4242]
+
+
+# ---------------------------------------------------------------------------
+# Manual trigger reservation, through the API
+# ---------------------------------------------------------------------------
+
+
+async def _admin_headers(db_session) -> dict:
+    from app.auth import create_access_token, hash_password
+    from app.models.user import User
+
+    user = User(
+        email=f"admin_{uuid.uuid4().hex[:8]}@test.com",
+        password_hash=hash_password("pw"),
+        is_active=True,
+        role="admin",
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return {"Authorization": f"Bearer {create_access_token({'sub': str(user.id)})}"}
+
+
+async def _run_log_count(db_session, source_id: int) -> int:
+    return (
+        await db_session.execute(
+            select(func.count()).select_from(RunLog).where(RunLog.source_id == source_id)
+        )
+    ).scalar_one()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_manual_triggers_yield_one_202_and_one_409(
+    client, db_session, source, monkeypatch
+):
+    headers = await _admin_headers(db_session)
+    before = await _run_log_count(db_session, source.id)
+
+    in_collection = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[int] = []
+
+    async def _slow_run(src, session):
+        calls.append(src.id)
+        run = RunLog(
+            source_id=src.id,
+            run_started_at=datetime.utcnow(),
+            run_finished_at=datetime.utcnow(),
+            status="success",
+        )
+        session.add(run)
+        await session.commit()
+        in_collection.set()
+        await release.wait()
+        return run
+
+    monkeypatch.setattr(collector, "run_source", _slow_run)
+
+    url = f"/api/v1/sources/{source.id}/trigger"
+
+    async def _first():
+        return await client.post(url, headers=headers)
+
+    async def _second():
+        # Fire only once the first run holds the reservation, so the overlap is
+        # deterministic rather than timing-dependent.
+        await in_collection.wait()
+        response = await client.post(url, headers=headers)
+        release.set()
+        return response
+
+    first, second = await asyncio.gather(_first(), _second())
+
+    assert sorted([first.status_code, second.status_code]) == [202, 409]
+    conflict = first if first.status_code == 409 else second
+    assert "already in progress" in conflict.json()["detail"]
+
+    assert calls == [source.id]
+    assert await _run_log_count(db_session, source.id) == before + 1
+    assert not collection_guard.is_source_collecting(source.id)
+
+
+@pytest.mark.asyncio
+async def test_manual_trigger_releases_reservation_after_background_failure(
+    client, db_session, source, monkeypatch
+):
+    headers = await _admin_headers(db_session)
+
+    async def _explode(src, session):
+        raise RuntimeError("collection blew up")
+
+    monkeypatch.setattr(collector, "run_source", _explode)
+
+    response = await client.post(
+        f"/api/v1/sources/{source.id}/trigger", headers=headers
+    )
+
+    assert response.status_code == 202
+    assert not collection_guard.is_source_collecting(source.id)
+
+
+@pytest.mark.asyncio
+async def test_manual_trigger_releases_reservation_when_queueing_fails(
+    client, db_session, source, monkeypatch
+):
+    """A reservation must not leak if the background task is never registered."""
+    from fastapi import BackgroundTasks
+
+    def _refuse(self, func, *args, **kwargs):
+        raise RuntimeError("cannot queue")
+
+    monkeypatch.setattr(BackgroundTasks, "add_task", _refuse)
+    headers = await _admin_headers(db_session)
+
+    with pytest.raises(RuntimeError):
+        await client.post(f"/api/v1/sources/{source.id}/trigger", headers=headers)
+
+    assert not collection_guard.is_source_collecting(source.id)
+
+
+@pytest.mark.asyncio
+async def test_rejected_manual_trigger_creates_no_run_log(
+    client, db_session, source, monkeypatch
+):
+    headers = await _admin_headers(db_session)
+    before = await _run_log_count(db_session, source.id)
+
+    await collection_guard.claim_source_run(source.id)
+    response = await client.post(
+        f"/api/v1/sources/{source.id}/trigger", headers=headers
+    )
+
+    assert response.status_code == 409
+    assert await _run_log_count(db_session, source.id) == before
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_manual_trigger_reserves_nothing(client, db_session, source):
+    response = await client.post(f"/api/v1/sources/{source.id}/trigger")
+
+    assert response.status_code == 401
+    assert not collection_guard.is_source_collecting(source.id)

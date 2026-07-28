@@ -13,8 +13,6 @@ Revision ID: 0012
 Revises: 0011
 Create Date: 2026-07-28
 """
-from __future__ import annotations
-
 import sqlalchemy as sa
 from alembic import op
 
