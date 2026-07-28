@@ -1,7 +1,12 @@
 """Guard preventing overlapping collection runs for the same source.
 
-Claimed by ``app.pipeline.collector.collect_source``, the single entry point for
-both scheduled and manual collection, so the two cannot overlap on one source.
+Both collection paths in ``app.pipeline.collector`` claim through here, so a
+scheduled run and a manual one cannot overlap on the same source:
+
+* scheduled/internal — ``collect_source`` claims, collects, releases;
+* manual — ``reserve_source_collection`` claims so the API can answer 202 or 409,
+  then ``collect_reserved_source`` runs the collection and releases the claim.
+
 Different sources are independent.
 
 Process-local: the claim set is not shared across workers or containers, which is

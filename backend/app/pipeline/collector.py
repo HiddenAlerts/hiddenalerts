@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime
 
@@ -38,7 +39,11 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
     stub: ``items_fetched == items_new + items_skipped_url + items_skipped_content
     + items_skipped_invalid``. A run that fails part-way keeps whatever counts it
     reached, so that identity does not hold for ``status='failed'`` rows.
+
+    Raises if the final commit fails, because in that case nothing was persisted
+    and the returned counters would be fiction.
     """
+    cancelled = False
     run_log = RunLog(
         source_id=source.id,
         run_started_at=datetime.utcnow(),
@@ -87,7 +92,7 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
         run_log.items_skipped_url += len(batch) - len(new_stubs)
 
         log.info(
-            "Source %s '%s': %d fetched → %d already known → %d to retrieve",
+            "Source %s '%s': %d fetched → %d skipped by URL → %d to retrieve",
             source.id,
             source.name,
             run_log.items_fetched,
@@ -168,6 +173,21 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
             run_log.items_fetched,
         )
 
+    except asyncio.CancelledError:
+        cancelled = True
+        run_log.status = "failed"
+        run_log.error_message = (
+            "Collection cancelled before completion — counters are partial and the "
+            "source was not fully collected. Re-run to finish."
+        )
+        log.warning(
+            "Source %s '%s': collection cancelled after storing %d item(s)",
+            source.id,
+            source.name,
+            run_log.items_new,
+        )
+        raise
+
     except Exception as exc:
         run_log.status = "failed"
         run_log.error_message = str(exc)
@@ -186,6 +206,12 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
                 "Source %s: failed to commit run log: %s", source.id, commit_exc, exc_info=True
             )
             await session.rollback()
+            # Nothing was persisted, so the caller must not treat the in-memory
+            # counters as real work — a rolled-back items_new would otherwise make
+            # the scheduler kick off AI processing for data that does not exist.
+            # A pending cancellation still wins: it must not be masked.
+            if not cancelled:
+                raise
 
     return run_log
 

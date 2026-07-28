@@ -76,10 +76,11 @@ async def _process_new_alerts_job() -> None:
 
 
 async def trigger_source_by_id(source_id: int) -> None:
-    """Manually trigger a collection for a single source (used by API endpoint).
+    """Collect a single source by id, claiming it like any other collection run.
 
-    Goes through the same claimed entry point as scheduled collection, so a manual
-    trigger can never run alongside a scheduled run of the same source.
+    A convenience wrapper for internal and ad-hoc use. The trigger endpoint does
+    not go through here — it reserves the source itself so it can answer 202 or
+    409, then hands the reservation to ``collect_reserved_source``.
     """
     from app.pipeline.collector import collect_source
 

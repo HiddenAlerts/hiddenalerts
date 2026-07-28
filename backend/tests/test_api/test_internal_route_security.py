@@ -352,16 +352,30 @@ async def test_slot_is_released_after_a_successful_run(
 async def test_slot_is_released_when_collection_fails(client, db_session, monkeypatch):
     admin = await _make_user(db_session)
     source = await _make_source(db_session)
+    calls: list[int] = []
 
-    async def _boom(source_id: int) -> None:
-        raise RuntimeError("upstream unreachable")
+    async def _boom(source_id: int):
+        calls.append(source_id)
+        try:
+            raise RuntimeError("upstream unreachable")
+        finally:
+            await collection_guard.release_source_run(source_id)
 
-    monkeypatch.setattr("app.scheduler.jobs.trigger_source_by_id", _boom, raising=True)
+    # The endpoint binds this name at import time, so patch it where it is used.
+    monkeypatch.setattr("app.api.sources.collect_reserved_source", _boom, raising=True)
+
+    # Nothing may reach the real collector or an adapter.
+    def _no_adapters(source):  # pragma: no cover - fails the test if reached
+        raise AssertionError("adapter was constructed during a mocked collection")
+
+    monkeypatch.setattr("app.pipeline.collector.get_adapter", _no_adapters)
 
     resp = await client.post(
         f"/api/v1/sources/{source.id}/trigger", headers=_auth(admin)
     )
+
     assert resp.status_code == 202
+    assert calls == [source.id]
     assert not collection_guard.is_source_collecting(source.id)
 
 

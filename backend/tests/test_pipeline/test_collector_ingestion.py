@@ -41,6 +41,24 @@ class StubAdapter:
         return self._bodies.get(url, f"Body for {url}"), f"<p>{url}</p>"
 
 
+class _CommitFailingSession:
+    """Session proxy whose commit always fails, recording the rollback."""
+
+    def __init__(self, session):
+        self._session = session
+        self.rolled_back = False
+
+    def __getattr__(self, name):
+        return getattr(self._session, name)
+
+    async def commit(self):
+        raise RuntimeError("connection lost during commit")
+
+    async def rollback(self):
+        self.rolled_back = True
+        await self._session.rollback()
+
+
 def _stub(url, *, title="Title", published_at=None, summary="Feed summary"):
     return RawItemStub(
         source_name="Stub Source",
@@ -591,7 +609,11 @@ async def test_failed_run_records_status_and_message(db_session, source, monkeyp
 
 @pytest.mark.asyncio
 async def test_failed_run_keeps_partial_counters(db_session, source, monkeypatch):
-    """A run that dies part-way is not expected to satisfy the complete-run identity."""
+    """A run that dies part-way is not expected to satisfy the complete-run identity.
+
+    The failure is an ordinary RuntimeError, so it reaches ``run_source``'s outer
+    exception handler and the run is committed as ``failed`` with partial counts.
+    """
 
     class HalfWay:
         async def fetch_item_stubs(self):
@@ -599,20 +621,32 @@ async def test_failed_run_keeps_partial_counters(db_session, source, monkeypatch
 
         async def fetch_full_article(self, url):
             if url.endswith("p2"):
-                raise KeyboardInterrupt("simulated hard failure mid-run")
+                raise RuntimeError("simulated mid-run failure")
             return "Body one", "<p>one</p>"
 
-    monkeypatch.setattr(collector, "get_adapter", lambda s: HalfWay())
-    with pytest.raises(KeyboardInterrupt):
-        await collector.run_source(source, db_session)
+        # The adapter's own fetch failure is caught per item, so raise from the
+        # content check instead by returning text the collector then chokes on.
 
-    run = (
-        await db_session.execute(
-            select(RunLog).where(RunLog.source_id == source.id).order_by(RunLog.id.desc())
-        )
-    ).scalars().first()
+    class FailsAfterFirstStore(HalfWay):
+        async def fetch_item_stubs(self):
+            return [_stub("https://example.test/p1"), _stub("https://example.test/p2")]
+
+    monkeypatch.setattr(collector, "get_adapter", lambda s: FailsAfterFirstStore())
+
+    async def _boom_on_second(session, content_hash):
+        if getattr(_boom_on_second, "seen", False):
+            raise RuntimeError("simulated mid-run failure")
+        _boom_on_second.seen = True
+        return False
+
+    monkeypatch.setattr(collector, "is_content_duplicate", _boom_on_second)
+
+    run = await collector.run_source(source, db_session)
+
+    assert run.status == "failed"
+    assert "simulated mid-run failure" in run.error_message
+    assert run.run_finished_at is not None
     assert run.items_fetched == 2
-    assert run.items_new <= run.items_fetched
     total = (
         run.items_new
         + run.items_skipped_url
@@ -620,6 +654,118 @@ async def test_failed_run_keeps_partial_counters(db_session, source, monkeypatch
         + run.items_skipped_invalid
     )
     assert total < run.items_fetched
+
+    persisted = (
+        await db_session.execute(select(RunLog).where(RunLog.id == run.id))
+    ).scalar_one()
+    assert persisted.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_run_is_persisted_as_failed_and_releases_the_claim(
+    db_session, source, monkeypatch
+):
+    """Cancellation must propagate, but must not leave a run stuck at 'running'."""
+    in_fetch = asyncio.Event()
+
+    class Hanging:
+        async def fetch_item_stubs(self):
+            return [_stub("https://example.test/slow")]
+
+        async def fetch_full_article(self, url):
+            in_fetch.set()
+            await asyncio.sleep(3600)
+
+    monkeypatch.setattr(collector, "get_adapter", lambda s: Hanging())
+
+    task = asyncio.create_task(collector.collect_reserved_source(source.id))
+    await collection_guard.claim_source_run(source.id)
+    await in_fetch.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert not collection_guard.is_source_collecting(source.id)
+
+    run = (
+        await db_session.execute(
+            select(RunLog).where(RunLog.source_id == source.id).order_by(RunLog.id.desc())
+        )
+    ).scalars().first()
+    assert run is not None
+    assert run.status == "failed"
+    assert run.status != "running"
+    assert run.run_finished_at is not None
+    assert "cancelled" in run.error_message.lower()
+    assert run.items_fetched == 1
+    assert run.items_new == 0
+
+
+@pytest.mark.asyncio
+async def test_final_commit_failure_propagates_and_rolls_back(
+    db_session, source, monkeypatch
+):
+    """A failed final commit must not be reported as a successful run.
+
+    The in-memory counters would otherwise claim items_new > 0 for writes that
+    were rolled back, which is what makes the scheduler start AI processing.
+    """
+    # The rollback expires every ORM object, so read the id before the run.
+    source_id = source.id
+    adapter = StubAdapter(source, [_stub("https://example.test/uncommitted")])
+    _use_adapter(monkeypatch, adapter)
+
+    # Wrap rather than patch the live session: only the collector's final commit
+    # fails, and the real session stays usable for the assertions below.
+    proxy = _CommitFailingSession(db_session)
+
+    with pytest.raises(RuntimeError, match="connection lost during commit"):
+        await collector.run_source(source, proxy)
+
+    assert proxy.rolled_back, "the failed commit must be rolled back"
+
+    stored = (
+        await db_session.execute(
+            select(func.count()).select_from(RawItem).where(RawItem.source_id == source_id)
+        )
+    ).scalar_one()
+    assert stored == 0
+
+    remaining = (
+        await db_session.execute(
+            select(func.count()).select_from(RunLog).where(RunLog.source_id == source_id)
+        )
+    ).scalar_one()
+    assert remaining == 0
+
+
+@pytest.mark.asyncio
+async def test_commit_failure_releases_the_claim(db_session, source, monkeypatch):
+    async def _fail(src, session):
+        raise RuntimeError("connection lost during commit")
+
+    monkeypatch.setattr(collector, "run_source", _fail)
+
+    with pytest.raises(RuntimeError):
+        await collector.collect_source(source.id)
+
+    assert not collection_guard.is_source_collecting(source.id)
+
+
+@pytest.mark.asyncio
+async def test_run_all_sources_omits_a_run_whose_commit_failed(
+    db_session, source, monkeypatch
+):
+    async def _fail(src, session):
+        raise RuntimeError("connection lost during commit")
+
+    monkeypatch.setattr(collector, "run_source", _fail)
+
+    logs = await collector.run_all_sources()
+
+    assert all(entry.source_id != source.id for entry in logs)
+    assert not collection_guard.is_source_collecting(source.id)
 
 
 def test_run_log_schema_is_additive_and_backward_compatible():

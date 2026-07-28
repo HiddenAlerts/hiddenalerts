@@ -93,8 +93,9 @@ async def trigger_source(
 ) -> dict:
     """Manually trigger a collection run for a single source (runs in background).
 
-    Returns 409 when a manual run for this source is already in flight, so a
-    repeated click cannot stack outbound fetches against the same upstream.
+    Returns 409 when any collection for this source is already in flight —
+    scheduled or manual — so a repeated click cannot stack outbound fetches
+    against the same upstream.
     """
     source = await db.get(Source, source_id)
     if source is None:
