@@ -7,6 +7,7 @@ import feedparser
 from dateutil import parser as dateutil_parser
 
 from app.sources.base import BaseSourceAdapter, RawItemData, RawItemStub
+from app.sources.response_policy import AcceptPolicy
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ class RSSAdapter(BaseSourceAdapter):
     async def fetch_item_stubs(self) -> list[RawItemStub]:
         """Parse RSS feed — returns stubs with no full article fetches."""
         log.info(f"Fetching RSS feed (stubs): {self.rss_url}")
-        rss_content = await self._http_get(self.rss_url)
+        rss_content = (await self.fetch(self.rss_url, accept=AcceptPolicy.FEED)).text
         feed = feedparser.parse(rss_content)
 
         if feed.bozo:
@@ -112,7 +113,7 @@ class HTMLScraperAdapter(BaseSourceAdapter):
         """Fetch listing page and parse article refs — no full article fetches."""
         listing_url = self.source.base_url  # type: ignore[attr-defined]
         log.info(f"Fetching HTML listing (stubs): {listing_url}")
-        listing_html = await self._http_get(listing_url)
+        listing_html = (await self.fetch(listing_url, accept=AcceptPolicy.HTML_LISTING)).text
         refs = await self.parse_listing_page(listing_html)
 
         stubs: list[RawItemStub] = []
