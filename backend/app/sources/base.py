@@ -18,6 +18,7 @@ from app.sources.http_errors import (
     ChallengeDetected,
     EmptyContent,
     SourceFetchError,
+    UnsafeRequestTarget,
     ContentTypeMismatch,
     PermanentFetchError,
     RateLimitedError,
@@ -44,13 +45,16 @@ _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
 # Never replayed to a different host on a redirect.
-_SENSITIVE_HEADERS = frozenset({"authorization", "cookie", "proxy-authorization", "x-api-key"})
+# Dropped on any origin change. Host goes too: it names the previous origin.
+_SENSITIVE_HEADERS = frozenset(
+    {"authorization", "cookie", "proxy-authorization", "x-api-key", "host"}
+)
 _MAX_RETRY_AFTER_SECONDS = 30.0
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 # Outcomes no alternative fingerprint or browser can improve on.
 _CONCLUSIVE_ERRORS = (
     ChallengeDetected, UnsupportedDocument, ContentTypeMismatch, EmptyContent,
-    RedirectLoop, TooManyRedirects, UnsupportedRedirectScheme, RateLimitedError,
+    RedirectLoop, TooManyRedirects, UnsafeRequestTarget, RateLimitedError,
 )
 
 # Tier 1: Browser-like UA — works for most sites
@@ -134,15 +138,17 @@ class FetchResult:
     hosts: tuple[str, ...] = field(default_factory=tuple)
 
 
-def safe_redirect_headers(headers: dict, *, cross_host: bool) -> dict:
+def safe_redirect_headers(headers: dict, *, cross_origin: bool) -> dict:
     """Headers to send on a redirect hop.
 
-    Credential-bearing headers are dropped when the destination host differs, so
-    a redirect can never leak them to another origin. Ordinary public headers
-    (User-Agent, Accept, Accept-Language) are preserved so the request keeps
-    identifying itself the same way.
+    Credential-bearing headers and Host are dropped whenever the *origin* changes
+    — a different hostname, scheme or effective port — so nothing leaks across a
+    security boundary, including an HTTPS→HTTP downgrade. Matching is
+    case-insensitive. Ordinary public headers (User-Agent, Accept,
+    Accept-Language) are preserved so the request keeps identifying itself the
+    same way.
     """
-    if not cross_host:
+    if not cross_origin:
         return dict(headers)
     return {k: v for k, v in headers.items() if k.lower() not in _SENSITIVE_HEADERS}
 
@@ -165,16 +171,31 @@ def _sync_requests_get(url: str, headers: dict, timeout: float) -> tuple[int, di
     map is preserved so Retry-After and Location survive. Runs in a thread pool;
     the caller owns redirect following and rate limiting.
     """
-    with _requests.Session() as session:
-        session.headers.update(headers)
-        resp = session.get(url, timeout=timeout, allow_redirects=False)
-        return resp.status_code, dict(resp.headers), resp.text, resp.content
+    try:
+        with _requests.Session() as session:
+            session.headers.update(headers)
+            resp = session.get(url, timeout=timeout, allow_redirects=False)
+            return resp.status_code, dict(resp.headers), resp.text, resp.content
+    except _requests.RequestException as exc:
+        raise TransientFetchError(f"requests transport error: {type(exc).__name__}") from exc
 
 
 def _safe_url(url: str) -> str:
-    """URL without query string — query params can carry tokens."""
+    """URL safe to log: no credentials, no query string, no fragment.
+
+    Query params and userinfo can both carry tokens. Keeps scheme, host, a
+    non-default port and the path, which is all a diagnostic needs.
+    """
     parts = urlsplit(url)
-    return f"{parts.scheme}://{parts.netloc}{parts.path}"
+    host = normalize_host(parts.hostname)
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    netloc = f"[{host}]" if ":" in host else host
+    if port and port not in (_DEFAULT_PORTS.get(parts.scheme.lower()),):
+        netloc = f"{netloc}:{port}"
+    return f"{parts.scheme}://{netloc}{parts.path}"
 
 
 def _reject_challenge_or_binary(
@@ -193,7 +214,9 @@ def _reject_challenge_or_binary(
             content_type=content_type, accepted=tuple(sorted(policy.accepted)),
         )
 
-    verdict = classify_challenge(body, content_type=content_type, body_kind=kind)
+    verdict = classify_challenge(
+        body, content_type=content_type, body_kind=kind, status=status
+    )
     if verdict:
         raise ChallengeDetected(
             "anti-bot verification page", url=url, status=status, signals=verdict.signals
@@ -230,19 +253,30 @@ def _origin(url: str) -> tuple[str, str, int]:
     return scheme, normalize_host(parts.hostname), port
 
 
-def _is_unsafe_redirect_target(url: str) -> str | None:
-    """Reason a redirect target must not be followed, or None if it is fine.
+def _unsafe_target_reason(url: str) -> str | None:
+    """Reason a URL must not be requested, or None if it is fine.
 
-    Blocks credentials in the URL and literal internal addresses. This is a
-    literal-address check only — a public hostname that *resolves* to a private
-    address is not caught, so full DNS-rebinding protection is NOT implemented.
+    Blocks non-http(s) schemes, credentials in the URL, malformed hosts and ports,
+    and literal internal addresses. This is a *literal*-address check only — a
+    public hostname that resolves to a private address is not caught, so full
+    DNS-rebinding protection is NOT implemented.
     """
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "malformed URL"
+    scheme = (parts.scheme or "").lower()
+    if scheme not in _ALLOWED_SCHEMES:
+        return f"unsupported scheme {scheme or '(none)'}"
     if parts.username or parts.password or "@" in (parts.netloc.split("]")[-1]):
-        return "userinfo in redirect target"
+        return "credentials embedded in URL"
+    try:
+        parts.port
+    except ValueError:
+        return "invalid port"
     host = normalize_host(parts.hostname)
     if not host:
-        return "redirect target has no host"
+        return "URL has no host"
     if host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".home.arpa")):
         return f"internal hostname {host}"
     try:
@@ -255,17 +289,26 @@ def _is_unsafe_redirect_target(url: str) -> str | None:
     return None
 
 
+def assert_safe_target(url: str) -> None:
+    """Raise :class:`UnsafeRequestTarget` if this URL must not be requested."""
+    reason = _unsafe_target_reason(url)
+    if reason:
+        raise UnsafeRequestTarget(f"refusing to request URL: {reason}", url=_safe_url(url))
+
+
 def _resolve_redirect(current_url: str, location: str) -> str:
     """Resolve a Location header and reject schemes and targets we will not follow."""
     target = urljoin(current_url, (location or "").strip())
     scheme = urlsplit(target).scheme.lower()
     if scheme not in _ALLOWED_SCHEMES:
         raise UnsupportedRedirectScheme(
-            f"refusing redirect to {scheme or 'relative'} scheme", url=current_url
+            f"refusing redirect to {scheme or 'relative'} scheme", url=_safe_url(current_url)
         )
-    reason = _is_unsafe_redirect_target(target)
+    reason = _unsafe_target_reason(target)
     if reason:
-        raise UnsupportedRedirectScheme(f"refusing redirect: {reason}", url=current_url)
+        raise UnsafeRequestTarget(
+            f"refusing redirect: {reason}", url=_safe_url(current_url)
+        )
     return target
 
 
@@ -322,7 +365,7 @@ async def _follow(
                     "%s: redirect %s → %s crosses origin, re-applying host policy",
                     source_label, host, next_host,
                 )
-                current_headers = safe_redirect_headers(current_headers, cross_host=True)
+                current_headers = safe_redirect_headers(current_headers, cross_origin=True)
             current = target
             continue
 
@@ -335,7 +378,7 @@ async def _follow(
 
         # Challenge and binary checks run BEFORE status handling: a CDN may serve
         # an interstitial as 200 or 403, and either way it is conclusive.
-        kind = sniff_body_kind(body, raw)
+        kind = sniff_body_kind(body, raw, content_type)
         _reject_challenge_or_binary(current, status, content_type, body, raw, kind, policy)
 
         if status == 429:
@@ -398,8 +441,8 @@ class BaseSourceAdapter(ABC):
         """Stage 1: Fetch lightweight stubs (URL + metadata only, no full article fetch).
 
         Parses the feed/listing page and returns one stub per discovered article.
-        The collector uses this for URL-hash and date pre-filtering before deciding
-        which articles actually need to be fetched.
+        The collector pre-filters these by normalized URL hash to decide which
+        articles actually need fetching; publication dates never gate ingestion.
         """
         pass
 
@@ -446,6 +489,7 @@ class BaseSourceAdapter(ABC):
         remaining tiers, never launches a browser, and propagates immediately.
         Every attempt, retry and redirect hop passes through the host limiter.
         """
+        assert_safe_target(url)
         limiter = limiter or host_limiter
         label = self._source_label()
 
@@ -506,8 +550,14 @@ class BaseSourceAdapter(ABC):
                 await asyncio.sleep(2 ** attempt)
 
         if not got_403:
+            if isinstance(last_exc, SourceFetchError):
+                # Keep the type and status the upstream actually produced —
+                # repeated 503 stays TransientFetchError(status=503).
+                raise last_exc
             raise TransientFetchError(
-                f"failed after {retries} attempt(s)", url=url
+                f"failed after {retries} attempt(s): "
+                f"{type(last_exc).__name__ if last_exc else 'no response'}",
+                url=url,
             ) from last_exc
 
         # Only an ordinary, non-challenge 403 reaches the fallback tiers. Every
@@ -521,14 +571,19 @@ class BaseSourceAdapter(ABC):
                     url, policy=accept, headers=headers, timeout=timeout,
                     send=_requests_send, limiter=limiter, source_label=label,
                 )
-            except _CONCLUSIVE_ERRORS:
-                raise
             except PermanentFetchError as exc:
                 if exc.status != 403:
                     raise
+                # An ordinary 403 is the only reason to try the next fingerprint.
                 last_exc = exc
+            except SourceFetchError:
+                # Every other typed failure is terminal: another fingerprint or a
+                # browser cannot turn it into a usable document.
+                raise
             except Exception as exc:
-                last_exc = exc
+                raise TransientFetchError(
+                    f"tier {tier} request failed", url=url
+                ) from exc
 
         log.debug("%s: escalating %s to browser rendering", label, _safe_url(url))
         try:
@@ -550,13 +605,19 @@ class BaseSourceAdapter(ABC):
         an empty page are all rejected rather than reported as a success.
         """
         status, final_url, html = await _playwright_get(url, timeout=60.0, limiter=limiter)
-        kind = sniff_body_kind(html)
-        effective_status = status if status is not None else 200
 
-        _reject_challenge_or_binary(
-            final_url, effective_status, "", html, b"", kind, accept
-        )
-        if status is not None and status >= 400:
+        if status is None:
+            # No HTTP response reached the page. Inventing a 200 would report a
+            # navigation failure as a successful fetch.
+            raise TransientFetchError(
+                "browser navigation produced no HTTP response",
+                url=_safe_url(final_url or url),
+            )
+
+        kind = sniff_body_kind(html, b"", "text/html")
+        _reject_challenge_or_binary(final_url, status, "text/html", html, b"", kind, accept)
+
+        if status >= 400:
             if status in _RETRY_STATUSES:
                 raise TransientFetchError(
                     "browser navigation failed", url=final_url, status=status
@@ -564,12 +625,17 @@ class BaseSourceAdapter(ABC):
             raise PermanentFetchError(
                 f"browser navigation returned HTTP {status}", url=final_url, status=status
             )
-        _validate_success_body(final_url, effective_status, "", html, kind, accept)
+        _validate_success_body(final_url, status, "text/html", html, kind, accept)
+
+        # Only the initial and final hosts are knowable: intermediate browser
+        # redirect hops are not observable without request interception.
+        initial_host = normalize_host(urlsplit(url).hostname)
+        final_host = normalize_host(urlsplit(final_url).hostname)
+        hosts = (initial_host,) if final_host in ("", initial_host) else (initial_host, final_host)
 
         return FetchResult(
-            url=url, final_url=final_url, status=effective_status,
-            content_type="text/html", text=html, redirects=0,
-            hosts=(normalize_host(urlsplit(final_url).hostname),),
+            url=url, final_url=final_url, status=status,
+            content_type="text/html", text=html, redirects=0, hosts=hosts,
         )
 
     async def _http_get(self, url: str, retries: int = 3, timeout: float = 30.0) -> str:

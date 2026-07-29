@@ -74,6 +74,15 @@ class EmptyContent(SourceFetchError):
     """
 
 
+class UnsafeRequestTarget(SourceFetchError):
+    """A URL we refuse to request at all.
+
+    Covers non-http(s) schemes, credentials embedded in the URL, malformed hosts
+    or ports, and literal internal addresses. Applied to the initial target and to
+    every redirect destination.
+    """
+
+
 class RedirectLoop(SourceFetchError):
     """The redirect chain revisited a URL."""
 
@@ -82,5 +91,5 @@ class TooManyRedirects(SourceFetchError):
     """The redirect chain exceeded the configured maximum."""
 
 
-class UnsupportedRedirectScheme(SourceFetchError):
+class UnsupportedRedirectScheme(UnsafeRequestTarget):
     """Location pointed somewhere other than http/https."""

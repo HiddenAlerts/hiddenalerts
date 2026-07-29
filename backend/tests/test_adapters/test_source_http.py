@@ -384,7 +384,7 @@ async def test_cross_host_redirect_applies_both_host_policies():
 # ---------------------------------------------------------------------------
 
 
-def test_sensitive_headers_are_dropped_across_hosts():
+def test_sensitive_headers_are_dropped_across_origins():
     headers = {
         "User-Agent": "HiddenAlerts Research bot@hiddenalerts.com",
         "Accept": "text/html",
@@ -393,7 +393,7 @@ def test_sensitive_headers_are_dropped_across_hosts():
         "Cookie": "session=abc",
         "X-Api-Key": "k",
     }
-    out = safe_redirect_headers(headers, cross_host=True)
+    out = safe_redirect_headers(headers, cross_origin=True)
     assert "Authorization" not in out
     assert "Cookie" not in out
     assert "X-Api-Key" not in out
@@ -401,15 +401,15 @@ def test_sensitive_headers_are_dropped_across_hosts():
 
 def test_ordinary_public_headers_survive_a_cross_host_redirect():
     headers = dict(source_base._BROWSER_HEADERS) | {"Authorization": "Bearer x"}
-    out = safe_redirect_headers(headers, cross_host=True)
+    out = safe_redirect_headers(headers, cross_origin=True)
     assert out["User-Agent"] == source_base._BROWSER_HEADERS["User-Agent"]
     assert out["Accept"] == source_base._BROWSER_HEADERS["Accept"]
     assert out["Accept-Language"] == source_base._BROWSER_HEADERS["Accept-Language"]
 
 
-def test_same_host_redirect_keeps_all_headers():
+def test_same_origin_redirect_keeps_all_headers():
     headers = {"User-Agent": "ua", "Authorization": "Bearer x"}
-    assert safe_redirect_headers(headers, cross_host=False) == headers
+    assert safe_redirect_headers(headers, cross_origin=False) == headers
 
 
 # ---------------------------------------------------------------------------

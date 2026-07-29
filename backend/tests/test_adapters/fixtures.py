@@ -120,3 +120,35 @@ ARTICLE_WITH_NO_TEXT = (
     '<script>window.__DATA__={};renderApp();</script>'
     "<footer>All rights reserved</footer></body></html>"
 )
+
+# Short HTTP 403 refusal page: one strong denial marker, no other evidence.
+ACCESS_DENIED_403 = (
+    "<!DOCTYPE html><html><head><title>Access Denied</title></head><body>"
+    "<h1>Access Denied</h1><p>You don't have permission to access this resource "
+    "on this server.</p></body></html>"
+)
+
+# A genuine article that merely discusses access denial. Must stay usable.
+ARTICLE_ABOUT_ACCESS_DENIAL = (
+    "<!DOCTYPE html><html><head><title>Insider Denied Access Charged</title></head>"
+    "<body><article><p>The indictment alleges the defendant saw an access denied "
+    "message and then escalated privileges. "
+    + ("The complaint describes further unauthorized access attempts. " * 160)
+    + "</p></article></body></html>"
+)
+
+# Plain 403 with no challenge or denial evidence at all.
+PLAIN_FORBIDDEN_403 = "<!DOCTYPE html><html><body><h1>Forbidden</h1></body></html>"
+
+# HTML fragments with no document wrapper.
+HTML_ARTICLE_FRAGMENT = (
+    "<article><h2>Man Sentenced for Fraud</h2><p>A federal judge imposed a "
+    "48-month sentence following a guilty plea.</p></article>"
+)
+HTML_DIV_FRAGMENT = '<div class="content"><p>Press release body text here.</p></div>'
+
+# Ordinary non-feed XML — must stay XML, not be mistaken for HTML.
+GENERIC_XML = (
+    '<?xml version="1.0"?><catalog><book id="1"><title>A</title></book></catalog>'
+)
+GENERIC_XML_NO_PROLOGUE = '<catalog><book id="1"><title>A</title></book></catalog>'

@@ -23,6 +23,7 @@ from app.sources.base import (
 from app.sources.host_limiter import HostRateLimiter, normalize_host
 from app.sources.http_errors import (
     ChallengeDetected,
+    UnsafeRequestTarget,
     ContentTypeMismatch,
     EmptyContent,
     PermanentFetchError,
@@ -622,7 +623,7 @@ async def test_same_origin_redirect_keeps_headers():
 @pytest.mark.asyncio
 async def test_unsafe_redirect_targets_are_rejected(target):
     send, _ = _responder({"https://x.test/a": (302, {"location": target}, "", b"")})
-    with pytest.raises(UnsupportedRedirectScheme):
+    with pytest.raises(UnsafeRequestTarget):
         await _fetch(send, "https://x.test/a")
 
 

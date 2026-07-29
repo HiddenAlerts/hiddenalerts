@@ -48,6 +48,14 @@ _CORROBORATING = (
 
 _MIN_CORROBORATING = 2
 
+# On an error status a single strong denial/verification marker is enough: a
+# short 403/503 refusal page is terminal, and retrying it with another
+# fingerprint or a browser only amplifies requests against a host already
+# refusing us. A 200 article merely discussing access denial is unaffected.
+_DENIAL_STATUSES = frozenset({401, 403, 429, 503})
+_DENIAL_SIGNALS = frozenset({"access_denied", "verification_wording", "bot_wording"})
+_DENIAL_BODY_BYTES = 4_000
+
 
 class ChallengeVerdict:
     """Outcome of challenge classification. Truthy when the page is a challenge."""
@@ -63,7 +71,8 @@ class ChallengeVerdict:
 
 
 def classify_challenge(
-    body: str, *, content_type: str = "", body_kind: "BodyKind | None" = None
+    body: str, *, content_type: str = "", body_kind: "BodyKind | None" = None,
+    status: int | None = None,
 ) -> ChallengeVerdict:
     """Decide whether ``body`` is an anti-bot verification page.
 
@@ -86,6 +95,13 @@ def classify_challenge(
 
     corroborating = tuple(name for name, pat in _CORROBORATING if pat.search(head))
     if len(body) < SMALL_BODY_BYTES and len(corroborating) >= _MIN_CORROBORATING:
+        return ChallengeVerdict(True, corroborating)
+
+    if (
+        status in _DENIAL_STATUSES
+        and len(body) < _DENIAL_BODY_BYTES
+        and any(name in _DENIAL_SIGNALS for name in corroborating)
+    ):
         return ChallengeVerdict(True, corroborating)
 
     return ChallengeVerdict(False, corroborating)
@@ -151,24 +167,43 @@ class BodyKind(Enum):
 _XML_PROLOGUE = re.compile(r"^\s*<\?xml|^\s*<(rss|feed|rdf:RDF)\b", re.I)
 _HTML_PROLOGUE = re.compile(r"^\s*<!doctype\s+html|^\s*<html\b", re.I)
 _HTML_ANYWHERE = re.compile(r"<html\b|<head\b|<body\b|<!doctype\s+html", re.I)
+# Structural tags that mean HTML even in a fragment with no document wrapper.
+_HTML_FRAGMENT = re.compile(
+    r"</?(article|section|main|div|p|span|table|tbody|tr|td|ul|ol|li|h[1-6]|"
+    r"nav|form|figure|blockquote|img|br|hr|strong|em)\b", re.I
+)
 
 
-def sniff_body_kind(body: str, raw: bytes = b"") -> BodyKind:
-    """Classify a body by inspection. Deliberately small — not a MIME framework."""
+def sniff_body_kind(body: str, raw: bytes = b"", content_type: str = "") -> BodyKind:
+    """Classify a body by inspection. Deliberately small — not a MIME parser.
+
+    Explicit feed markers win outright. Otherwise HTML is identified structurally,
+    including bare fragments, and the declared type only breaks a genuine tie —
+    so a mislabelled challenge page is still seen as HTML while ordinary XML
+    labelled ``application/xml`` stays XML.
+    """
     if raw and any(raw.startswith(sig) for sig in _BINARY_SIGNATURES):
         return BodyKind.BINARY
     if not body or not body.strip():
         return BodyKind.EMPTY
+
     head = body[:4096]
-    # XML first: an XML document may legitimately mention <html> in content.
+    # Feed/XML declarations are unambiguous and take precedence.
     if _XML_PROLOGUE.search(head):
         return BodyKind.XML
     if _HTML_PROLOGUE.search(head) or _HTML_ANYWHERE.search(head):
         return BodyKind.HTML
+    if _HTML_FRAGMENT.search(head):
+        return BodyKind.HTML
+
     stripped = body.lstrip()
     if stripped[:1] in ("{", "["):
         return BodyKind.JSON
     if stripped.startswith("<"):
+        # Ambiguous markup: honour the declared type before defaulting to XML.
+        declared = _base_type(content_type)
+        if declared in _HTML_TYPES:
+            return BodyKind.HTML
         return BodyKind.XML
     return BodyKind.UNKNOWN_TEXT
 
