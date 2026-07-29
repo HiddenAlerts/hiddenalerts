@@ -215,3 +215,66 @@ def large_article_quoting_mechanism(token: str) -> str:
         + ("<p>Further analysis of the observed traffic continues here. </p>" * 300)
         + "</article></body></html>"
     )
+
+
+def _prose(n: int = 30) -> str:
+    return "Analysts documented the observed behaviour in detail. " * n
+
+
+def article_documenting(snippet: str) -> str:
+    """A security article whose body quotes challenge markup as documentation."""
+    return (
+        "<!DOCTYPE html><html><head><title>CDN Interstitial Analysis</title></head>"
+        f"<body><article><p>{_prose()}</p>{snippet}"
+        f"<p>{_prose()}</p></article></body></html>"
+    )
+
+
+def article_with_marker_and_wording(marker: str, wording: str) -> str:
+    """A short but real security article that uses a vendor token and denial wording."""
+    return (
+        "<!DOCTYPE html><html><head><title>Threat Note</title></head><body><article>"
+        f"<p>The report references {marker} and describes {wording} controls. "
+        + ("The note continues with the observed detection detail. " * 20)
+        + "</p></article></body></html>"
+    )
+
+
+# Article about access denial with an unrelated footer contact-form reCAPTCHA.
+ARTICLE_ACCESS_DENIED_WITH_FOOTER_CAPTCHA = (
+    "<!DOCTYPE html><html><head><title>Insider Access Case</title></head><body>"
+    "<main><article><p>The complaint states the defendant received an access denied "
+    "message before escalating privileges. "
+    + ("The filing details the subsequent unauthorized activity. " * 30)
+    + "</p></article></main>"
+    '<footer><form action="/contact"><div class="g-recaptcha" '
+    'data-sitekey="6LcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"></div></form></footer>'
+    "</body></html>"
+)
+
+# Real mechanisms, for the positive side of each documentation case.
+REAL_SEC_VERIFY_SCRIPT = (
+    '<html><body><script>var x=new XMLHttpRequest();'
+    'x.open("POST","/_sec/verify?provider=interstitial",false);x.send();</script></body></html>'
+)
+REAL_DOJ_IFRAME = (
+    '<html><body><iframe src="https://www.justice.gov/apology_objects/interstitial/'
+    'doj-interstitial.html"></iframe></body></html>'
+)
+REAL_CF_RESOURCE = (
+    '<html><body><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/jsch/v1">'
+    "</script></body></html>"
+)
+REAL_CF_FORM = (
+    '<html><body><form id="challenge-form" action="/cdn-cgi/challenge-platform/verify">'
+    "<button>Continue</button></form></body></html>"
+)
+
+MALFORMED_LOCATIONS = [
+    "http://[::1",
+    "http://[:::1]/",
+    "http://[bad]:x/",
+    "http://[]/",
+    "//[::1",
+    "http://x.test:99999/",
+]

@@ -281,6 +281,10 @@ def _unsafe_target_reason(url: str) -> str | None:
     except ValueError:
         return "invalid port"
     try:
+        parts.hostname
+    except ValueError:
+        return "malformed host"
+    try:
         host = normalize_host(parts.hostname)
     except ValueError:
         return "malformed host"
@@ -310,18 +314,27 @@ def assert_safe_target(url: str) -> None:
 
 
 def _resolve_redirect(current_url: str, location: str) -> str:
-    """Resolve a Location header and reject schemes and targets we will not follow."""
-    target = urljoin(current_url, (location or "").strip())
-    scheme = urlsplit(target).scheme.lower()
+    """Resolve a Location header into a target we are willing to request.
+
+    Every parsing failure is converted to a typed error, so a malformed Location
+    can never escape as a raw ``ValueError``. The Location value itself is never
+    put in the message or the log — only the redacted current URL is.
+    """
+    try:
+        target = urljoin(current_url, (location or "").strip())
+        scheme = urlsplit(target).scheme.lower()
+    except (ValueError, TypeError) as exc:
+        raise UnsafeRequestTarget(
+            "refusing redirect: malformed Location header", url=current_url
+        ) from exc
+
     if scheme not in _ALLOWED_SCHEMES:
         raise UnsupportedRedirectScheme(
-            f"refusing redirect to {scheme or 'relative'} scheme", url=_safe_url(current_url)
+            f"refusing redirect to {scheme or 'relative'} scheme", url=current_url
         )
     reason = _unsafe_target_reason(target)
     if reason:
-        raise UnsafeRequestTarget(
-            f"refusing redirect: {reason}", url=_safe_url(current_url)
-        )
+        raise UnsafeRequestTarget(f"refusing redirect: {reason}", url=current_url)
     return target
 
 

@@ -5,72 +5,173 @@ Pure functions, no IO. Two jobs:
 * decide whether a body is an anti-bot verification page rather than content;
 * decide whether a response's content type is one the caller asked for.
 
-The challenge rules are deliberately two-tier. A handful of markers are specific
-enough to be conclusive on their own; everything else is only corroborating and
-needs a second signal on a small body. That is what keeps a real article carrying
-an inert ``gstatic.com/recaptcha`` preconnect hint from being classified as
-blocked, while a 2.4 KB Akamai interstitial still is.
+Challenge evidence is graded. A verification *mechanism* the document actually
+uses — a challenge endpoint in a form action, an interstitial loaded as a
+resource, a challenge element, an executable verification call — is conclusive.
+Vendor tokens and denial wording are weaker: they only count in context, and are
+never combined on a page that has real article content. Quoted documentation
+(``pre``/``code``/``textarea``) is excluded from structural scanning, so an
+article demonstrating ``fetch('/_sec/verify')`` is not mistaken for one running
+it. These are heuristics, not a parser.
 """
 import re
 from enum import Enum
 
-# Interstitials observed in the source audits are 2.3–2.6 KB. Real articles from
-# the same sites are 8 KB+ of extracted text and far larger raw. Corroborating
-# signals only count below this bound.
+from bs4 import BeautifulSoup
+from bs4.element import Comment
+
+# Verification shells observed in the source audits are 2.3–2.6 KB. Legitimate
+# pages are not reliably larger — FinCEN releases extract to roughly 0.9–3 KB —
+# so size is never proof on its own. This bound only limits where the weakest
+# evidence is trusted, and is always combined with a check for real article
+# content.
 SMALL_BODY_BYTES = 15_000
 
-# Structural evidence is tied to a mechanism actually being *used*: a challenge
-# endpoint in a form action or script call, an interstitial loaded as a resource,
-# a challenge element id/class. A security article quoting the same token in prose
-# or a code sample matches none of these.
+# Parsing is bounded; a challenge shell is tiny and never buried past this.
+_MAX_SCAN_BYTES = 200_000
+
+# Containers whose contents are quoted documentation, not executable markup. A
+# security article showing `fetch('/_sec/verify')` in a code block is describing
+# a mechanism, not running one, so these are removed before structural scanning.
+_DOC_CONTAINERS = ("pre", "code", "textarea", "samp", "kbd", "xmp", "template")
+
+# Tags whose src/data actually loads a resource.
+_RESOURCE_TAGS = ("iframe", "script", "embed", "object", "frame")
+
+# Article-content length above which a page is treated as real content rather
+# than a verification shell. Weak evidence is not combined on such a page. This
+# is not a minimum length for accepting a document — short releases are fine; it
+# only decides whether weak signals may be believed.
+_CONTENT_TEXT_FLOOR = 400
 
 
-def _attr_ref(token: str) -> re.Pattern:
-    """Token used as a resource or endpoint in an attribute value."""
-    return re.compile(rf"""(?:action|src|href|data-[\w-]+)\s*=\s*["'][^"']*(?:{token})""", re.I)
+class _ScanView:
+    """Executable view of a document, with quoted documentation removed.
+
+    Pure and I/O-free. Falls back to raw-text scanning if parsing fails, which
+    is more conservative rather than less.
+    """
+
+    __slots__ = ("soup", "scripts", "content_len", "parsed")
+
+    def __init__(self, body: str) -> None:
+        self.soup = None
+        self.scripts = ""
+        self.content_len = 0
+        self.parsed = False
+        try:
+            soup = BeautifulSoup(body[:_MAX_SCAN_BYTES], "lxml")
+            for tag in soup.find_all(_DOC_CONTAINERS):
+                tag.decompose()
+            for node in soup.find_all(string=lambda t: isinstance(t, Comment)):
+                node.extract()
+            self.scripts = "\n".join(t.get_text() for t in soup.find_all("script"))
+            self.content_len = _article_text_length(soup)
+            self.soup = soup
+            self.parsed = True
+        except Exception:  # pragma: no cover - defensive
+            pass
+
+    def form_action(self, pattern: re.Pattern) -> bool:
+        if not self.parsed:
+            return False
+        return any(pattern.search(f.get("action") or "") for f in self.soup.find_all("form"))
+
+    def resource_src(self, pattern: re.Pattern) -> bool:
+        if not self.parsed:
+            return False
+        for tag in self.soup.find_all(_RESOURCE_TAGS):
+            for attr in ("src", "data"):
+                if pattern.search(tag.get(attr) or ""):
+                    return True
+        return False
+
+    def id_or_class(self, pattern: re.Pattern, *, tags=None) -> bool:
+        if not self.parsed:
+            return False
+        for tag in self.soup.find_all(tags or True):
+            if pattern.search(tag.get("id") or ""):
+                return True
+            classes = tag.get("class") or []
+            if any(pattern.search(c) for c in classes):
+                return True
+        return False
+
+    def script_call(self, pattern: re.Pattern) -> bool:
+        return bool(self.scripts) and bool(pattern.search(self.scripts))
+
+    def has_article_content(self) -> bool:
+        return self.content_len >= _CONTENT_TEXT_FLOOR
 
 
-def _js_ref(token: str) -> re.Pattern:
-    """Token passed as a quoted string to a request/navigation call."""
+def _article_text_length(soup) -> int:
+    """Length of body prose, ignoring navigation, footers and forms."""
+    total = 0
+    paragraphs = [
+        t for t in soup.find_all("p")
+        if not t.find_parent(["footer", "nav", "aside", "form", "header"])
+    ]
+    if not paragraphs:
+        paragraphs = [
+            t for t in soup.find_all(["article", "main"])
+            if not t.find_parent(["footer", "nav", "aside", "form"])
+        ]
+    for tag in paragraphs:
+        total += len(" ".join(tag.get_text(" ", strip=True).split()))
+    return total
+
+
+def _js_call(token: str) -> re.Pattern:
+    """A request/navigation call whose argument references the token."""
     return re.compile(
-        rf"""(?:\.open|fetch|\.ajax|\.post|\.get|location\.\w+)\s*\([^)]{{0,160}}["'][^"']*(?:{token})""",
+        rf"""(?:\.open|fetch|\.ajax|\.post|\.get|location\.(?:href|replace|assign))"""
+        rf"""\s*\([^)]{{0,160}}["'][^"']*(?:{token})""",
         re.I,
     )
 
 
-def _dom_ref(token: str) -> re.Pattern:
-    """Token used as an element id/class, or looked up in the DOM."""
+def _dom_lookup(token: str) -> re.Pattern:
     return re.compile(
-        rf"""(?:id|class)\s*=\s*["'][^"']*(?:{token})"""
-        rf"""|getElementById\s*\(\s*["'](?:{token})"""
+        rf"""getElementById\s*\(\s*["'](?:{token})"""
         rf"""|querySelector(?:All)?\s*\(\s*["'][^"']*(?:{token})""",
         re.I,
     )
 
 
-def _any_of(*patterns: re.Pattern):
-    def _search(text: str):
-        return any(p.search(text) for p in patterns)
+_SEC_VERIFY = re.compile(r"/_sec/verify", re.I)
+_DOJ_INTERSTITIAL = re.compile(r"doj-interstitial", re.I)
+_AKAM_LOGO = re.compile(r"akam-logo", re.I)
+_CF_ELEMENT = re.compile(r"cf-browser-verification|cf-challenge", re.I)
+_CF_PLATFORM = re.compile(r"/cdn-cgi/challenge-platform", re.I)
+_CHALLENGE_FORM_ID = re.compile(r"challenge-form|challenge", re.I)
+_CHALLENGE_ACTION = re.compile(r"challenge-form|captcha-delivery|/cdn-cgi/challenge-platform", re.I)
 
-    return _search
 
+def _structural_signals(view: _ScanView) -> tuple[str, ...]:
+    """Names of verification mechanisms the document actually uses.
 
-# name -> predicate(text) -> bool
-_STRUCTURAL = (
-    ("akamai_sec_verify", _any_of(_attr_ref(r"/_sec/verify"), _js_ref(r"/_sec/verify"))),
-    ("doj_interstitial", _any_of(_attr_ref(r"doj-interstitial"), _js_ref(r"doj-interstitial"))),
-    ("akamai_interstitial_logo", _any_of(_dom_ref(r"akam-logo"))),
-    ("cloudflare_challenge", _any_of(
-        _dom_ref(r"cf-browser-verification|cf-challenge"),
-        _attr_ref(r"/cdn-cgi/challenge-platform"),
-        _js_ref(r"/cdn-cgi/challenge-platform"),
-    )),
-    ("challenge_form", _any_of(
-        _dom_ref(r"challenge-form"),
-        _attr_ref(r"challenge-form|captcha-delivery|/cdn-cgi/challenge-platform"),
-        re.compile(r"<form[^>]*\b(?:id|class)\s*=\s*[\"'][^\"']*challenge", re.I),
-    )),
-)
+    Each check is bound to a specific place a mechanism can live — a form action,
+    a loaded resource, a challenge element, or an executable script call — so a
+    token quoted in prose, a documentation link or a data attribute never counts.
+    """
+    found = []
+    if view.form_action(_SEC_VERIFY) or view.script_call(_js_call(r"/_sec/verify")):
+        found.append("akamai_sec_verify")
+    if view.resource_src(_DOJ_INTERSTITIAL):
+        found.append("doj_interstitial")
+    if view.id_or_class(_AKAM_LOGO) or view.script_call(_dom_lookup(r"akam-logo")):
+        found.append("akamai_interstitial_logo")
+    if (
+        view.id_or_class(_CF_ELEMENT)
+        or view.resource_src(_CF_PLATFORM)
+        or view.form_action(_CF_PLATFORM)
+        or view.script_call(_js_call(r"/cdn-cgi/challenge-platform"))
+    ):
+        found.append("cloudflare_challenge")
+    if view.id_or_class(_CHALLENGE_FORM_ID, tags=["form"]) or view.form_action(_CHALLENGE_ACTION):
+        found.append("challenge_form")
+    return tuple(found)
+
 
 # Technical markers: real vendor tokens that a security article can legitimately
 # quote. Never conclusive on their own — see ``classify_challenge``.
@@ -81,15 +182,19 @@ _TECHNICAL = (
     ("cloudflare_token", re.compile(r"cf_chl_", re.I)),
 )
 
-# Markup showing a technical marker is being used rather than mentioned.
-_CHALLENGE_CONTEXT = re.compile(
-    r"""<form[^>]*(challenge|verify)|<script[^>]*(challenge|/_sec/)"""
-    r"""|(action|src|href)\s*=\s*["'][^"']*(challenge|verify)""",
-    re.I,
-)
 
-# Weaker hints. Any one of these can appear on a legitimate page, so a challenge
-# is only declared when at least two fire on a small body.
+def _has_challenge_context(view: _ScanView) -> bool:
+    """A form, loaded resource or script call that is about verification."""
+    token = r"challenge|verify"
+    return (
+        view.form_action(re.compile(token, re.I))
+        or view.resource_src(re.compile(token, re.I))
+        or view.script_call(_js_call(token))
+    )
+
+
+# Weak hints. Any one can appear on a legitimate page, so they are only combined
+# when the document has no real article content behind them.
 _CORROBORATING = (
     ("meta_refresh", re.compile(r"<meta[^>]+http-equiv=[\"']?refresh", re.I)),
     ("noscript_js_required", re.compile(r"<noscript>(?:(?!</noscript>).){0,400}(enable\s+javascript|javascript\s+is\s+required)", re.I | re.S)),
@@ -98,7 +203,7 @@ _CORROBORATING = (
     ("bot_wording", re.compile(r"automated\s+access|unusual\s+traffic|bot\s+detection", re.I)),
     ("cloudflare_wait", re.compile(r"Checking if the site connection is secure", re.I)),
     # A widget alone is not proof: healthy pages embed reCAPTCHA in contact and
-    # feedback forms. It only counts alongside a second signal on a small body.
+    # feedback forms. It only counts on a page with no article content behind it.
     ("captcha_widget", re.compile(r"g-recaptcha[\"'\s>]|data-sitekey|h-captcha[\"'\s>]", re.I)),
 )
 
@@ -138,9 +243,14 @@ def classify_challenge(
     """Decide whether ``body`` is an anti-bot verification page.
 
     Keyed on what the body *is*, not on what the server said it is: an
-    interstitial served as ``application/xml`` is still an interstitial. Only the
-    first 30 KB is scanned; verification shells are tiny and this bounds the cost
-    on large articles.
+    interstitial served as ``application/xml`` is still an interstitial.
+
+    Evidence is weighed in a fixed order: a real verification mechanism, then an
+    approved short 403/503 refusal, then contextual technical/weak evidence, then
+    the document is usable. Structural scanning ignores quoted documentation
+    (``pre``/``code``/``textarea``), and weak signals are only combined on a page
+    with no article content behind them. All of this remains regex and
+    lightweight-HTML heuristics, not a browser or JavaScript parser.
     """
     if not body:
         return ChallengeVerdict(False, ())
@@ -149,8 +259,11 @@ def classify_challenge(
         # Genuine XML/JSON payloads are content, not interstitials.
         return ChallengeVerdict(False, ())
 
+    view = _ScanView(body)
     head = body[:30_000]
-    structural = tuple(name for name, matches in _STRUCTURAL if matches(head))
+
+    # 1. An actual verification mechanism is conclusive at any size or status.
+    structural = _structural_signals(view)
     if structural:
         return ChallengeVerdict(True, structural)
 
@@ -163,27 +276,32 @@ def classify_challenge(
     if status == RATE_LIMIT_STATUS:
         return ChallengeVerdict(False, technical + corroborating)
 
-    if technical:
-        small = len(body) < SMALL_BODY_BYTES
-        # Size alone proves nothing — a short legitimate release is not a shell.
-        # It only bounds where weaker evidence is trusted.
-        denied = status in _DENIAL_STATUSES
-        in_context = bool(_CHALLENGE_CONTEXT.search(head))
-        corroborated = small and bool(corroborating)
-        multi_signal = small and (len(technical) + len(corroborating)) >= 2
-        if denied or in_context or corroborated or multi_signal:
-            return ChallengeVerdict(True, technical + corroborating)
-        return ChallengeVerdict(False, technical)
-    if len(body) < SMALL_BODY_BYTES and len(corroborating) >= _MIN_CORROBORATING:
-        return ChallengeVerdict(True, corroborating)
-
+    # 2. A short refusal page at a denial status is terminal.
     if (
         status in _DENIAL_STATUSES
         and len(body) < _DENIAL_BODY_BYTES
+        and not view.has_article_content()
         and any(name in _DENIAL_SIGNALS for name in corroborating)
     ):
         return ChallengeVerdict(True, corroborating)
 
+    # 3. Weak evidence is only believed on a page with no article behind it, so
+    #    prose that merely discusses these topics is never combined into a verdict.
+    shell = len(body) < SMALL_BODY_BYTES and not view.has_article_content()
+
+    if technical:
+        denied = status in _DENIAL_STATUSES
+        in_context = _has_challenge_context(view)
+        corroborated = shell and bool(corroborating)
+        multi_signal = shell and (len(technical) + len(corroborating)) >= 2
+        if denied or in_context or corroborated or multi_signal:
+            return ChallengeVerdict(True, technical + corroborating)
+        return ChallengeVerdict(False, technical)
+
+    if shell and len(corroborating) >= _MIN_CORROBORATING:
+        return ChallengeVerdict(True, corroborating)
+
+    # 4. Otherwise the document is usable content.
     return ChallengeVerdict(False, corroborating)
 
 
