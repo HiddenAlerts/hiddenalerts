@@ -19,21 +19,61 @@ from enum import Enum
 # signals only count below this bound.
 SMALL_BODY_BYTES = 15_000
 
-# Structural markers: an actual verification mechanism present in the document —
-# a challenge endpoint, an interstitial element, a challenge form. A normal
-# article does not contain these, so they stand alone at any size.
+# Structural evidence is tied to a mechanism actually being *used*: a challenge
+# endpoint in a form action or script call, an interstitial loaded as a resource,
+# a challenge element id/class. A security article quoting the same token in prose
+# or a code sample matches none of these.
+
+
+def _attr_ref(token: str) -> re.Pattern:
+    """Token used as a resource or endpoint in an attribute value."""
+    return re.compile(rf"""(?:action|src|href|data-[\w-]+)\s*=\s*["'][^"']*(?:{token})""", re.I)
+
+
+def _js_ref(token: str) -> re.Pattern:
+    """Token passed as a quoted string to a request/navigation call."""
+    return re.compile(
+        rf"""(?:\.open|fetch|\.ajax|\.post|\.get|location\.\w+)\s*\([^)]{{0,160}}["'][^"']*(?:{token})""",
+        re.I,
+    )
+
+
+def _dom_ref(token: str) -> re.Pattern:
+    """Token used as an element id/class, or looked up in the DOM."""
+    return re.compile(
+        rf"""(?:id|class)\s*=\s*["'][^"']*(?:{token})"""
+        rf"""|getElementById\s*\(\s*["'](?:{token})"""
+        rf"""|querySelector(?:All)?\s*\(\s*["'][^"']*(?:{token})""",
+        re.I,
+    )
+
+
+def _any_of(*patterns: re.Pattern):
+    def _search(text: str):
+        return any(p.search(text) for p in patterns)
+
+    return _search
+
+
+# name -> predicate(text) -> bool
 _STRUCTURAL = (
-    ("akamai_sec_verify", re.compile(r"/_sec/verify", re.I)),
-    ("doj_interstitial", re.compile(r"doj-interstitial", re.I)),
-    ("akamai_interstitial_logo", re.compile(r"akam-logo", re.I)),
-    ("cloudflare_challenge", re.compile(r"cf-browser-verification|cf-challenge", re.I)),
-    ("cloudflare_wait", re.compile(r"Checking if the site connection is secure", re.I)),
-    ("challenge_form", re.compile(r"challenge-form|captcha-delivery|/cdn-cgi/challenge-platform", re.I)),
+    ("akamai_sec_verify", _any_of(_attr_ref(r"/_sec/verify"), _js_ref(r"/_sec/verify"))),
+    ("doj_interstitial", _any_of(_attr_ref(r"doj-interstitial"), _js_ref(r"doj-interstitial"))),
+    ("akamai_interstitial_logo", _any_of(_dom_ref(r"akam-logo"))),
+    ("cloudflare_challenge", _any_of(
+        _dom_ref(r"cf-browser-verification|cf-challenge"),
+        _attr_ref(r"/cdn-cgi/challenge-platform"),
+        _js_ref(r"/cdn-cgi/challenge-platform"),
+    )),
+    ("challenge_form", _any_of(
+        _dom_ref(r"challenge-form"),
+        _attr_ref(r"challenge-form|captcha-delivery|/cdn-cgi/challenge-platform"),
+        re.compile(r"<form[^>]*\b(?:id|class)\s*=\s*[\"'][^\"']*challenge", re.I),
+    )),
 )
 
-# Technical markers: real vendor tokens, but a security article can quote them in
-# prose. They are conclusive only in context — a small verification shell, an HTTP
-# denial status, corroboration by another signal, or challenge-specific markup.
+# Technical markers: real vendor tokens that a security article can legitimately
+# quote. Never conclusive on their own — see ``classify_challenge``.
 _TECHNICAL = (
     ("akamai_bm_verify", re.compile(r"bm-verify", re.I)),
     ("akamai_ghost", re.compile(r"AkamaiGHost", re.I)),
@@ -41,10 +81,10 @@ _TECHNICAL = (
     ("cloudflare_token", re.compile(r"cf_chl_", re.I)),
 )
 
-# Markup that shows a technical marker is being *used*, not merely mentioned.
+# Markup showing a technical marker is being used rather than mentioned.
 _CHALLENGE_CONTEXT = re.compile(
-    r"<form[^>]*(challenge|verify)|<script[^>]*(challenge|/_sec/)|"
-    r"(action|src|href)\s*=\s*[\"\'][^\"\']*(challenge|verify)",
+    r"""<form[^>]*(challenge|verify)|<script[^>]*(challenge|/_sec/)"""
+    r"""|(action|src|href)\s*=\s*["'][^"']*(challenge|verify)""",
     re.I,
 )
 
@@ -56,6 +96,7 @@ _CORROBORATING = (
     ("access_denied", re.compile(r"access denied|request unsuccessful|you don'?t have permission to access", re.I)),
     ("verification_wording", re.compile(r"verify(?:ing)?\s+you\s+are\s+human|security\s+check|please\s+wait\s+while\s+we\s+verify", re.I)),
     ("bot_wording", re.compile(r"automated\s+access|unusual\s+traffic|bot\s+detection", re.I)),
+    ("cloudflare_wait", re.compile(r"Checking if the site connection is secure", re.I)),
     # A widget alone is not proof: healthy pages embed reCAPTCHA in contact and
     # feedback forms. It only counts alongside a second signal on a small body.
     ("captcha_widget", re.compile(r"g-recaptcha[\"'\s>]|data-sitekey|h-captcha[\"'\s>]", re.I)),
@@ -72,6 +113,7 @@ _MIN_CORROBORATING = 2
 # absent too: an ordinary authentication refusal is a permanent error, not a bot
 # challenge. Both still become challenges if a structural mechanism is present.
 _DENIAL_STATUSES = frozenset({403, 503})
+RATE_LIMIT_STATUS = 429
 _DENIAL_SIGNALS = frozenset({"access_denied", "verification_wording", "bot_wording"})
 _DENIAL_BODY_BYTES = 4_000
 
@@ -108,20 +150,29 @@ def classify_challenge(
         return ChallengeVerdict(False, ())
 
     head = body[:30_000]
-    structural = tuple(name for name, pat in _STRUCTURAL if pat.search(head))
+    structural = tuple(name for name, matches in _STRUCTURAL if matches(head))
     if structural:
         return ChallengeVerdict(True, structural)
 
     technical = tuple(name for name, pat in _TECHNICAL if pat.search(head))
     corroborating = tuple(name for name, pat in _CORROBORATING if pat.search(head))
 
+    # 429 means "slow down", not "prove you are human". Only a real mechanism
+    # (handled above) reclassifies it; everything else keeps RateLimitedError and
+    # its Retry-After.
+    if status == RATE_LIMIT_STATUS:
+        return ChallengeVerdict(False, technical + corroborating)
+
     if technical:
-        small_shell = len(body) < SMALL_BODY_BYTES
+        small = len(body) < SMALL_BODY_BYTES
+        # Size alone proves nothing — a short legitimate release is not a shell.
+        # It only bounds where weaker evidence is trusted.
         denied = status in _DENIAL_STATUSES
         in_context = bool(_CHALLENGE_CONTEXT.search(head))
-        if small_shell or denied or corroborating or in_context:
+        corroborated = small and bool(corroborating)
+        multi_signal = small and (len(technical) + len(corroborating)) >= 2
+        if denied or in_context or corroborated or multi_signal:
             return ChallengeVerdict(True, technical + corroborating)
-        # A large 200 article merely quoting the token stays usable.
         return ChallengeVerdict(False, technical)
     if len(body) < SMALL_BODY_BYTES and len(corroborating) >= _MIN_CORROBORATING:
         return ChallengeVerdict(True, corroborating)

@@ -46,18 +46,12 @@ MAX_REDIRECTS = 5
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
-# Never replayed to a different host on a redirect.
 # Dropped on any origin change. Host goes too: it names the previous origin.
 _SENSITIVE_HEADERS = frozenset(
     {"authorization", "cookie", "proxy-authorization", "x-api-key", "host"}
 )
 _MAX_RETRY_AFTER_SECONDS = 30.0
 _DEFAULT_PORTS = {"http": 80, "https": 443}
-# Outcomes no alternative fingerprint or browser can improve on.
-_CONCLUSIVE_ERRORS = (
-    ChallengeDetected, UnsupportedDocument, ContentTypeMismatch, EmptyContent,
-    RedirectLoop, TooManyRedirects, UnsafeRequestTarget, RateLimitedError,
-)
 
 # Tier 1: Browser-like UA — works for most sites
 _BROWSER_HEADERS = {
@@ -179,7 +173,9 @@ def _sync_requests_get(url: str, headers: dict, timeout: float) -> tuple[int, di
             resp = session.get(url, timeout=timeout, allow_redirects=False)
             return resp.status_code, dict(resp.headers), resp.text, resp.content
     except _requests.RequestException as exc:
-        raise TransientFetchError(f"requests transport error: {type(exc).__name__}") from exc
+        raise TransientFetchError(
+            f"requests transport error: {type(exc).__name__}", url=url
+        ) from exc
 
 
 def _safe_url(url: str) -> str:

@@ -183,3 +183,35 @@ RATE_LIMITED_WITH_CHALLENGE = (
 
 # Browser navigation returning a PDF.
 BROWSER_PDF_HTML = "<html><body>%PDF-1.4 binary payload</body></html>"
+
+
+def small_article_mentioning(marker: str) -> str:
+    """A short but legitimate press release quoting a CDN/challenge token.
+
+    Sized in the range the audit observed for real FinCEN detail pages
+    (~0.9–3 KB of extracted text), so short length alone must not be read as
+    evidence of a verification shell.
+    """
+    return (
+        "<!DOCTYPE html><html><head><title>FinCEN Alert</title></head><body>"
+        f"<p>FinCEN issued an alert after analysts observed {marker} referenced "
+        "in the reporting. "
+        + ("The advisory describes the typology in brief. " * 40)
+        + "</p></body></html>"
+    )
+
+
+def large_article_quoting_mechanism(token: str) -> str:
+    """A long security article quoting a challenge endpoint in prose and a code block.
+
+    The token appears only as text, never as a form action, script call or
+    element id, so it must not read as a live mechanism.
+    """
+    return (
+        "<!DOCTYPE html><html><head><title>CDN Challenge Analysis</title></head><body>"
+        f"<article><p>The vendor documentation refers to {token} when describing "
+        "the interstitial flow. Analysts reproduced the behaviour in a lab.</p>"
+        f"<pre><code>GET {token} HTTP/1.1</code></pre>"
+        + ("<p>Further analysis of the observed traffic continues here. </p>" * 300)
+        + "</article></body></html>"
+    )

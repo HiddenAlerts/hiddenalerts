@@ -406,8 +406,16 @@ def test_large_article_quoting_a_technical_marker_stays_usable(marker):
 
 
 @pytest.mark.parametrize("marker", ["AkamaiGHost", "bm-verify"])
-def test_technical_marker_is_conclusive_on_a_small_shell(marker):
+def test_small_size_alone_does_not_make_a_technical_marker_conclusive(marker):
+    """A short legitimate release is not a verification shell."""
     body = f"<html><body><p>{marker}</p></body></html>"
+    assert not classify_challenge(body, content_type="text/html", status=200)
+
+
+@pytest.mark.parametrize("marker", ["AkamaiGHost", "bm-verify"])
+def test_technical_marker_becomes_conclusive_with_corroboration(marker):
+    body = (f'<html><head><meta http-equiv="refresh" content="1; url=/x"></head>'
+            f"<body><p>{marker} — security check in progress</p></body></html>")
     assert classify_challenge(body, content_type="text/html", status=200)
 
 
