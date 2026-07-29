@@ -137,7 +137,7 @@ async def test_http_403_doj_interstitial_is_a_challenge_not_a_403():
     with pytest.raises(ChallengeDetected) as exc:
         await _fetch(send, "https://x.test/a", accept=AcceptPolicy.ARTICLE)
     assert exc.value.status == 403
-    assert "akamai_bm_verify" in exc.value.signals
+    assert "doj_interstitial" in exc.value.signals
 
 
 @pytest.mark.asyncio
@@ -183,7 +183,7 @@ async def test_403_challenge_skips_every_fallback_tier(monkeypatch):
 
     async def _no_browser(*a, **k):
         tiers.append("playwright")
-        return 200, "", ""
+        return 200, "", "text/html", ""
 
     monkeypatch.setattr(source_base, "_playwright_get", _no_browser)
 
@@ -353,34 +353,34 @@ def _force_browser(monkeypatch, browser_result):
 
 @pytest.mark.asyncio
 async def test_playwright_challenge_result_is_rejected(monkeypatch):
-    _force_browser(monkeypatch, (200, "https://x.test/a", DOJ_INTERSTITIAL))
+    _force_browser(monkeypatch, (200, "https://x.test/a", "text/html", DOJ_INTERSTITIAL))
     with pytest.raises(ChallengeDetected):
         await _adapter().fetch("https://x.test/a", accept=AcceptPolicy.ARTICLE,
-                               limiter=_limiter())
+                               allow_browser=True, limiter=_limiter())
 
 
 @pytest.mark.asyncio
 async def test_playwright_http_error_result_is_rejected(monkeypatch):
-    _force_browser(monkeypatch, (404, "https://x.test/a", "<html><body>Not found</body></html>"))
+    _force_browser(monkeypatch, (404, "https://x.test/a", "text/html", "<html><body>Not found</body></html>"))
     with pytest.raises(PermanentFetchError) as exc:
         await _adapter().fetch("https://x.test/a", accept=AcceptPolicy.ARTICLE,
-                               limiter=_limiter())
+                               allow_browser=True, limiter=_limiter())
     assert "404" in str(exc.value)
 
 
 @pytest.mark.asyncio
 async def test_playwright_empty_result_is_rejected(monkeypatch):
-    _force_browser(monkeypatch, (200, "https://x.test/a", "   "))
+    _force_browser(monkeypatch, (200, "https://x.test/a", "text/html", "   "))
     with pytest.raises(EmptyContent):
         await _adapter().fetch("https://x.test/a", accept=AcceptPolicy.ARTICLE,
-                               limiter=_limiter())
+                               allow_browser=True, limiter=_limiter())
 
 
 @pytest.mark.asyncio
 async def test_playwright_preserves_status_and_final_url(monkeypatch):
-    _force_browser(monkeypatch, (200, "https://x.test/final-page", ARTICLE_HTML))
+    _force_browser(monkeypatch, (200, "https://x.test/final-page", "text/html", ARTICLE_HTML))
     result = await _adapter().fetch("https://x.test/a", accept=AcceptPolicy.ARTICLE,
-                                    limiter=_limiter())
+                                    allow_browser=True, limiter=_limiter())
     assert result.final_url == "https://x.test/final-page"
     assert result.status == 200
     assert result.hosts == ("x.test",)
@@ -388,10 +388,10 @@ async def test_playwright_preserves_status_and_final_url(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_playwright_result_must_satisfy_the_content_policy(monkeypatch):
-    _force_browser(monkeypatch, (200, "https://x.test/a", ORDINARY_HTML_LISTING))
+    _force_browser(monkeypatch, (200, "https://x.test/a", "text/html", ORDINARY_HTML_LISTING))
     with pytest.raises(ContentTypeMismatch):
         await _adapter().fetch("https://x.test/a", accept=AcceptPolicy.FEED,
-                               limiter=_limiter())
+                               allow_browser=True, limiter=_limiter())
 
 
 # ---------------------------------------------------------------------------
@@ -412,7 +412,7 @@ def _tier2_raises(monkeypatch, exc_factory):
 
     async def _browser(*a, **k):
         launched.append("playwright")
-        return 200, "", ARTICLE_HTML
+        return 200, "", "text/html", ARTICLE_HTML
 
     monkeypatch.setattr(source_base, "_sync_requests_get", _requests)
     monkeypatch.setattr(source_base, "_playwright_get", _browser)

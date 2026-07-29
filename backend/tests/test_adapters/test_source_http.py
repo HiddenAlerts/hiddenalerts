@@ -147,7 +147,10 @@ def _html(body, ctype="text/html; charset=utf-8", status=200):
 def test_doj_interstitial_is_a_challenge():
     verdict = classify_challenge(DOJ_INTERSTITIAL, content_type="text/html")
     assert verdict
-    assert "akamai_bm_verify" in verdict.signals
+    # Structural markers (the interstitial's own endpoint/elements) are what make
+    # this conclusive — the bm-verify token alone is only contextual evidence.
+    assert "doj_interstitial" in verdict.signals
+    assert "akamai_sec_verify" in verdict.signals
 
 
 def test_doj_interstitial_matches_the_observed_size_band():
@@ -252,7 +255,7 @@ async def test_challenge_response_raises_rather_than_returning_empty_article():
     send, _ = _responder({"https://x.test/a": _html(DOJ_INTERSTITIAL)})
     with pytest.raises(ChallengeDetected) as exc:
         await _fetch_via(send, "https://x.test/a", accept=AcceptPolicy.ARTICLE)
-    assert "akamai_bm_verify" in exc.value.signals
+    assert "doj_interstitial" in exc.value.signals
     assert exc.value.status == 200
 
 

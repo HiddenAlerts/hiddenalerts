@@ -19,18 +19,33 @@ from enum import Enum
 # signals only count below this bound.
 SMALL_BODY_BYTES = 15_000
 
-# Markers specific enough to stand alone. Each names a verification mechanism
-# rather than a library that a normal page might merely reference.
-_CONCLUSIVE = (
-    ("akamai_bm_verify", re.compile(r"bm-verify", re.I)),
+# Structural markers: an actual verification mechanism present in the document —
+# a challenge endpoint, an interstitial element, a challenge form. A normal
+# article does not contain these, so they stand alone at any size.
+_STRUCTURAL = (
     ("akamai_sec_verify", re.compile(r"/_sec/verify", re.I)),
     ("doj_interstitial", re.compile(r"doj-interstitial", re.I)),
     ("akamai_interstitial_logo", re.compile(r"akam-logo", re.I)),
-    ("akamai_ghost", re.compile(r"AkamaiGHost", re.I)),
-    ("akamai_reference", re.compile(r"Reference&#32;&#35;\d|akamai\.net/errorpage", re.I)),
-    ("cloudflare_challenge", re.compile(r"cf-browser-verification|cf_chl_|cf-challenge", re.I)),
+    ("cloudflare_challenge", re.compile(r"cf-browser-verification|cf-challenge", re.I)),
     ("cloudflare_wait", re.compile(r"Checking if the site connection is secure", re.I)),
     ("challenge_form", re.compile(r"challenge-form|captcha-delivery|/cdn-cgi/challenge-platform", re.I)),
+)
+
+# Technical markers: real vendor tokens, but a security article can quote them in
+# prose. They are conclusive only in context — a small verification shell, an HTTP
+# denial status, corroboration by another signal, or challenge-specific markup.
+_TECHNICAL = (
+    ("akamai_bm_verify", re.compile(r"bm-verify", re.I)),
+    ("akamai_ghost", re.compile(r"AkamaiGHost", re.I)),
+    ("akamai_reference", re.compile(r"Reference&#32;&#35;\d|akamai\.net/errorpage", re.I)),
+    ("cloudflare_token", re.compile(r"cf_chl_", re.I)),
+)
+
+# Markup that shows a technical marker is being *used*, not merely mentioned.
+_CHALLENGE_CONTEXT = re.compile(
+    r"<form[^>]*(challenge|verify)|<script[^>]*(challenge|/_sec/)|"
+    r"(action|src|href)\s*=\s*[\"\'][^\"\']*(challenge|verify)",
+    re.I,
 )
 
 # Weaker hints. Any one of these can appear on a legitimate page, so a challenge
@@ -48,11 +63,15 @@ _CORROBORATING = (
 
 _MIN_CORROBORATING = 2
 
-# On an error status a single strong denial/verification marker is enough: a
-# short 403/503 refusal page is terminal, and retrying it with another
-# fingerprint or a browser only amplifies requests against a host already
-# refusing us. A 200 article merely discussing access denial is unaffected.
-_DENIAL_STATUSES = frozenset({401, 403, 429, 503})
+# On an error status a single strong denial marker is enough: a short 403/503
+# refusal page is terminal, and retrying it with another fingerprint or a browser
+# only amplifies requests against a host already refusing us.
+#
+# 429 is deliberately absent — it means "slow down", and must keep producing
+# RateLimitedError with its Retry-After rather than being reclassified. 401 is
+# absent too: an ordinary authentication refusal is a permanent error, not a bot
+# challenge. Both still become challenges if a structural mechanism is present.
+_DENIAL_STATUSES = frozenset({403, 503})
 _DENIAL_SIGNALS = frozenset({"access_denied", "verification_wording", "bot_wording"})
 _DENIAL_BODY_BYTES = 4_000
 
@@ -89,11 +108,21 @@ def classify_challenge(
         return ChallengeVerdict(False, ())
 
     head = body[:30_000]
-    conclusive = tuple(name for name, pat in _CONCLUSIVE if pat.search(head))
-    if conclusive:
-        return ChallengeVerdict(True, conclusive)
+    structural = tuple(name for name, pat in _STRUCTURAL if pat.search(head))
+    if structural:
+        return ChallengeVerdict(True, structural)
 
+    technical = tuple(name for name, pat in _TECHNICAL if pat.search(head))
     corroborating = tuple(name for name, pat in _CORROBORATING if pat.search(head))
+
+    if technical:
+        small_shell = len(body) < SMALL_BODY_BYTES
+        denied = status in _DENIAL_STATUSES
+        in_context = bool(_CHALLENGE_CONTEXT.search(head))
+        if small_shell or denied or corroborating or in_context:
+            return ChallengeVerdict(True, technical + corroborating)
+        # A large 200 article merely quoting the token stays usable.
+        return ChallengeVerdict(False, technical)
     if len(body) < SMALL_BODY_BYTES and len(corroborating) >= _MIN_CORROBORATING:
         return ChallengeVerdict(True, corroborating)
 

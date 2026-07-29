@@ -109,7 +109,7 @@ def _no_browser(monkeypatch):
 
     async def _browser(*a, **k):
         launched.append("playwright")
-        return 200, "https://x.test/a", ARTICLE_HTML
+        return 200, "https://x.test/a", "text/html", ARTICLE_HTML
 
     monkeypatch.setattr(source_base, "_playwright_get", _browser)
     return launched
@@ -214,12 +214,12 @@ async def test_two_ordinary_403s_still_reach_playwright(monkeypatch):
 
     async def _browser(*a, **k):
         launched.append("playwright")
-        return 200, "https://x.test/a", ARTICLE_HTML
+        return 200, "https://x.test/a", "text/html", ARTICLE_HTML
 
     monkeypatch.setattr(source_base, "_playwright_get", _browser)
 
     result = await _adapter().fetch("https://x.test/a", accept=AcceptPolicy.ARTICLE,
-                                    limiter=_limiter())
+                                    allow_browser=True, limiter=_limiter())
     assert launched == ["playwright"]
     assert result.status == 200
 
@@ -262,35 +262,35 @@ def _browser_returns(monkeypatch, result):
 
 @pytest.mark.asyncio
 async def test_browser_status_none_with_html_is_rejected(monkeypatch):
-    _browser_returns(monkeypatch, (None, "https://x.test/final", ARTICLE_HTML))
+    _browser_returns(monkeypatch, (None, "https://x.test/final", "text/html", ARTICLE_HTML))
     with pytest.raises(TransientFetchError) as exc:
         await _adapter().fetch("https://x.test/a", accept=AcceptPolicy.ARTICLE,
-                               limiter=_limiter())
+                               allow_browser=True, limiter=_limiter())
     assert "no HTTP response" in str(exc.value)
     assert "x.test/final" in exc.value.url
 
 
 @pytest.mark.asyncio
 async def test_browser_status_none_with_empty_html_is_rejected(monkeypatch):
-    _browser_returns(monkeypatch, (None, "https://x.test/final", ""))
+    _browser_returns(monkeypatch, (None, "https://x.test/final", "text/html", ""))
     with pytest.raises(TransientFetchError):
         await _adapter().fetch("https://x.test/a", accept=AcceptPolicy.ARTICLE,
-                               limiter=_limiter())
+                               allow_browser=True, limiter=_limiter())
 
 
 @pytest.mark.asyncio
 async def test_browser_hosts_include_initial_and_final(monkeypatch):
-    _browser_returns(monkeypatch, (200, "https://www.justice.gov/opa/pr/x", ARTICLE_HTML))
+    _browser_returns(monkeypatch, (200, "https://www.justice.gov/opa/pr/x", "text/html", ARTICLE_HTML))
     result = await _adapter().fetch("https://www.fbi.gov/a", accept=AcceptPolicy.ARTICLE,
-                                    limiter=_limiter())
+                                    allow_browser=True, limiter=_limiter())
     assert result.hosts == ("www.fbi.gov", "www.justice.gov")
 
 
 @pytest.mark.asyncio
 async def test_browser_hosts_collapse_when_no_host_change(monkeypatch):
-    _browser_returns(monkeypatch, (200, "https://x.test/a", ARTICLE_HTML))
+    _browser_returns(monkeypatch, (200, "https://x.test/a", "text/html", ARTICLE_HTML))
     result = await _adapter().fetch("https://x.test/a", accept=AcceptPolicy.ARTICLE,
-                                    limiter=_limiter())
+                                    allow_browser=True, limiter=_limiter())
     assert result.hosts == ("x.test",)
 
 
@@ -592,7 +592,7 @@ async def test_short_403_denial_does_not_amplify_requests(monkeypatch):
 
     async def _browser(*a, **k):
         tiers.append("playwright")
-        return 200, "", ARTICLE_HTML
+        return 200, "", "text/html", ARTICLE_HTML
 
     monkeypatch.setattr(source_base, "_playwright_get", _browser)
 

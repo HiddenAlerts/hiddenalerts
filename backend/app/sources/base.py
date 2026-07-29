@@ -1,6 +1,7 @@
 import asyncio
 import ipaddress
 import logging
+import socket
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ from app.sources.http_errors import (
     EmptyContent,
     SourceFetchError,
     UnsafeRequestTarget,
+    redact_url,
     ContentTypeMismatch,
     PermanentFetchError,
     RateLimitedError,
@@ -181,21 +183,8 @@ def _sync_requests_get(url: str, headers: dict, timeout: float) -> tuple[int, di
 
 
 def _safe_url(url: str) -> str:
-    """URL safe to log: no credentials, no query string, no fragment.
-
-    Query params and userinfo can both carry tokens. Keeps scheme, host, a
-    non-default port and the path, which is all a diagnostic needs.
-    """
-    parts = urlsplit(url)
-    host = normalize_host(parts.hostname)
-    try:
-        port = parts.port
-    except ValueError:
-        port = None
-    netloc = f"[{host}]" if ":" in host else host
-    if port and port not in (_DEFAULT_PORTS.get(parts.scheme.lower()),):
-        netloc = f"{netloc}:{port}"
-    return f"{parts.scheme}://{netloc}{parts.path}"
+    """Log-safe URL. Single implementation lives in ``http_errors.redact_url``."""
+    return redact_url(url)
 
 
 def _reject_challenge_or_binary(
@@ -253,6 +242,27 @@ def _origin(url: str) -> tuple[str, str, int]:
     return scheme, normalize_host(parts.hostname), port
 
 
+def _is_noncanonical_numeric_host(host: str) -> str | bool:
+    """True for numeric host forms the OS resolves but ``ipaddress`` rejects.
+
+    Uses ``inet_aton``, which parses the legacy dotted/octal/hex/integer forms
+    without touching DNS. A host that ``ipaddress`` already accepted is canonical
+    and is handled by the caller's normal address checks.
+    """
+    bare = host.strip("[]")
+    try:
+        ipaddress.ip_address(bare)
+        return False  # canonical — caller applies the private/loopback rules
+    except ValueError:
+        pass
+    try:
+        socket.inet_aton(bare)
+    except OSError:
+        # Not numeric at all; a genuine hostname.
+        return False
+    return True
+
+
 def _unsafe_target_reason(url: str) -> str | None:
     """Reason a URL must not be requested, or None if it is fine.
 
@@ -274,9 +284,16 @@ def _unsafe_target_reason(url: str) -> str | None:
         parts.port
     except ValueError:
         return "invalid port"
-    host = normalize_host(parts.hostname)
+    try:
+        host = normalize_host(parts.hostname)
+    except ValueError:
+        return "malformed host"
     if not host:
         return "URL has no host"
+    if _is_noncanonical_numeric_host(host):
+        # 2130706433 / 0x7f000001 / 017700000001 / 127.1 all resolve to
+        # 127.0.0.1 in the OS resolver. Only canonical notation is accepted.
+        return f"ambiguous numeric address {host}"
     if host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".home.arpa")):
         return f"internal hostname {host}"
     try:
@@ -400,8 +417,10 @@ async def _follow(
     raise TooManyRedirects(f"exceeded {MAX_REDIRECTS} redirects", url=current)
 
 
-async def _playwright_get(url: str, timeout: float, *, limiter=None) -> tuple[int | None, str, str]:
-    """Headless Chromium fetch. Returns (status, final_url, html).
+async def _playwright_get(
+    url: str, timeout: float, *, limiter=None
+) -> tuple[int | None, str, str, str]:
+    """Headless Chromium fetch. Returns (status, final_url, content_type, html).
 
     The host limiter is applied to the initial navigation only. Redirects and
     sub-resources fetched inside the browser cannot be spaced individually
@@ -426,8 +445,11 @@ async def _playwright_get(url: str, timeout: float, *, limiter=None) -> tuple[in
                 url, timeout=int(timeout * 1000), wait_until="domcontentloaded"
             )
             status = response.status if response is not None else None
+            content_type = ""
+            if response is not None:
+                content_type = (response.headers or {}).get("content-type", "")
             final_url = page.url or url
-            return status, final_url, await page.content()
+            return status, final_url, content_type, await page.content()
         finally:
             await browser.close()
 
@@ -475,6 +497,7 @@ class BaseSourceAdapter(ABC):
         accept: AcceptPolicy = AcceptPolicy.ANY_TEXT,
         retries: int = 3,
         timeout: float = 30.0,
+        allow_browser: bool = False,
         limiter=None,
     ) -> FetchResult:
         """Fetch one URL through the shared boundary and return a structured result.
@@ -484,10 +507,16 @@ class BaseSourceAdapter(ABC):
         Tier 2b — requests with minimal headers
         Tier 3  — Playwright, only for pages that need JavaScript rendering
 
-        Tiers 2 and 3 are reached only after an HTTP 403. A detected challenge or
-        an unsupported document is conclusive: it stops retries, skips the
-        remaining tiers, never launches a browser, and propagates immediately.
-        Every attempt, retry and redirect hop passes through the host limiter.
+        Tiers 2 and 3 are reached only after an ordinary HTTP 403. A detected
+        challenge or an unsupported document is conclusive: it stops retries,
+        skips the remaining tiers, never launches a browser, and propagates
+        immediately. Every attempt, retry and redirect hop passes through the host
+        limiter.
+
+        Browser rendering is **opt-in**: ``allow_browser=True`` is required, and
+        even then it runs only after ordinary 403s from every direct tier. No
+        current source enables it. A future adapter must justify the need and test
+        it explicitly rather than inheriting browser mode by default.
         """
         assert_safe_target(url)
         limiter = limiter or host_limiter
@@ -585,6 +614,17 @@ class BaseSourceAdapter(ABC):
                     f"tier {tier} request failed", url=url
                 ) from exc
 
+        if not allow_browser:
+            log.debug(
+                "%s: browser rendering not permitted for %s, stopping after direct tiers",
+                label, _safe_url(url),
+            )
+            if isinstance(last_exc, SourceFetchError):
+                raise last_exc
+            raise PermanentFetchError(
+                "all direct tiers returned HTTP 403", url=url, status=403
+            ) from last_exc
+
         log.debug("%s: escalating %s to browser rendering", label, _safe_url(url))
         try:
             return await self._browser_fetch(url, accept, limiter, label)
@@ -604,20 +644,28 @@ class BaseSourceAdapter(ABC):
         an error status, an unsupported document, an unacceptable content kind or
         an empty page are all rejected rather than reported as a success.
         """
-        status, final_url, html = await _playwright_get(url, timeout=60.0, limiter=limiter)
+        status, final_url, content_type, html = await _playwright_get(
+            url, timeout=60.0, limiter=limiter
+        )
+        final_url = final_url or url
 
         if status is None:
             # No HTTP response reached the page. Inventing a 200 would report a
             # navigation failure as a successful fetch.
             raise TransientFetchError(
-                "browser navigation produced no HTTP response",
-                url=_safe_url(final_url or url),
+                "browser navigation produced no HTTP response", url=final_url
             )
 
-        kind = sniff_body_kind(html, b"", "text/html")
-        _reject_challenge_or_binary(final_url, status, "text/html", html, b"", kind, accept)
+        # The navigation already happened, so this check stops unsafe *content*
+        # from being returned — it cannot prevent the browser request itself.
+        # Preventive interception of browser navigation is out of scope.
+        assert_safe_target(final_url)
 
-        if status >= 400:
+        if status in _REDIRECT_STATUSES or 300 <= status < 400:
+            raise PermanentFetchError(
+                f"browser navigation ended on HTTP {status}", url=final_url, status=status
+            )
+        if not (200 <= status < 300):
             if status in _RETRY_STATUSES:
                 raise TransientFetchError(
                     "browser navigation failed", url=final_url, status=status
@@ -625,7 +673,12 @@ class BaseSourceAdapter(ABC):
             raise PermanentFetchError(
                 f"browser navigation returned HTTP {status}", url=final_url, status=status
             )
-        _validate_success_body(final_url, status, "text/html", html, kind, accept)
+
+        kind = sniff_body_kind(html, b"", content_type)
+        _reject_challenge_or_binary(
+            final_url, status, content_type, html, b"", kind, accept
+        )
+        _validate_success_body(final_url, status, content_type, html, kind, accept)
 
         # Only the initial and final hosts are knowable: intermediate browser
         # redirect hops are not observable without request interception.
@@ -635,7 +688,7 @@ class BaseSourceAdapter(ABC):
 
         return FetchResult(
             url=url, final_url=final_url, status=status,
-            content_type="text/html", text=html, redirects=0, hosts=hosts,
+            content_type=content_type or "text/html", text=html, redirects=0, hosts=hosts,
         )
 
     async def _http_get(self, url: str, retries: int = 3, timeout: float = 30.0) -> str:

@@ -152,3 +152,34 @@ GENERIC_XML = (
     '<?xml version="1.0"?><catalog><book id="1"><title>A</title></book></catalog>'
 )
 GENERIC_XML_NO_PROLOGUE = '<catalog><book id="1"><title>A</title></book></catalog>'
+
+
+def large_article_mentioning(marker: str) -> str:
+    """A genuine security article that merely quotes a CDN/challenge token.
+
+    Comfortably above the small-shell threshold, so a technical marker appearing
+    as prose must not classify it as blocked.
+    """
+    return (
+        "<!DOCTYPE html><html><head><title>Threat Report</title></head><body><article>"
+        f"<p>Researchers observed {marker} referenced in the intrusion set. "
+        + ("A further sentence of genuine reporting continues the analysis here. " * 400)
+        + "</p></article></body></html>"
+    )
+
+
+# 429 body that mentions automated access but carries no challenge mechanism.
+RATE_LIMITED_BODY = (
+    "<!DOCTYPE html><html><body><h1>Too Many Requests</h1>"
+    "<p>Automated access is limited. Please retry later.</p></body></html>"
+)
+
+# 429 that really is a challenge: a challenge form is present.
+RATE_LIMITED_WITH_CHALLENGE = (
+    "<!DOCTYPE html><html><body><h1>Too Many Requests</h1>"
+    '<form class="challenge-form" action="/cdn-cgi/challenge-platform/verify">'
+    "<button>Verify</button></form></body></html>"
+)
+
+# Browser navigation returning a PDF.
+BROWSER_PDF_HTML = "<html><body>%PDF-1.4 binary payload</body></html>"

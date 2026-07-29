@@ -4,16 +4,52 @@ Adapters branch on the exception type — never on message text — so a challen
 content-type mismatch, a transient outage and an unsupported document can be told
 apart without parsing strings.
 
-No exception carries a response body, cookies or an Authorization header.
+No exception carries a response body, cookies or an Authorization header, and the
+URL on every exception is redacted on construction.
 """
+from urllib.parse import urlsplit
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+INVALID_URL = "<invalid-url>"
+
+
+def redact_url(url: str) -> str:
+    """Return a URL safe to log or attach to an exception.
+
+    Drops credentials, query string and fragment; keeps scheme, hostname, a
+    non-default port and the path. Never raises — an unparseable URL becomes
+    ``"<invalid-url>"`` rather than leaking the original string.
+    """
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url)
+        scheme = (parts.scheme or "").lower()
+        host = (parts.hostname or "").strip().lower().rstrip(".")
+        if not host:
+            return INVALID_URL
+        try:
+            port = parts.port
+        except ValueError:
+            port = None
+        netloc = f"[{host}]" if ":" in host else host
+        if port and port != _DEFAULT_PORTS.get(scheme):
+            netloc = f"{netloc}:{port}"
+        return f"{scheme}://{netloc}{parts.path}" if scheme else INVALID_URL
+    except Exception:
+        return INVALID_URL
 
 
 class SourceFetchError(Exception):
-    """Base class for every failure the shared fetch layer raises."""
+    """Base class for every failure the shared fetch layer raises.
+
+    ``url`` is redacted on construction, so no caller can accidentally attach
+    credentials or query tokens to an exception.
+    """
 
     def __init__(self, message: str, *, url: str = "", status: int | None = None) -> None:
         super().__init__(message)
-        self.url = url
+        self.url = redact_url(url)
         self.status = status
 
 
