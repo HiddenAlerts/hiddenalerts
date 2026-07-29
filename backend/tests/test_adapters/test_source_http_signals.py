@@ -113,8 +113,19 @@ def test_two_technical_markers_on_a_short_document_are_conclusive():
     assert classify_challenge(body, content_type="text/html", status=200)
 
 
-def test_technical_marker_in_challenge_markup_is_conclusive_at_any_size():
-    body = ('<html><body><form action="/verify">bm-verify</form>'
+def test_generic_verify_context_is_conclusive_only_on_a_shell():
+    """A generic /verify form is weak evidence, not a known mechanism."""
+    shell = '<html><body><form action="/verify">bm-verify</form></body></html>'
+    assert classify_challenge(shell, content_type="text/html", status=200)
+
+    padded = ('<html><body><form action="/verify">bm-verify</form>'
+              + ("padding text. " * 2000) + "</body></html>")
+    assert len(padded) > SMALL_BODY_BYTES
+    assert not classify_challenge(padded, content_type="text/html", status=200)
+
+
+def test_known_mechanism_stays_conclusive_at_any_size():
+    body = ('<html><body><form id="challenge-form" action="/verify">bm-verify</form>'
             + ("padding text. " * 2000) + "</body></html>")
     assert len(body) > SMALL_BODY_BYTES
     assert classify_challenge(body, content_type="text/html", status=200)

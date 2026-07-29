@@ -238,7 +238,7 @@ def _origin(url: str) -> tuple[str, str, int]:
     return scheme, normalize_host(parts.hostname), port
 
 
-def _is_noncanonical_numeric_host(host: str) -> str | bool:
+def _is_noncanonical_numeric_host(host: str) -> bool:
     """True for numeric host forms the OS resolves but ``ipaddress`` rejects.
 
     Uses ``inet_aton``, which parses the legacy dotted/octal/hex/integer forms

@@ -425,10 +425,14 @@ def test_technical_marker_is_conclusive_at_a_denial_status(marker):
     assert classify_challenge(body, content_type="text/html", status=403)
 
 
-def test_technical_marker_is_conclusive_in_challenge_markup():
-    body = ('<html><body><form action="/verify">bm-verify</form>'
-            + ("padding text. " * 1500) + "</body></html>")
-    assert classify_challenge(body, content_type="text/html", status=200)
+def test_technical_marker_with_generic_verify_context_needs_a_shell():
+    """Generic verify markup is weak: it only counts without article content."""
+    shell = '<html><body><form action="/verify">bm-verify</form></body></html>'
+    assert classify_challenge(shell, content_type="text/html", status=200)
+
+    padded = ('<html><body><form action="/verify">bm-verify</form>'
+              + ("padding text. " * 1500) + "</body></html>")
+    assert not classify_challenge(padded, content_type="text/html", status=200)
 
 
 @pytest.mark.asyncio

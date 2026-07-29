@@ -15,9 +15,10 @@ article demonstrating ``fetch('/_sec/verify')`` is not mistaken for one running
 it. These are heuristics, not a parser.
 """
 import re
+import warnings
 from enum import Enum
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from bs4.element import Comment
 
 # Verification shells observed in the source audits are 2.3–2.6 KB. Legitimate
@@ -38,6 +39,14 @@ _DOC_CONTAINERS = ("pre", "code", "textarea", "samp", "kbd", "xmp", "template")
 # Tags whose src/data actually loads a resource.
 _RESOURCE_TAGS = ("iframe", "script", "embed", "object", "frame")
 
+# Script types the browser executes. Anything else — JSON-LD, JSON, manifests,
+# client-side templates — is data a page merely carries, so a challenge call
+# quoted inside it is documentation, not a mechanism.
+_EXECUTABLE_SCRIPT_TYPES = frozenset({
+    "", "text/javascript", "application/javascript", "text/ecmascript",
+    "application/ecmascript", "module", "text/jscript",
+})
+
 # Article-content length above which a page is treated as real content rather
 # than a verification shell. Weak evidence is not combined on such a page. This
 # is not a minimum length for accepting a document — short releases are fine; it
@@ -45,11 +54,19 @@ _RESOURCE_TAGS = ("iframe", "script", "embed", "object", "frame")
 _CONTENT_TEXT_FLOOR = 400
 
 
+def _is_executable_script(tag) -> bool:
+    """True when a <script> is JavaScript the browser would run."""
+    declared = (tag.get("type") or "").split(";", 1)[0].strip().lower()
+    return declared in _EXECUTABLE_SCRIPT_TYPES
+
+
 class _ScanView:
     """Executable view of a document, with quoted documentation removed.
 
-    Pure and I/O-free. Falls back to raw-text scanning if parsing fails, which
-    is more conservative rather than less.
+    Pure and I/O-free. If HTML parsing fails, ``parsed`` stays False and every
+    structural check reports nothing — there is **no** raw-text fallback, so a
+    document we cannot parse is never called a challenge on structural grounds.
+    Weak-signal evaluation still runs against the raw text.
     """
 
     __slots__ = ("soup", "scripts", "content_len", "parsed")
@@ -60,12 +77,19 @@ class _ScanView:
         self.content_len = 0
         self.parsed = False
         try:
-            soup = BeautifulSoup(body[:_MAX_SCAN_BYTES], "lxml")
+            with warnings.catch_warnings():
+                # XHTML and feeds are parsed with the HTML parser on purpose:
+                # this view looks for HTML structure (forms, iframes, scripts),
+                # it does not model the document.
+                warnings.simplefilter("ignore", XMLParsedAsHTMLWarning)
+                soup = BeautifulSoup(body[:_MAX_SCAN_BYTES], "lxml")
             for tag in soup.find_all(_DOC_CONTAINERS):
                 tag.decompose()
             for node in soup.find_all(string=lambda t: isinstance(t, Comment)):
                 node.extract()
-            self.scripts = "\n".join(t.get_text() for t in soup.find_all("script"))
+            self.scripts = "\n".join(
+                t.get_text() for t in soup.find_all("script") if _is_executable_script(t)
+            )
             self.content_len = _article_text_length(soup)
             self.soup = soup
             self.parsed = True
@@ -143,7 +167,13 @@ _DOJ_INTERSTITIAL = re.compile(r"doj-interstitial", re.I)
 _AKAM_LOGO = re.compile(r"akam-logo", re.I)
 _CF_ELEMENT = re.compile(r"cf-browser-verification|cf-challenge", re.I)
 _CF_PLATFORM = re.compile(r"/cdn-cgi/challenge-platform", re.I)
-_CHALLENGE_FORM_ID = re.compile(r"challenge-form|challenge", re.I)
+# Known verification form identifiers, matched as whole tokens so an unrelated
+# name such as "challenge-entry-form" cannot collide.
+_CHALLENGE_FORM_ID = re.compile(
+    r"(?<![\w-])(?:challenge-form|cf-challenge-form|cf-please-wait|"
+    r"cf-browser-verification|captcha-form|verification-form)(?![\w-])",
+    re.I,
+)
 _CHALLENGE_ACTION = re.compile(r"challenge-form|captcha-delivery|/cdn-cgi/challenge-platform", re.I)
 
 
@@ -184,7 +214,11 @@ _TECHNICAL = (
 
 
 def _has_challenge_context(view: _ScanView) -> bool:
-    """A form, loaded resource or script call that is about verification."""
+    """A form, loaded resource or script call that mentions verification.
+
+    Deliberately generic, and therefore *weak*: ``/assets/verify-signature.js``
+    matches. It is only trusted on a page with no article content behind it.
+    """
     token = r"challenge|verify"
     return (
         view.form_action(re.compile(token, re.I))
@@ -291,10 +325,15 @@ def classify_challenge(
 
     if technical:
         denied = status in _DENIAL_STATUSES
-        in_context = _has_challenge_context(view)
-        corroborated = shell and bool(corroborating)
-        multi_signal = shell and (len(technical) + len(corroborating)) >= 2
-        if denied or in_context or corroborated or multi_signal:
+        # Everything below the denial status is weak evidence, so it is only
+        # believed on a shell. A real article that happens to load an asset named
+        # verify-*.js or challenge-*.js stays usable.
+        weak = (
+            bool(corroborating)
+            or _has_challenge_context(view)
+            or len(technical) >= 2
+        )
+        if denied or (shell and weak):
             return ChallengeVerdict(True, technical + corroborating)
         return ChallengeVerdict(False, technical)
 
@@ -362,7 +401,11 @@ class BodyKind(Enum):
     UNKNOWN_TEXT = "unknown_text"
 
 
-_XML_PROLOGUE = re.compile(r"^\s*<\?xml|^\s*<(rss|feed|rdf:RDF)\b", re.I)
+_XML_DECLARATION = re.compile(r"^\s*<\?xml[^>]*\?>", re.I)
+_LEADING_NOISE = re.compile(r"^\s*(?:<!--.*?-->|<!doctype\s+[^>]*>)\s*", re.I | re.S)
+# Explicit feed roots win outright, whether or not an XML declaration precedes.
+_FEED_ROOT = re.compile(r"^\s*<(?:rss|feed|rdf:RDF)\b", re.I)
+_HTML_ROOT = re.compile(r"^\s*(?:<!doctype\s+html\b|<html\b)", re.I)
 _HTML_PROLOGUE = re.compile(r"^\s*<!doctype\s+html|^\s*<html\b", re.I)
 _HTML_ANYWHERE = re.compile(r"<html\b|<head\b|<body\b|<!doctype\s+html", re.I)
 # Structural tags that mean HTML even in a fragment with no document wrapper.
@@ -386,11 +429,18 @@ def sniff_body_kind(body: str, raw: bytes = b"", content_type: str = "") -> Body
         return BodyKind.EMPTY
 
     head = body[:4096]
-    # Feed/XML declarations are unambiguous and take precedence.
-    if _XML_PROLOGUE.search(head):
+    # An XML declaration says how the bytes are encoded, not what the document
+    # is — XHTML starts with one too. Look past it at the actual root element.
+    had_xml_declaration = bool(_XML_DECLARATION.match(head))
+    probe = _XML_DECLARATION.sub("", head, count=1) if had_xml_declaration else head
+    probe = _LEADING_NOISE.sub("", probe, count=1)
+
+    if _FEED_ROOT.match(probe):
         return BodyKind.XML
-    if _HTML_PROLOGUE.search(head) or _HTML_ANYWHERE.search(head):
+    if _HTML_ROOT.match(probe) or _HTML_ANYWHERE.search(head):
         return BodyKind.HTML
+    if had_xml_declaration:
+        return BodyKind.XML
     if _HTML_FRAGMENT.search(head):
         return BodyKind.HTML
 

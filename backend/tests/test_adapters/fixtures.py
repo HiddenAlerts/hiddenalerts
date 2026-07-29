@@ -278,3 +278,80 @@ MALFORMED_LOCATIONS = [
     "//[::1",
     "http://x.test:99999/",
 ]
+
+
+def article_with_data_script(script_type: str, payload: str) -> str:
+    """A real article carrying a challenge call inside a non-executable script."""
+    return (
+        "<!DOCTYPE html><html><head><title>Interstitial Research</title>"
+        f'<script type="{script_type}">{payload}</script></head>'
+        "<body><article><p>"
+        + ("The write-up walks through the observed verification flow. " * 30)
+        + "</p></article></body></html>"
+    )
+
+
+def article_with_executable_script(payload: str) -> str:
+    """The same call in a script the browser would actually run."""
+    return (
+        "<!DOCTYPE html><html><head><title>Page</title></head><body><article><p>"
+        + ("Body prose. " * 30)
+        + f"</p></article><script>{payload}</script></body></html>"
+    )
+
+
+def article_with_generic_asset(marker: str, asset: str) -> str:
+    """A long article that names a vendor token and loads an unrelated asset."""
+    return (
+        "<!DOCTYPE html><html><head><title>Threat Analysis</title>"
+        f'<script src="{asset}"></script></head><body><article><p>'
+        f"The report discusses {marker} at length. "
+        + ("Further analysis of the campaign continues here. " * 120)
+        + "</p></article></body></html>"
+    )
+
+
+JSONLD_WITH_CALLS = (
+    '{"@context":"https://schema.org","@type":"NewsArticle",'
+    '"articleBody":"The demo used fetch(\'/_sec/verify\') and '
+    'xhr.open(\'POST\', \'/_sec/verify\') to reproduce the flow.",'
+    '"description":"Also fetch(\'/cdn-cgi/challenge-platform/example\')."}'
+)
+
+# Legitimate form whose name merely contains the word challenge.
+LEGITIMATE_CHALLENGE_ENTRY_FORM = (
+    "<!DOCTYPE html><html><body><main><article><p>"
+    + ("Entries for the challenge are open until Friday. " * 30)
+    + '</p></article></main><form id="challenge-entry-form" action="/submit">'
+    "<button>Enter</button></form></body></html>"
+)
+
+# XHTML served with an XML declaration, carrying a real challenge form.
+XHTML_CHALLENGE = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" '
+    '"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">'
+    '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Verify</title></head>'
+    '<body><form id="challenge-form" action="/cdn-cgi/challenge-platform/verify">'
+    "<button>Continue</button></form></body></html>"
+)
+
+XHTML_ARTICLE = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Press Release</title></head>'
+    "<body><article><p>"
+    + ("A federal jury returned an indictment today. " * 30)
+    + "</p></article></body></html>"
+)
+
+RSS_WITH_DECLARATION = (
+    '<?xml version="1.0" encoding="utf-8"?><rss version="2.0"><channel>'
+    "<title>Feed</title><item><title>One</title>"
+    "<link>https://example.test/a</link></item></channel></rss>"
+)
+
+ATOM_WITH_DECLARATION = (
+    '<?xml version="1.0" encoding="utf-8"?>'
+    '<feed xmlns="http://www.w3.org/2005/Atom"><title>Feed</title>'
+    "<entry><title>One</title><link href=\"https://example.test/a\"/></entry></feed>"
+)
