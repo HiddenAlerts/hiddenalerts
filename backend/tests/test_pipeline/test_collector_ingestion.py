@@ -18,7 +18,8 @@ from app.models.source import Source
 from app.pipeline import collector
 from app.pipeline.normalizer import compute_url_hash
 from app.services import collection_guard
-from app.sources.base import RawItemStub
+from app.sources.base import RawItemStub, clean_summary_text
+from app.sources.http_errors import TransientFetchError, UnsafeRequestTarget
 
 
 class StubAdapter:
@@ -39,6 +40,10 @@ class StubAdapter:
         if self._fetch_error is not None:
             raise self._fetch_error
         return self._bodies.get(url, f"Body for {url}"), f"<p>{url}</p>"
+
+    def summary_fallback(self, stub, error):
+        # Same contract as BaseSourceAdapter: any non-empty summary will do.
+        return clean_summary_text(stub.summary) or None
 
 
 class _CommitFailingSession:
@@ -505,10 +510,11 @@ async def test_multiple_empty_articles_are_not_mistaken_for_duplicates(
 async def test_feed_summary_is_used_when_the_article_fetch_fails(
     db_session, source, monkeypatch
 ):
+    """Expected unavailability — the adapter decides its summary will serve."""
     adapter = StubAdapter(
         source,
         [_stub("https://example.test/fallback", summary="Summary text")],
-        fetch_error=RuntimeError("upstream unreachable"),
+        fetch_error=TransientFetchError("upstream unreachable", status=503),
     )
     run = await _run(db_session, source, adapter, monkeypatch)
 
@@ -519,6 +525,40 @@ async def test_feed_summary_is_used_when_the_article_fetch_fails(
         )
     ).scalar_one()
     assert stored == "Summary text"
+
+
+@pytest.mark.asyncio
+async def test_terminal_fetch_error_does_not_reach_the_summary(
+    db_session, source, monkeypatch
+):
+    """A target we refused to request must not be papered over with feed text."""
+    adapter = StubAdapter(
+        source,
+        [_stub("https://example.test/unsafe", summary="Summary text")],
+        fetch_error=UnsafeRequestTarget("private address"),
+    )
+    run = await _run(db_session, source, adapter, monkeypatch)
+
+    assert run.status == "success"
+    assert run.items_new == 0
+    assert run.items_skipped_invalid == 1
+
+
+@pytest.mark.asyncio
+async def test_unexpected_error_fails_the_run_instead_of_falling_back(
+    db_session, source, monkeypatch
+):
+    """A bug in an adapter must surface, not degrade silently into summaries."""
+    adapter = StubAdapter(
+        source,
+        [_stub("https://example.test/bug", summary="Summary text")],
+        fetch_error=RuntimeError("adapter bug"),
+    )
+    run = await _run(db_session, source, adapter, monkeypatch)
+
+    assert run.status == "failed"
+    assert "adapter bug" in (run.error_message or "")
+    assert run.items_new == 0
 
 
 # ---------------------------------------------------------------------------

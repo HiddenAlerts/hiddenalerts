@@ -111,6 +111,46 @@ class RawItemData(BaseModel):
     raw_html: str
 
 
+def clean_summary_text(summary: str) -> str:
+    """Normalize a feed summary to plain text.
+
+    Feed descriptions routinely carry markup, tracking pixels and boilerplate
+    links. Scripts, styles and navigation are dropped and whitespace collapsed so
+    the result is safe to store as article text.
+    """
+    if not summary or not summary.strip():
+        return ""
+    soup = BeautifulSoup(summary, "lxml")
+    for tag in soup(["script", "style", "nav", "header", "footer", "aside", "noscript"]):
+        tag.decompose()
+    return " ".join(soup.get_text(separator=" ").split())
+
+
+# Detail-page failures where falling back to the feed summary is reasonable: the
+# article is genuinely unavailable to us, not something we got wrong.
+_FALLBACK_ELIGIBLE = (
+    ChallengeDetected, EmptyContent, RateLimitedError, TransientFetchError,
+    UnsupportedDocument,
+)
+# Failures that mean we asked for the wrong thing, or something is misconfigured.
+# Substituting a summary would paper over a defect.
+_FALLBACK_TERMINAL = (UnsafeRequestTarget, RedirectLoop, TooManyRedirects)
+# Statuses that plausibly mean "this article is not available to us right now".
+_EXPECTED_UNAVAILABLE_STATUSES = frozenset({401, 403, 404, 410, 429, 451})
+
+
+def summary_fallback_allowed(error: Exception) -> bool:
+    """True when a feed summary may stand in for an unavailable article page."""
+    if isinstance(error, _FALLBACK_TERMINAL):
+        return False
+    if isinstance(error, PermanentFetchError):
+        return error.status in _EXPECTED_UNAVAILABLE_STATUSES
+    if isinstance(error, ContentTypeMismatch) and not isinstance(error, UnsupportedDocument):
+        # The wrong kind of page came back — that is a parsing or config problem.
+        return False
+    return isinstance(error, _FALLBACK_ELIGIBLE)
+
+
 def extract_text_from_html(html: str) -> str:
     """Extract readable text from HTML, stripping scripts/styles."""
     soup = BeautifulSoup(html, "lxml")
@@ -481,6 +521,17 @@ class BaseSourceAdapter(ABC):
     async def fetch_items(self) -> list[RawItemData]:
         """Full fetch: stubs + full article content. Used for direct/legacy calls."""
         pass
+
+    def summary_fallback(self, stub: RawItemStub, error: Exception) -> str | None:
+        """Text to store when this item's article page could not be fetched.
+
+        Returns cleaned, normalized text, or ``None`` when the feed summary is
+        not a usable substitute — in which case the collector counts the item as
+        invalid rather than storing something thin. The default accepts any
+        non-empty summary, preserving existing adapter behaviour; a source whose
+        summaries vary in quality should override this and judge per item.
+        """
+        return clean_summary_text(stub.summary) or None
 
     async def fetch_full_article(self, url: str) -> tuple[str, str]:
         """Fetch an article page. Returns (extracted_text, raw_html).

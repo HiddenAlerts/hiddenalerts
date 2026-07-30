@@ -2,11 +2,17 @@ import calendar
 import logging
 from abc import abstractmethod
 from datetime import datetime
+from urllib.parse import urljoin
 
 import feedparser
 from dateutil import parser as dateutil_parser
 
-from app.sources.base import BaseSourceAdapter, RawItemData, RawItemStub
+from app.sources.base import (
+    BaseSourceAdapter,
+    RawItemData,
+    RawItemStub,
+    _unsafe_target_reason,
+)
 from app.sources.response_policy import AcceptPolicy
 
 log = logging.getLogger(__name__)
@@ -54,20 +60,37 @@ class RSSAdapter(BaseSourceAdapter):
             return []
 
         stubs: list[RawItemStub] = []
+        skipped = 0
         for entry in feed.entries:
-            url = entry.get("link", "")
-            if not url:
+            # An entry with no link must be dropped before urljoin, which would
+            # otherwise resolve "" to the feed URL itself and turn a malformed
+            # entry into an item pointing at the feed. Relative links are resolved
+            # against the feed URL for the rare feeds that emit them; anything
+            # that is not a public http(s) target is dropped rather than requested.
+            link = (entry.get("link") or "").strip()
+            title = (entry.get("title") or "").strip()
+            if not link or not title:
+                skipped += 1
+                continue
+            url = urljoin(self.rss_url, link)
+            if _unsafe_target_reason(url):
+                skipped += 1
                 continue
             stubs.append(
                 RawItemStub(
                     source_name=self.source.name,  # type: ignore[attr-defined]
                     item_url=url,
-                    title=entry.get("title", ""),
+                    title=title,
                     published_at=_parse_feed_date(
                         entry.get("published") or entry.get("updated")
                     ),
                     summary=entry.get("summary", ""),
                 )
+            )
+        if skipped:
+            log.info(
+                "RSS feed %s: skipped %d entr%s missing a title or usable link",
+                self.rss_url, skipped, "y" if skipped == 1 else "ies",
             )
 
         log.info(f"RSS feed {self.rss_url}: found {len(stubs)} stubs")

@@ -13,7 +13,8 @@ from app.models.source import Source
 from app.pipeline.deduplicator import get_known_url_hashes, is_content_duplicate
 from app.pipeline.normalizer import compute_content_hash, compute_url_hash
 from app.services.collection_guard import claim_source_run, release_source_run
-from app.sources.base import RawItemStub
+from app.sources.base import RawItemStub, _safe_url, summary_fallback_allowed
+from app.sources.http_errors import SourceFetchError
 from app.sources.registry import get_adapter
 
 log = logging.getLogger(__name__)
@@ -102,23 +103,34 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
 
         # ── Stage 2: Full article fetch — only for new stubs ─────────────────────
         for url_hash, stub in new_stubs:
+            # Article text first; a feed summary only where the adapter says its
+            # own summary is an acceptable substitute for *this* item. The choice
+            # is the adapter's — the collector holds no per-source knowledge.
             try:
                 raw_text, raw_html = await adapter.fetch_full_article(stub.item_url)
-            except Exception as exc:
-                log.warning(
-                    "Source %s: full article fetch failed for %s (%s) — falling back to feed summary",
-                    source.id,
-                    stub.item_url,
-                    exc,
+                content_origin = "article"
+            except SourceFetchError as exc:
+                raw_text, raw_html = "", ""
+                content_origin = "none"
+                if summary_fallback_allowed(exc):
+                    fallback = adapter.summary_fallback(stub, exc)
+                    if fallback:
+                        raw_text = fallback
+                        content_origin = "summary"
+                log.info(
+                    "Source %s '%s': article unavailable for %s (%s) — using %s",
+                    source.id, source.name, _safe_url(stub.item_url),
+                    type(exc).__name__,
+                    "feed summary" if content_origin == "summary" else "no content",
                 )
-                raw_text = stub.summary
-                raw_html = ""
 
             # Nothing usable to persist. Left unstored on purpose so a later run can
             # retry the URL once the upstream fetch recovers.
             if not (raw_text or "").strip():
                 run_log.items_skipped_invalid += 1
-                log.debug("Source %s: no usable content for %s", source.id, stub.item_url)
+                log.debug(
+                    "Source %s: no usable content for %s", source.id, _safe_url(stub.item_url)
+                )
                 continue
 
             content_hash = compute_content_hash(raw_text)
