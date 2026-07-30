@@ -1,55 +1,109 @@
+"""IC3 Public Service Announcements — yearly HTML listing pages.
+
+The listing is a div/card layout: the audit measured ~42 KB of HTML, 16 ``<time>``
+elements and **zero** ``<table>``/``<tr>`` elements. The previous parser read a
+date only from a ``<tr>`` ancestor, so it found none and every IC3 row landed with
+``published_at = NULL``. It also accepted any href containing ``/PSA/``, which is
+why ``/PSA/Archive`` is stored as if it were an article.
+
+Discovery now starts from links that match the real PSA URL shape and reads each
+card's own date, falling back to the date encoded in the URL slug.
+"""
 import logging
-from datetime import datetime
+import re
+from datetime import datetime, timezone
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from app.sources.base import RawItemData, RawItemStub
-from app.sources.rss_adapter import HTMLScraperAdapter, _parse_feed_date
+from app.sources.base import RawItemData, RawItemStub, _unsafe_target_reason
+from app.sources.html_listing import item_date, item_scope
+from app.sources.response_policy import AcceptPolicy
+from app.sources.rss_adapter import HTMLScraperAdapter
 
 log = logging.getLogger(__name__)
 
-_LISTING_YEARS = [2026, 2025, 2024]
-_BASE = "https://www.ic3.gov"
-_NON_HTML_EXTS = (".pdf", ".doc", ".docx", ".xlsx", ".zip", ".ppt", ".pptx")
+# Real PSA articles: /PSA/<4-digit year>/PSA<YYMMDD>, optionally suffixed when
+# more than one lands on a day (…/PSA260515-2). A positive rule like this needs
+# no exclusion list: /PSA/Archive, /PSA/RSS, category and pagination links simply
+# do not match it.
+_PSA_PATH = re.compile(r"^/PSA/(?P<year>\d{4})/PSA(?P<slug>\d{6})(?:-\d+)?/?$", re.I)
+
+# The listing pages the adapter walks each run: the current UTC year and the two
+# before it. This is the depth the hardcoded [2026, 2025, 2024] list covered, and
+# this slice does not change crawl depth — only where the years come from.
+LISTING_YEAR_DEPTH = 3
+
+
+def listing_years(now: datetime | None = None) -> list[int]:
+    """The years to crawl, newest first, derived from the current UTC date.
+
+    ``now`` is injectable so the December/January boundary is testable; a naive
+    value is read as UTC.
+    """
+    moment = now or datetime.now(timezone.utc)
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(timezone.utc)
+    return [moment.year - offset for offset in range(LISTING_YEAR_DEPTH)]
+
+
+def psa_url_date(path_year: str, slug: str) -> datetime | None:
+    """The date encoded in a PSA slug, or ``None`` if it is not a real date.
+
+    ``/PSA/2026/PSA260720`` → 2026-07-20. The two-digit slug year must agree with
+    the four-digit year in the path, and the day must exist — so a typo, a
+    renumbered file or an unrelated six-digit identifier yields nothing rather
+    than a wrong date.
+    """
+    year, month, day = 2000 + int(slug[:2]), int(slug[2:4]), int(slug[4:6])
+    if year != int(path_year):
+        return None
+    try:
+        return datetime(year, month, day)
+    except ValueError:
+        return None
 
 
 class IC3AlertsAdapter(HTMLScraperAdapter):
     """IC3 Public Service Announcements — HTML scrape of yearly listing pages."""
 
+    @property
+    def listing_root(self) -> str:
+        """The PSA root from the source row, e.g. ``https://www.ic3.gov/PSA``.
+
+        Configuration is required: a blank or non-http(s) ``base_url`` raises
+        rather than silently falling back to a hardcoded host, so a bad row shows
+        up as a failed run instead of collecting from somewhere nobody chose.
+        """
+        configured = (getattr(self.source, "base_url", None) or "").strip()
+        if not configured or urlparse(configured).scheme not in ("http", "https"):
+            raise ValueError(
+                f"{self._source_label()}: base_url must be an http(s) PSA listing root, "
+                f"got {configured!r}"
+            )
+        return configured.rstrip("/")
+
+    def listing_urls(self, now: datetime | None = None) -> list[str]:
+        return [f"{self.listing_root}/{year}" for year in listing_years(now)]
+
     async def fetch_item_stubs(self) -> list[RawItemStub]:
-        """Scrape all year listing pages and return stubs — no full article fetches."""
+        """Scrape each year listing page and return stubs — no article fetches.
+
+        Duplicate URLs across year pages are left in: the collector deduplicates
+        by normalized URL hash, within the batch as well as against storage.
+        """
         stubs: list[RawItemStub] = []
-        seen_urls: set[str] = set()
 
-        for year in _LISTING_YEARS:
-            listing_url = f"{_BASE}/PSA/{year}"
+        for listing_url in self.listing_urls():
             try:
-                listing_html = await self._http_get(listing_url)
+                result = await self.fetch(listing_url, accept=AcceptPolicy.HTML_LISTING)
             except Exception as exc:
-                log.warning(f"Could not fetch IC3 listing {listing_url}: {exc}")
+                log.warning("IC3: could not fetch listing %s: %s", listing_url, exc)
                 continue
+            stubs.extend(self._parse_items(result.text, result.final_url))
 
-            refs = await self.parse_listing_page(listing_html)
-            for ref in refs:
-                url = ref.get("url", "")
-                if not url or url in seen_urls:
-                    continue
-                seen_urls.add(url)
-
-                published_at: datetime | None = None
-                if ref.get("date"):
-                    published_at = _parse_feed_date(ref["date"])
-
-                stubs.append(
-                    RawItemStub(
-                        source_name=self.source.name,  # type: ignore[attr-defined]
-                        item_url=url,
-                        title=ref.get("title", ""),
-                        published_at=published_at,
-                    )
-                )
-
-        log.info(f"IC3: found {len(stubs)} stubs across {_LISTING_YEARS}")
+        dated = sum(1 for stub in stubs if stub.published_at is not None)
+        log.info("IC3: found %d stubs, %d dated", len(stubs), dated)
         return stubs
 
     async def fetch_items(self) -> list[RawItemData]:
@@ -61,7 +115,7 @@ class IC3AlertsAdapter(HTMLScraperAdapter):
             try:
                 raw_text, raw_html = await self.fetch_full_article(stub.item_url)
             except Exception as exc:
-                log.warning(f"Could not fetch IC3 article {stub.item_url}: {exc}")
+                log.warning("IC3: could not fetch article %s: %s", stub.item_url, exc)
                 continue
 
             items.append(
@@ -75,36 +129,56 @@ class IC3AlertsAdapter(HTMLScraperAdapter):
                 )
             )
 
-        log.info(f"IC3: fetched {len(items)} full items")
+        log.info("IC3: fetched %d full items", len(items))
         return items
 
-    async def parse_listing_page(self, html: str) -> list[dict]:
+    def _parse_items(self, html: str, listing_url: str) -> list[RawItemStub]:
         soup = BeautifulSoup(html, "lxml")
-        results = []
+        listing_host = urlparse(listing_url).netloc.lower()
 
-        for a_tag in soup.find_all("a", href=True):
-            href: str = a_tag["href"]
-            if "/PSA/" not in href:
+        # Pass 1: which links are PSA articles at all. Pass 2 needs the whole set
+        # so each card's scope can be bounded by its neighbours.
+        accepted: list[tuple] = []
+        for anchor in soup.find_all("a", href=True):
+            resolved = self._psa_url(anchor["href"], listing_url, listing_host)
+            if resolved is None:
                 continue
-            # Skip non-HTML documents (PDFs, Office files, etc.)
-            if any(href.lower().endswith(ext) for ext in _NON_HTML_EXTS):
-                continue
-            url = href if href.startswith("http") else f"{_BASE}{href}"
-
-            title = a_tag.get_text(strip=True)
+            title = anchor.get_text(" ", strip=True)
             if not title:
                 continue
+            accepted.append((anchor, *resolved, title))
 
-            date_str: str | None = None
-            parent = a_tag.find_parent("tr")
-            if parent:
-                tds = parent.find_all("td")
-                for td in tds:
-                    text = td.get_text(strip=True)
-                    if len(text) <= 15 and any(c.isdigit() for c in text):
-                        date_str = text
-                        break
+        anchor_ids = {id(entry[0]) for entry in accepted}
 
-            results.append({"url": url, "title": title, "date": date_str})
+        stubs: list[RawItemStub] = []
+        for anchor, url, path_year, slug, title in accepted:
+            published_at = item_date(item_scope(anchor, anchor_ids))
+            if published_at is None:
+                published_at = psa_url_date(path_year, slug)
+            stubs.append(
+                RawItemStub(
+                    source_name=self.source.name,  # type: ignore[attr-defined]
+                    item_url=url,
+                    title=title,
+                    published_at=published_at,
+                )
+            )
+        return stubs
 
-        return results
+    def _psa_url(self, href: str, listing_url: str, listing_host: str):
+        """``(absolute_url, path_year, slug)`` for a real PSA link, else ``None``."""
+        url = urljoin(listing_url, href.strip())
+        parsed = urlparse(url)
+        if parsed.netloc.lower() != listing_host or _unsafe_target_reason(url):
+            return None
+        match = _PSA_PATH.match(parsed.path)
+        if not match:
+            return None
+        return url, match.group("year"), match.group("slug")
+
+    async def parse_listing_page(self, html: str) -> list[dict]:
+        """Legacy dict view of one listing page, kept for the base-class contract."""
+        return [
+            {"url": stub.item_url, "title": stub.title, "date": stub.published_at}
+            for stub in self._parse_items(html, f"{self.listing_root}/")
+        ]

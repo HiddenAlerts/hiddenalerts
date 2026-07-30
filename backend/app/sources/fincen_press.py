@@ -1,45 +1,59 @@
+"""FinCEN Press Releases — HTML listing scrape.
+
+FinCEN publishes no RSS feed. The audit found ~15 ``<time datetime>`` elements on
+the listing but only one broad ``<article>``/page wrapper, so the previous primary
+selector matched the wrapper, took *its* first link — routinely a navigation link
+rather than a press release — and then fell through to a link-scan fallback that
+emitted no dates at all. Every stored FinCEN row has ``published_at = NULL``.
+
+Discovery now starts from links that match the press-release URL shape and reads
+each row's own ``<time>``.
+"""
 import logging
-from datetime import datetime
+import re
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from app.sources.base import RawItemData, RawItemStub
-from app.sources.rss_adapter import HTMLScraperAdapter, _parse_feed_date
+from app.sources.base import RawItemData, RawItemStub, _unsafe_target_reason
+from app.sources.html_listing import item_date, item_scope
+from app.sources.response_policy import AcceptPolicy
+from app.sources.rss_adapter import HTMLScraperAdapter
 
 log = logging.getLogger(__name__)
 
-_BASE = "https://www.fincen.gov"
-_LISTING_URL = "https://www.fincen.gov/news/press-releases"
+# Every FinCEN press release stored to date lives under this path with a slug:
+# /news/news-releases/<slug>. Starting from links that match keeps the page
+# wrapper, the section navigation and unrelated links out without an exclusion
+# list, and without the dateless fallback that used to carry the source.
+_PRESS_RELEASE_PATH = re.compile(r"^/news/news-releases/(?P<slug>[^/]+)/?$", re.I)
 
 
 class FinCENPressAdapter(HTMLScraperAdapter):
-    """FinCEN Press Releases — HTML scrape of fincen.gov/news/press-releases.
+    """FinCEN Press Releases — HTML scrape of the configured listing page."""
 
-    FinCEN does not publish an RSS feed; we scrape the HTML listing page.
-    """
+    @property
+    def listing_url(self) -> str:
+        """The listing page from the source row.
+
+        Configuration is required: a blank or non-http(s) ``base_url`` raises
+        rather than silently falling back to a hardcoded host.
+        """
+        configured = (getattr(self.source, "base_url", None) or "").strip()
+        if not configured or urlparse(configured).scheme not in ("http", "https"):
+            raise ValueError(
+                f"{self._source_label()}: base_url must be an http(s) listing URL, "
+                f"got {configured!r}"
+            )
+        return configured
 
     async def fetch_item_stubs(self) -> list[RawItemStub]:
-        """Fetch FinCEN listing page and return stubs — no full article fetches."""
-        listing_html = await self._http_get(_LISTING_URL)
-        refs = await self.parse_listing_page(listing_html)
-        log.info(f"FinCEN listing: found {len(refs)} stubs")
+        """Fetch the listing page and return stubs — no full article fetches."""
+        result = await self.fetch(self.listing_url, accept=AcceptPolicy.HTML_LISTING)
+        stubs = self._parse_items(result.text, result.final_url)
 
-        stubs: list[RawItemStub] = []
-        for ref in refs:
-            url = ref.get("url", "")
-            if not url:
-                continue
-            published_at: datetime | None = None
-            if ref.get("date"):
-                published_at = _parse_feed_date(ref["date"])
-            stubs.append(
-                RawItemStub(
-                    source_name=self.source.name,  # type: ignore[attr-defined]
-                    item_url=url,
-                    title=ref.get("title", ""),
-                    published_at=published_at,
-                )
-            )
+        dated = sum(1 for stub in stubs if stub.published_at is not None)
+        log.info("FinCEN listing: found %d stubs, %d dated", len(stubs), dated)
         return stubs
 
     async def fetch_items(self) -> list[RawItemData]:
@@ -51,7 +65,7 @@ class FinCENPressAdapter(HTMLScraperAdapter):
             try:
                 raw_text, raw_html = await self.fetch_full_article(stub.item_url)
             except Exception as exc:
-                log.warning(f"Could not fetch FinCEN article {stub.item_url}: {exc}")
+                log.warning("FinCEN: could not fetch article %s: %s", stub.item_url, exc)
                 continue
 
             items.append(
@@ -65,40 +79,50 @@ class FinCENPressAdapter(HTMLScraperAdapter):
                 )
             )
 
-        log.info(f"FinCEN: fetched {len(items)} full items")
+        log.info("FinCEN: fetched %d full items", len(items))
         return items
 
-    async def parse_listing_page(self, html: str) -> list[dict]:
+    def _parse_items(self, html: str, listing_url: str) -> list[RawItemStub]:
         soup = BeautifulSoup(html, "lxml")
-        results = []
+        listing_host = urlparse(listing_url).netloc.lower()
 
-        for item in soup.select("div.view-content li, div.views-row, article"):
-            a_tag = item.find("a", href=True)
-            if not a_tag:
+        # Pass 1: which links are press releases at all. Pass 2 needs the whole
+        # set so each row's scope can be bounded by its neighbours.
+        accepted: list[tuple] = []
+        for anchor in soup.find_all("a", href=True):
+            url = self._press_release_url(anchor["href"], listing_url, listing_host)
+            if url is None:
                 continue
-            href: str = a_tag["href"]
-            if not (href.startswith("/news/news-releases/") or href.startswith("http")):
-                continue
-            url = href if href.startswith("http") else f"{_BASE}{href}"
-            title = a_tag.get_text(strip=True)
+            title = anchor.get_text(" ", strip=True)
             if not title:
                 continue
+            accepted.append((anchor, url, title))
 
-            date_str: str | None = None
-            date_el = item.find(["time", "span", "div"], class_=lambda c: c and "date" in c)
-            if date_el:
-                date_str = date_el.get("datetime") or date_el.get_text(strip=True)
+        anchor_ids = {id(entry[0]) for entry in accepted}
 
-            results.append({"url": url, "title": title, "date": date_str})
+        return [
+            RawItemStub(
+                source_name=self.source.name,  # type: ignore[attr-defined]
+                item_url=url,
+                title=title,
+                published_at=item_date(item_scope(anchor, anchor_ids)),
+            )
+            for anchor, url, title in accepted
+        ]
 
-        # Fallback: any link that looks like a FinCEN press release detail page
-        if not results:
-            for a_tag in soup.find_all("a", href=True):
-                href = a_tag["href"]
-                if "/news/news-releases/" in href and len(href) > len("/news/news-releases/"):
-                    url = href if href.startswith("http") else f"{_BASE}{href}"
-                    title = a_tag.get_text(strip=True)
-                    if title and len(title) > 10:
-                        results.append({"url": url, "title": title, "date": None})
+    def _press_release_url(self, href: str, listing_url: str, listing_host: str) -> str | None:
+        """The absolute URL for a real press-release link, else ``None``."""
+        url = urljoin(listing_url, href.strip())
+        parsed = urlparse(url)
+        if parsed.netloc.lower() != listing_host or _unsafe_target_reason(url):
+            return None
+        if not _PRESS_RELEASE_PATH.match(parsed.path):
+            return None
+        return url
 
-        return results
+    async def parse_listing_page(self, html: str) -> list[dict]:
+        """Legacy dict view of the listing, kept for the base-class contract."""
+        return [
+            {"url": stub.item_url, "title": stub.title, "date": stub.published_at}
+            for stub in self._parse_items(html, self.listing_url)
+        ]
