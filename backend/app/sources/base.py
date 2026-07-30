@@ -522,8 +522,23 @@ class BaseSourceAdapter(ABC):
         """Full fetch: stubs + full article content. Used for direct/legacy calls."""
         pass
 
-    def summary_fallback(self, stub: RawItemStub, error: Exception) -> str | None:
-        """Text to store when this item's article page could not be fetched.
+    def should_fetch_article(self, stub: RawItemStub) -> bool:
+        """Whether this item's article page is worth requesting at all.
+
+        The default is ``True`` — fetch the article, fall back to the summary only
+        if that fails. A source whose detail pages are known to be systematically
+        unavailable overrides this and returns ``False``, so the collector goes
+        straight to :meth:`summary_fallback` instead of spending a request to
+        provoke a failure it already knows is coming.
+        """
+        return True
+
+    def summary_fallback(self, stub: RawItemStub, error: Exception | None) -> str | None:
+        """Text to store in place of this item's article page.
+
+        ``error`` is the typed fetch failure that made the article unavailable, or
+        ``None`` when the adapter declined to request it via
+        :meth:`should_fetch_article`.
 
         Returns cleaned, normalized text, or ``None`` when the feed summary is
         not a usable substitute — in which case the collector counts the item as

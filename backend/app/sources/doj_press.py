@@ -97,7 +97,7 @@ class DOJPressAdapter(RSSAdapter):
         configured = (getattr(self.source, "rss_url", None) or "").strip()
         return configured or OFFICIAL_FEED_URL
 
-    def summary_fallback(self, stub: RawItemStub, error: Exception) -> str | None:
+    def summary_fallback(self, stub: RawItemStub, error: Exception | None) -> str | None:
         """Use the feed summary for an unreachable article, if it is good enough.
 
         Most ``/usao-*`` article pages sit behind the interstitial, so without

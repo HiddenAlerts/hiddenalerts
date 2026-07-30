@@ -103,24 +103,38 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
 
         # ── Stage 2: Full article fetch — only for new stubs ─────────────────────
         for url_hash, stub in new_stubs:
-            # Article text first; a feed summary only where the adapter says its
-            # own summary is an acceptable substitute for *this* item. The choice
-            # is the adapter's — the collector holds no per-source knowledge.
-            try:
-                raw_text, raw_html = await adapter.fetch_full_article(stub.item_url)
-                content_origin = "article"
-            except SourceFetchError as exc:
-                raw_text, raw_html = "", ""
-                content_origin = "none"
-                if summary_fallback_allowed(exc):
-                    fallback = adapter.summary_fallback(stub, exc)
-                    if fallback:
-                        raw_text = fallback
-                        content_origin = "summary"
+            # Article text first, unless the adapter says this item's detail page
+            # is not worth requesting; then its own summary, but only where the
+            # adapter accepts that summary as a substitute for *this* item. Both
+            # choices are the adapter's — the collector holds no per-source
+            # knowledge, and never inspects a source name, id or URL.
+            if adapter.should_fetch_article(stub):
+                try:
+                    raw_text, raw_html = await adapter.fetch_full_article(stub.item_url)
+                    content_origin = "article"
+                except SourceFetchError as exc:
+                    raw_text, raw_html = "", ""
+                    content_origin = "none"
+                    if summary_fallback_allowed(exc):
+                        fallback = adapter.summary_fallback(stub, exc)
+                        if fallback:
+                            raw_text = fallback
+                            content_origin = "summary"
+                    log.info(
+                        "Source %s '%s': article unavailable for %s (%s) — using %s",
+                        source.id, source.name, _safe_url(stub.item_url),
+                        type(exc).__name__,
+                        "feed summary" if content_origin == "summary" else "no content",
+                    )
+            else:
+                # No request is made, so there is no error to report and none is
+                # invented; the summary is judged on its own merits.
+                raw_html = ""
+                raw_text = adapter.summary_fallback(stub, None) or ""
+                content_origin = "summary" if raw_text else "none"
                 log.info(
-                    "Source %s '%s': article unavailable for %s (%s) — using %s",
+                    "Source %s '%s': article not requested for %s — using %s",
                     source.id, source.name, _safe_url(stub.item_url),
-                    type(exc).__name__,
                     "feed summary" if content_origin == "summary" else "no content",
                 )
 

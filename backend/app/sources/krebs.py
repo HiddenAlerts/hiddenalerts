@@ -1,74 +1,31 @@
-import logging
+"""KrebsOnSecurity — official RSS feed.
 
-from bs4 import BeautifulSoup
+The feed is healthy: the audit measured 10 entries, all dated, all with summaries
+(median 395 cleaned characters, 90% AI-usable), and detail pages returning 9-18 KB
+of real article text.
 
-from app.sources.base import RawItemData, RawItemStub
-from app.sources.rss_adapter import HTMLScraperAdapter, RSSAdapter
+The HTML fallback this adapter used to carry was strictly worse — 20 references
+collapsing to 10, half of them undated — and it was reachable through a broad
+``except Exception`` that a transient feed hiccup was enough to trigger. It is
+gone: Krebs discovery is the feed, and a feed failure fails the run visibly rather
+than quietly degrading to a worse parser.
+"""
+from app.sources.rss_adapter import RSSAdapter
 
-log = logging.getLogger(__name__)
-
-_RSS_URL = "https://krebsonsecurity.com/feed/"
-_BASE = "https://krebsonsecurity.com"
-
-
-class KrebsAdapter(HTMLScraperAdapter):
-    """KrebsOnSecurity — try RSS first, fall back to HTML scraping."""
-
-    async def fetch_item_stubs(self) -> list[RawItemStub]:
-        """Try RSS stubs first; fall back to HTML listing stubs."""
-        try:
-            rss_adapter = _KrebsRSSAdapter(self.source)
-            stubs = await rss_adapter.fetch_item_stubs()
-            if stubs:
-                log.info(f"KrebsOnSecurity: {len(stubs)} stubs via RSS")
-                return stubs
-        except Exception as exc:
-            log.warning(f"KrebsOnSecurity RSS stubs failed, falling back to HTML: {exc}")
-        return await super().fetch_item_stubs()
-
-    async def fetch_items(self) -> list[RawItemData]:
-        """Try RSS fetch first; fall back to HTML scraping."""
-        try:
-            rss_adapter = _KrebsRSSAdapter(self.source)
-            items = await rss_adapter.fetch_items()
-            if items:
-                log.info(f"KrebsOnSecurity: fetched {len(items)} items via RSS")
-                return items
-        except Exception as exc:
-            log.warning(f"KrebsOnSecurity RSS failed, falling back to HTML: {exc}")
-        return await super().fetch_items()
-
-    async def parse_listing_page(self, html: str) -> list[dict]:
-        soup = BeautifulSoup(html, "lxml")
-        results = []
-
-        for article in soup.select("article, div.post, h2.entry-title"):
-            a_tag = article.find("a", href=True) if article.name != "a" else article
-            if not a_tag:
-                continue
-
-            href: str = a_tag.get("href", "")
-            if not href.startswith("http"):
-                href = f"{_BASE}{href}"
-
-            title = a_tag.get_text(strip=True)
-
-            # Try to find date
-            date_str: str | None = None
-            date_el = article.find(["time", "span"], class_=lambda c: c and "date" in c)
-            if date_el:
-                date_str = date_el.get("datetime") or date_el.get_text(strip=True)
-
-            if title and href and "krebsonsecurity.com" in href:
-                results.append({"url": href, "title": title, "date": date_str})
-
-        log.info(f"KrebsOnSecurity HTML: found {len(results)} article references")
-        return results
+# The row already carries this value; it is the default only so a cleared column
+# does not stop collection. A populated ``source.rss_url`` always wins.
+OFFICIAL_FEED_URL = "https://krebsonsecurity.com/feed/"
 
 
-class _KrebsRSSAdapter(RSSAdapter):
-    """Internal RSS adapter for Krebs."""
+class KrebsAdapter(RSSAdapter):
+    """KrebsOnSecurity via its official RSS feed."""
 
     @property
     def rss_url(self) -> str:
-        return _RSS_URL
+        """A configured feed wins; otherwise the official one.
+
+        Blank and whitespace-only column values resolve to the default rather
+        than to an unfetchable URL.
+        """
+        configured = (getattr(self.source, "rss_url", None) or "").strip()
+        return configured or OFFICIAL_FEED_URL

@@ -22,14 +22,30 @@ from app.sources.base import RawItemStub, clean_summary_text
 from app.sources.http_errors import TransientFetchError, UnsafeRequestTarget
 
 
-class StubAdapter:
+class _AdapterDouble:
+    """The adapter-side defaults ``run_source`` relies on.
+
+    Every double inherits these so a new hook on ``BaseSourceAdapter`` shows up
+    as one edit here rather than as an ``AttributeError`` — or a hang — inside an
+    unrelated test.
+    """
+
+    def should_fetch_article(self, stub):
+        return True
+
+    def summary_fallback(self, stub, error):
+        return clean_summary_text(stub.summary) or None
+
+
+class StubAdapter(_AdapterDouble):
     """Adapter double: returns canned stubs and canned article bodies."""
 
-    def __init__(self, source, stubs, bodies=None, fetch_error=None):
+    def __init__(self, source, stubs, bodies=None, fetch_error=None, fetch_detail=True):
         self.source = source
         self._stubs = stubs
         self._bodies = bodies or {}
         self._fetch_error = fetch_error
+        self._fetch_detail = fetch_detail
         self.fetched_urls: list[str] = []
 
     async def fetch_item_stubs(self):
@@ -41,9 +57,8 @@ class StubAdapter:
             raise self._fetch_error
         return self._bodies.get(url, f"Body for {url}"), f"<p>{url}</p>"
 
-    def summary_fallback(self, stub, error):
-        # Same contract as BaseSourceAdapter: any non-empty summary will do.
-        return clean_summary_text(stub.summary) or None
+    def should_fetch_article(self, stub):
+        return self._fetch_detail
 
 
 class _CommitFailingSession:
@@ -636,7 +651,7 @@ async def test_zero_store_run_is_successful(db_session, source, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_failed_run_records_status_and_message(db_session, source, monkeypatch):
-    class Boom:
+    class Boom(_AdapterDouble):
         async def fetch_item_stubs(self):
             raise RuntimeError("feed exploded")
 
@@ -655,7 +670,7 @@ async def test_failed_run_keeps_partial_counters(db_session, source, monkeypatch
     exception handler and the run is committed as ``failed`` with partial counts.
     """
 
-    class HalfWay:
+    class HalfWay(_AdapterDouble):
         async def fetch_item_stubs(self):
             return [_stub("https://example.test/p1"), _stub("https://example.test/p2")]
 
@@ -708,7 +723,7 @@ async def test_cancelled_run_is_persisted_as_failed_and_releases_the_claim(
     """Cancellation must propagate, but must not leave a run stuck at 'running'."""
     in_fetch = asyncio.Event()
 
-    class Hanging:
+    class Hanging(_AdapterDouble):
         async def fetch_item_stubs(self):
             return [_stub("https://example.test/slow")]
 
@@ -1174,3 +1189,70 @@ async def test_unauthenticated_manual_trigger_reserves_nothing(client, db_sessio
 
     assert response.status_code == 401
     assert not collection_guard.is_source_collecting(source.id)
+
+
+# ---------------------------------------------------------------------------
+# Detail-fetch policy
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_adapter_can_decline_the_detail_fetch(db_session, source, monkeypatch):
+    """No article request is made, and the summary is judged on its own."""
+    adapter = StubAdapter(
+        source,
+        [_stub("https://example.test/summary-only", summary="A complete sentence.")],
+        fetch_detail=False,
+    )
+    run = await _run(db_session, source, adapter, monkeypatch)
+
+    assert adapter.fetched_urls == []
+    assert run.items_new == 1
+    stored = (
+        await db_session.execute(
+            select(RawItem.raw_text, RawItem.raw_html).where(
+                RawItem.source_id == source.id
+            )
+        )
+    ).one()
+    assert stored == ("A complete sentence.", "")
+
+
+@pytest.mark.asyncio
+async def test_declined_detail_with_no_usable_summary_counts_invalid(
+    db_session, source, monkeypatch
+):
+    adapter = StubAdapter(
+        source,
+        [_stub("https://example.test/nothing", summary="   ")],
+        fetch_detail=False,
+    )
+    run = await _run(db_session, source, adapter, monkeypatch)
+
+    assert adapter.fetched_urls == []
+    assert run.status == "success"
+    assert run.items_new == 0
+    assert run.items_skipped_invalid == 1
+
+
+@pytest.mark.asyncio
+async def test_declining_the_detail_fetch_invents_no_error(
+    db_session, source, monkeypatch
+):
+    """summary_fallback is told there was no failure, because there was none."""
+    seen: list[object] = []
+    adapter = StubAdapter(
+        source,
+        [_stub(f"https://example.test/{uuid.uuid4().hex}", summary="A complete sentence.")],
+        fetch_detail=False,
+    )
+    real_fallback = adapter.summary_fallback
+
+    def _record(stub, error):
+        seen.append(error)
+        return real_fallback(stub, error)
+
+    adapter.summary_fallback = _record
+    await _run(db_session, source, adapter, monkeypatch)
+
+    assert seen == [None]
