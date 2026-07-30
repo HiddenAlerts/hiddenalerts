@@ -90,6 +90,30 @@ IC3_CARD_YEAR_MISMATCH = _card(
 IC3_CARD_ARCHIVE = _card("/PSA/Archive", "Public Service Announcement Archive")
 IC3_CARD_RSS = _card("/PSA/RSS", "Subscribe by RSS")
 
+# Card 7: RFC-822 style visible date, no datetime attribute. The slug says
+# 2026-07-10, so the visible date winning is observable.
+PSA_RFC822_URL = f"{IC3_ROOT}/2026/PSA260710"
+IC3_CARD_RFC822 = _card(
+    "/PSA/2026/PSA260710",
+    "Announcement Dated in Day-Month-Year Style",
+    '<time class="psa-card__date">Mon, 20 Jul 2026</time>',
+)
+# Card 8: datetime and visible text disagree — datetime must win.
+PSA_CONFLICT_URL = f"{IC3_ROOT}/2026/PSA260605"
+IC3_CARD_CONFLICT = _card(
+    "/PSA/2026/PSA260605",
+    "Announcement Whose Visible Text Disagrees With Its Timestamp",
+    '<time class="psa-card__date" datetime="2026-06-05T12:00:00+00:00">'
+    "January 2, 2020</time>",
+)
+# Card 9: a date-classed element holding prose, not a date, and a slug that is
+# not a real date either — the item must end up with no date at all.
+IC3_CARD_PROSE = _card(
+    "/PSA/2026/PSA269932",
+    "Announcement With Prose Where a Date Would Be",
+    '<div class="psa-card__date">Covering the 2026 reporting season</div>',
+)
+
 IC3_FULL_LISTING = ic3_listing(
     IC3_CARD_TZ,
     IC3_CARD_VISIBLE,
@@ -100,6 +124,20 @@ IC3_FULL_LISTING = ic3_listing(
 )
 IC3_EDGE_LISTING = ic3_listing(IC3_CARD_BAD_SLUG, IC3_CARD_YEAR_MISMATCH)
 IC3_EMPTY_LISTING = ic3_listing()
+IC3_DATE_FORMAT_LISTING = ic3_listing(
+    IC3_CARD_RFC822, IC3_CARD_CONFLICT, IC3_CARD_PROSE
+)
+
+# Hrefs that break url parsing outright, alongside one healthy card. urljoin
+# raises ValueError on the bracketed forms; the port/host forms resolve but are
+# off-host. Either way the listing must keep parsing.
+IC3_MALFORMED_LISTING = ic3_listing(
+    _card("http://[::1/PSA/2026/PSA260101", "Unclosed IPv6 bracket"),
+    _card("http://[not-an-ip]/PSA/2026/PSA260102", "Invalid bracketed host"),
+    _card("http://www.ic3.gov:99999/PSA/2026/PSA260103", "Invalid port"),
+    _card("//[::1/PSA/2026/PSA260104", "Malformed protocol-relative URL"),
+    IC3_CARD_TZ,
+)
 
 # Two cards whose dates sit adjacent in the DOM: a parser that widens too far
 # would hand card 2's date to card 1.
@@ -206,6 +244,27 @@ FINCEN_ROW_OFFSITE = _row(
     '<time class="row__date" datetime="2026-06-02T09:00:00-04:00">June 2, 2026</time>',
 )
 
+# Day-month-year visible text with a weekday prefix, no datetime attribute.
+FINCEN_DMY_URL = (
+    "https://www.fincen.gov/news/news-releases/"
+    "fincen-launches-webpage-whistleblower-tips"
+)
+FINCEN_ROW_DMY = _row(
+    "/news/news-releases/fincen-launches-webpage-whistleblower-tips",
+    "FinCEN Launches a Webpage for Whistleblower Tips",
+    '<span class="date-display-single">Monday, 20 July 2026</span>',
+)
+# A date-classed element holding prose rather than a date.
+FINCEN_PROSE_URL = (
+    "https://www.fincen.gov/news/news-releases/"
+    "fincen-statement-enforcement-policy"
+)
+FINCEN_ROW_PROSE = _row(
+    "/news/news-releases/fincen-statement-enforcement-policy",
+    "FinCEN Issues a Statement on Enforcement Policy",
+    '<span class="date-display-single">Fiscal year 2026 guidance</span>',
+)
+
 FINCEN_FULL_LISTING = fincen_listing(
     FINCEN_ROW_TZ,
     FINCEN_ROW_VISIBLE,
@@ -215,6 +274,16 @@ FINCEN_FULL_LISTING = fincen_listing(
     FINCEN_ROW_OFFSITE,
 )
 FINCEN_EMPTY_LISTING = fincen_listing()
+FINCEN_DATE_FORMAT_LISTING = fincen_listing(FINCEN_ROW_DMY, FINCEN_ROW_PROSE)
+
+# Hrefs that break url parsing outright, alongside one healthy row.
+FINCEN_MALFORMED_LISTING = fincen_listing(
+    _row("http://[::1/news/news-releases/unclosed-bracket", "Unclosed IPv6 bracket"),
+    _row("http://[not-an-ip]/news/news-releases/bad-host", "Invalid bracketed host"),
+    _row("http://www.fincen.gov:99999/news/news-releases/bad-port", "Invalid port"),
+    _row("//[::1/news/news-releases/protocol-relative", "Malformed protocol-relative"),
+    FINCEN_ROW_TZ,
+)
 
 # Two dated rows side by side — a wrapper-wide date search would cross them.
 FINCEN_ADJACENT_LISTING = fincen_listing(FINCEN_ROW_TZ, FINCEN_ROW_ABSOLUTE)

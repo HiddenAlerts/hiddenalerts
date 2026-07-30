@@ -17,12 +17,16 @@ from bs4.element import Tag
 
 from app.sources.rss_adapter import _parse_feed_date
 
-# A visible date has to look like a date. Anchoring on these three shapes keeps
-# a heading such as "…During the 2026 FIFA World Cup" from being read as one.
+# A visible date has to look like a date. Anchoring on these shapes keeps a
+# heading such as "…During the 2026 FIFA World Cup" from being read as one. A
+# leading weekday ("Mon, ", "Monday, ") is simply not part of the match, so only
+# the date substring is ever handed to the parser.
+_MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
 _DATE_TEXT = re.compile(
-    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}"
-    r"|\d{1,2}/\d{1,2}/\d{4}"
-    r"|\d{4}-\d{2}-\d{2}",
+    rf"\b{_MONTH}\s+\d{{1,2}},?\s+\d{{4}}\b"   # July 20, 2026 · Jul 20 2026
+    rf"|\b\d{{1,2}}\s+{_MONTH}\s+\d{{4}}\b"    # 20 Jul 2026 · 20 July 2026
+    r"|\b\d{1,2}/\d{1,2}/\d{4}\b"              # 07/20/2026
+    r"|\b\d{4}-\d{2}-\d{2}\b",                 # 2026-07-20
     re.I,
 )
 

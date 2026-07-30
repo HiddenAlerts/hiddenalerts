@@ -110,11 +110,18 @@ class FinCENPressAdapter(HTMLScraperAdapter):
             for anchor, url, title in accepted
         ]
 
-    def _press_release_url(self, href: str, listing_url: str, listing_host: str) -> str | None:
+    def _press_release_url(self, href, listing_url: str, listing_host: str) -> str | None:
         """The absolute URL for a real press-release link, else ``None``."""
-        url = urljoin(listing_url, href.strip())
-        parsed = urlparse(url)
-        if parsed.netloc.lower() != listing_host or _unsafe_target_reason(url):
+        if not isinstance(href, str):
+            return None
+        try:
+            url = urljoin(listing_url, href.strip())
+            parsed = urlparse(url)
+            host = parsed.netloc.lower()
+        except (TypeError, ValueError):
+            log.debug("FinCEN: skipping an unparseable listing href")
+            return None
+        if host != listing_host or _unsafe_target_reason(url):
             return None
         if not _PRESS_RELEASE_PATH.match(parsed.path):
             return None

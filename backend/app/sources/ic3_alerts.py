@@ -16,8 +16,14 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from app.sources.base import RawItemData, RawItemStub, _unsafe_target_reason
+from app.sources.base import (
+    RawItemData,
+    RawItemStub,
+    _safe_url,
+    _unsafe_target_reason,
+)
 from app.sources.html_listing import item_date, item_scope
+from app.sources.http_errors import SourceFetchError
 from app.sources.response_policy import AcceptPolicy
 from app.sources.rss_adapter import HTMLScraperAdapter
 
@@ -89,16 +95,32 @@ class IC3AlertsAdapter(HTMLScraperAdapter):
     async def fetch_item_stubs(self) -> list[RawItemStub]:
         """Scrape each year listing page and return stubs — no article fetches.
 
+        The current UTC year — the first URL :meth:`listing_urls` returns — is
+        **mandatory**: every new PSA appears there, so any failure fetching or
+        parsing it propagates and fails the run. Swallowing it is exactly how a
+        challenged listing becomes a "successful" zero-item run. The older year
+        pages are optional history; a typed fetch failure there is logged and
+        skipped, and the pages that answered still contribute.
+
+        Parsing is never inside a catch-all: a parser defect must surface as a
+        failed run rather than as silently missing items.
+
         Duplicate URLs across year pages are left in: the collector deduplicates
         by normalized URL hash, within the batch as well as against storage.
         """
-        stubs: list[RawItemStub] = []
+        current_url, *historical_urls = self.listing_urls()
 
-        for listing_url in self.listing_urls():
+        result = await self.fetch(current_url, accept=AcceptPolicy.HTML_LISTING)
+        stubs = self._parse_items(result.text, result.final_url)
+
+        for listing_url in historical_urls:
             try:
                 result = await self.fetch(listing_url, accept=AcceptPolicy.HTML_LISTING)
-            except Exception as exc:
-                log.warning("IC3: could not fetch listing %s: %s", listing_url, exc)
+            except SourceFetchError as exc:
+                log.warning(
+                    "IC3: skipping historical listing %s (%s)",
+                    _safe_url(listing_url), type(exc).__name__,
+                )
                 continue
             stubs.extend(self._parse_items(result.text, result.final_url))
 
@@ -165,11 +187,21 @@ class IC3AlertsAdapter(HTMLScraperAdapter):
             )
         return stubs
 
-    def _psa_url(self, href: str, listing_url: str, listing_host: str):
+    def _psa_url(self, href, listing_url: str, listing_host: str):
         """``(absolute_url, path_year, slug)`` for a real PSA link, else ``None``."""
-        url = urljoin(listing_url, href.strip())
-        parsed = urlparse(url)
-        if parsed.netloc.lower() != listing_host or _unsafe_target_reason(url):
+        if not isinstance(href, str):
+            return None
+        try:
+            url = urljoin(listing_url, href.strip())
+            parsed = urlparse(url)
+            host = parsed.netloc.lower()
+        except (TypeError, ValueError):
+            # An unparseable href — an unclosed IPv6 bracket, an invalid host or
+            # port — costs us this one candidate, not the whole listing. The raw
+            # value is page-controlled, so it is not written to the log.
+            log.debug("IC3: skipping an unparseable listing href")
+            return None
+        if host != listing_host or _unsafe_target_reason(url):
             return None
         match = _PSA_PATH.match(parsed.path)
         if not match:

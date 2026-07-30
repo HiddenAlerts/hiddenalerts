@@ -23,25 +23,40 @@ from app.sources.ic3_alerts import (
     listing_years,
     psa_url_date,
 )
+from app.sources.http_errors import (
+    ChallengeDetected,
+    ContentTypeMismatch,
+    SourceFetchError,
+)
 from app.sources.response_policy import AcceptPolicy
+from tests.test_adapters.fixtures import DOJ_INTERSTITIAL as CHALLENGE_INTERSTITIAL
 from tests.test_adapters.ic3_fincen_fixtures import (
     FINCEN_ABSOLUTE_URL,
     FINCEN_ADJACENT_LISTING,
     FINCEN_ARTICLE_PAGE,
+    FINCEN_DATE_FORMAT_LISTING,
+    FINCEN_DMY_URL,
     FINCEN_EMPTY_LISTING,
     FINCEN_FULL_LISTING,
     FINCEN_LISTING_URL,
+    FINCEN_MALFORMED_LISTING,
     FINCEN_NO_DATE_URL,
+    FINCEN_PROSE_URL,
     FINCEN_TZ_URL,
     FINCEN_VISIBLE_URL,
     IC3_ADJACENT_LISTING,
     IC3_ARTICLE_PAGE,
+    IC3_DATE_FORMAT_LISTING,
     IC3_EDGE_LISTING,
     IC3_EMPTY_LISTING,
     IC3_FULL_LISTING,
     IC3_LEAP_LISTING,
+    IC3_LISTING_2026,
+    IC3_MALFORMED_LISTING,
     IC3_ROOT,
     PSA_BAD_SLUG_URL,
+    PSA_CONFLICT_URL,
+    PSA_RFC822_URL,
     PSA_SUFFIXED_URL,
     PSA_TZ_URL,
     PSA_URL_DATE_URL,
@@ -850,3 +865,323 @@ def test_collector_holds_no_source_specific_logic():
     src = inspect.getsource(collector).lower()
     for token in ("ic3", "fincen", "psa", "news-releases"):
         assert token not in src, token
+
+
+# ===========================================================================
+# Refinement 1 — the current IC3 year page is mandatory
+# ===========================================================================
+
+
+def _fail_current(exc):
+    """Route map where only the current-year page raises ``exc``."""
+    async def _fetch(self, url, *, accept=AcceptPolicy.ANY_TEXT, **kw):
+        if url.endswith("/2026"):
+            raise exc
+        return source_base.FetchResult(
+            url=url, final_url=url, status=200, content_type="text/html",
+            text=IC3_EMPTY_LISTING,
+        )
+
+    return _fetch
+
+
+@pytest.mark.asyncio
+async def test_older_year_failure_is_skipped_and_current_year_survives(monkeypatch):
+    routes = _year_routes(IC3_FULL_LISTING)
+    routes[f"{IC3_ROOT}/2025"] = ("", "text/html", 500)
+    routes[f"{IC3_ROOT}/2024"] = (CHALLENGE_INTERSTITIAL, "text/html", 200)
+    _routes(monkeypatch, routes)
+    _no_browser(monkeypatch)
+
+    stubs = await _ic3().fetch_item_stubs()
+    assert len(stubs) == 4
+    assert stubs[0].item_url == PSA_TZ_URL
+
+
+@pytest.mark.asyncio
+async def test_older_year_success_still_contributes(monkeypatch):
+    routes = _year_routes(IC3_EMPTY_LISTING)
+    routes[f"{IC3_ROOT}/2025"] = (IC3_FULL_LISTING, "text/html", 200)
+    routes[f"{IC3_ROOT}/2024"] = ("", "text/html", 503)
+    _routes(monkeypatch, routes)
+
+    stubs = await _ic3().fetch_item_stubs()
+    assert [s.item_url for s in stubs] == [
+        PSA_TZ_URL, PSA_VISIBLE_URL, PSA_URL_DATE_URL, PSA_SUFFIXED_URL
+    ]
+
+
+@pytest.mark.asyncio
+async def test_current_year_server_error_propagates(monkeypatch):
+    routes = _year_routes(IC3_EMPTY_LISTING)
+    routes[f"{IC3_ROOT}/2026"] = ("", "text/html", 500)
+    _routes(monkeypatch, routes)
+
+    with pytest.raises(SourceFetchError):
+        await _ic3().fetch_item_stubs()
+
+
+@pytest.mark.asyncio
+async def test_current_year_challenge_propagates(monkeypatch):
+    routes = _year_routes(IC3_EMPTY_LISTING)
+    routes[f"{IC3_ROOT}/2026"] = (CHALLENGE_INTERSTITIAL, "text/html", 200)
+    _routes(monkeypatch, routes)
+    launched = _no_browser(monkeypatch)
+
+    with pytest.raises(ChallengeDetected):
+        await _ic3().fetch_item_stubs()
+    assert launched == []
+
+
+@pytest.mark.asyncio
+async def test_current_year_content_mismatch_propagates(monkeypatch):
+    routes = _year_routes(IC3_EMPTY_LISTING)
+    routes[f"{IC3_ROOT}/2026"] = ('{"items": []}', "application/json", 200)
+    _routes(monkeypatch, routes)
+
+    with pytest.raises(ContentTypeMismatch):
+        await _ic3().fetch_item_stubs()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing_year", ["2026", "2025"])
+async def test_unexpected_fetch_error_always_propagates(monkeypatch, failing_year):
+    """A RuntimeError is a bug, not expected unavailability — on any page."""
+    adapter = _ic3()
+
+    async def _fetch(url, *, accept=AcceptPolicy.ANY_TEXT, **kw):
+        if url.endswith(f"/{failing_year}"):
+            raise RuntimeError("adapter bug")
+        return source_base.FetchResult(
+            url=url, final_url=url, status=200, content_type="text/html",
+            text=IC3_EMPTY_LISTING,
+        )
+
+    monkeypatch.setattr(adapter, "fetch", _fetch)
+    with pytest.raises(RuntimeError, match="adapter bug"):
+        await adapter.fetch_item_stubs()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing_year", ["2026", "2025"])
+async def test_parser_error_always_propagates(monkeypatch, failing_year):
+    """Parsing sits outside every except block, on the current and older pages."""
+    adapter = _ic3()
+    real_parse = adapter._parse_items
+
+    def _parse(html, listing_url):
+        if listing_url.endswith(f"/{failing_year}"):
+            raise RuntimeError("parser bug")
+        return real_parse(html, listing_url)
+
+    monkeypatch.setattr(adapter, "_parse_items", _parse)
+    _routes(monkeypatch, _year_routes(IC3_EMPTY_LISTING))
+
+    with pytest.raises(RuntimeError, match="parser bug"):
+        await adapter.fetch_item_stubs()
+
+
+@pytest.mark.asyncio
+async def test_all_three_pages_failing_cannot_look_successful(monkeypatch):
+    """The historical skip must never be able to produce a clean empty run."""
+    _routes(monkeypatch, {}, default=("", "text/html", 500))
+
+    with pytest.raises(SourceFetchError):
+        await _ic3().fetch_item_stubs()
+
+
+@pytest.mark.asyncio
+async def test_valid_empty_current_year_page_remains_valid(monkeypatch):
+    _routes(monkeypatch, _year_routes(IC3_EMPTY_LISTING))
+    assert await _ic3().fetch_item_stubs() == []
+
+
+@pytest.mark.asyncio
+async def test_collector_marks_the_run_failed_when_the_current_year_fails(
+    monkeypatch, db_session, stored_source
+):
+    source = await stored_source("IC3 Press Releases", IC3_ROOT,
+                                 "ic3_alerts.IC3AlertsAdapter")
+    routes = _year_routes(IC3_EMPTY_LISTING)
+    routes[f"{IC3_ROOT}/2026"] = (CHALLENGE_INTERSTITIAL, "text/html", 200)
+    _routes(monkeypatch, routes)
+    _no_browser(monkeypatch)
+
+    run = await collector.run_source(source, db_session)
+
+    assert run.status == "failed"
+    assert run.items_new == 0
+    assert await _rows(db_session, source) == {}
+
+
+def test_current_year_fetch_is_outside_every_except_block():
+    import ast
+    import inspect
+    import textwrap
+
+    from app.sources.ic3_alerts import IC3AlertsAdapter
+
+    tree = ast.parse(
+        textwrap.dedent(inspect.getsource(IC3AlertsAdapter.fetch_item_stubs))
+    )
+    handlers = [
+        handler
+        for node in ast.walk(tree) if isinstance(node, ast.Try)
+        for handler in node.handlers
+    ]
+    # Exactly one guard, and it names the typed base class — never `Exception`.
+    assert len(handlers) == 1
+    assert isinstance(handlers[0].type, ast.Name)
+    assert handlers[0].type.id == "SourceFetchError"
+
+    # _parse_items is never called from inside a try block.
+    guarded = {
+        id(inner)
+        for node in ast.walk(tree) if isinstance(node, ast.Try)
+        for stmt in node.body
+        for inner in ast.walk(stmt)
+    }
+    parse_calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "_parse_items"
+    ]
+    assert parse_calls
+    assert not any(id(call) in guarded for call in parse_calls)
+
+
+# ===========================================================================
+# Refinement 2 — visible date formats
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_ic3_reads_rfc822_style_visible_dates(monkeypatch):
+    """"Mon, 20 Jul 2026" — the weekday is not part of the parsed substring."""
+    _routes(monkeypatch, _year_routes(IC3_DATE_FORMAT_LISTING))
+    dates = {s.item_url: s.published_at for s in await _ic3().fetch_item_stubs()}
+
+    # The slug would have said 2026-07-10; the visible date wins.
+    assert dates[PSA_RFC822_URL] == datetime(2026, 7, 20)
+
+
+@pytest.mark.asyncio
+async def test_ic3_time_datetime_still_beats_visible_text(monkeypatch):
+    _routes(monkeypatch, _year_routes(IC3_DATE_FORMAT_LISTING))
+    dates = {s.item_url: s.published_at for s in await _ic3().fetch_item_stubs()}
+
+    assert dates[PSA_CONFLICT_URL] == datetime(2026, 6, 5, 12, 0)
+
+
+@pytest.mark.asyncio
+async def test_prose_containing_a_year_is_not_a_date(monkeypatch):
+    """"Covering the 2026 reporting season" must not become a date."""
+    _routes(monkeypatch, _year_routes(IC3_DATE_FORMAT_LISTING))
+    dates = {s.item_url: s.published_at for s in await _ic3().fetch_item_stubs()}
+
+    assert dates[PSA_BAD_SLUG_URL] is None
+
+
+@pytest.mark.asyncio
+async def test_fincen_reads_day_month_year_visible_dates(monkeypatch):
+    _routes(monkeypatch, {FINCEN_LISTING_URL: (FINCEN_DATE_FORMAT_LISTING, "text/html", 200)})
+    dates = {s.item_url: s.published_at for s in await _fincen().fetch_item_stubs()}
+
+    assert dates[FINCEN_DMY_URL] == datetime(2026, 7, 20)
+    assert dates[FINCEN_PROSE_URL] is None
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("July 20, 2026", datetime(2026, 7, 20)),
+    ("Jul 20 2026", datetime(2026, 7, 20)),
+    ("Sept. 3, 2026", datetime(2026, 9, 3)),
+    ("Mon, 20 Jul 2026", datetime(2026, 7, 20)),
+    ("20 Jul 2026", datetime(2026, 7, 20)),
+    ("Monday, 20 July 2026", datetime(2026, 7, 20)),
+    ("07/20/2026", datetime(2026, 7, 20)),
+    ("2026-07-20", datetime(2026, 7, 20)),
+    ("Posted 2026-07-20 by the team", datetime(2026, 7, 20)),
+    ("Covering the 2026 reporting season", None),
+    ("During the 2026 FIFA World Cup", None),
+    ("Report 12026-07-3011", None),
+    ("Case 2026", None),
+    ("", None),
+])
+def test_visible_date_formats(text, expected):
+    from bs4 import BeautifulSoup
+
+    from app.sources.html_listing import item_date
+
+    scope = BeautifulSoup(f'<div><span class="date">{text}</span></div>', "lxml")
+    assert item_date(scope) == expected
+
+
+# ===========================================================================
+# Refinement 3 — malformed listing hrefs
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_ic3_malformed_hrefs_do_not_stop_the_listing(monkeypatch, caplog):
+    _routes(monkeypatch, _year_routes(IC3_MALFORMED_LISTING))
+
+    with caplog.at_level("DEBUG", logger="app.sources.ic3_alerts"):
+        stubs = await _ic3().fetch_item_stubs()
+
+    assert [s.item_url for s in stubs] == [PSA_TZ_URL]
+    assert stubs[0].published_at == datetime(2026, 7, 20, 14, 0)
+    assert not any("[::1" in r.getMessage() for r in caplog.records)
+    assert not any("not-an-ip" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_fincen_malformed_hrefs_do_not_stop_the_listing(monkeypatch, caplog):
+    _routes(monkeypatch, {
+        FINCEN_LISTING_URL: (FINCEN_MALFORMED_LISTING, "text/html", 200)
+    })
+
+    with caplog.at_level("DEBUG", logger="app.sources.fincen_press"):
+        stubs = await _fincen().fetch_item_stubs()
+
+    assert [s.item_url for s in stubs] == [FINCEN_TZ_URL]
+    assert stubs[0].published_at == datetime(2026, 7, 15, 18, 0)
+    assert not any("[::1" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("href", [
+    "http://[::1/PSA/2026/PSA260101",
+    "http://[not-an-ip]/PSA/2026/PSA260102",
+    "http://www.ic3.gov:99999/PSA/2026/PSA260103",
+    "//[::1/PSA/2026/PSA260104",
+    "http://user:pw@www.ic3.gov/PSA/2026/PSA260105",
+    None, 42, b"/PSA/2026/PSA260106", ["/PSA/2026/PSA260107"],
+])
+def test_ic3_rejects_unusable_hrefs(href):
+    adapter = _ic3()
+    assert adapter._psa_url(href, IC3_LISTING_2026, "www.ic3.gov") is None
+
+
+@pytest.mark.parametrize("href", [
+    "http://[::1/news/news-releases/x",
+    "http://[not-an-ip]/news/news-releases/x",
+    "http://www.fincen.gov:99999/news/news-releases/x",
+    "//[::1/news/news-releases/x",
+    "http://user:pw@www.fincen.gov/news/news-releases/x",
+    None, 42, b"/news/news-releases/x", ["/news/news-releases/x"],
+])
+def test_fincen_rejects_unusable_hrefs(href):
+    adapter = _fincen()
+    assert adapter._press_release_url(href, FINCEN_LISTING_URL, "www.fincen.gov") is None
+
+
+@pytest.mark.parametrize("href,expected", [
+    ("/PSA/2026/PSA260720", PSA_TZ_URL),      # root-relative
+    ("PSA260720", PSA_TZ_URL),                # relative to the year page
+    ("  /PSA/2026/PSA260720  ", PSA_TZ_URL),  # surrounding whitespace
+    (PSA_TZ_URL, PSA_TZ_URL),                 # absolute
+    ("/PSA/Archive", None),                   # still excluded
+])
+def test_ic3_still_accepts_well_formed_hrefs(href, expected):
+    resolved = _ic3()._psa_url(href, f"{IC3_ROOT}/2026/", "www.ic3.gov")
+    assert (resolved[0] if resolved else None) == expected
