@@ -355,3 +355,21 @@ ATOM_WITH_DECLARATION = (
     '<feed xmlns="http://www.w3.org/2005/Atom"><title>Feed</title>'
     "<entry><title>One</title><link href=\"https://example.test/a\"/></entry></feed>"
 )
+
+
+# JSON documents whose *values* contain markup. The document is still JSON.
+JSON_WITH_HTML_STRING = '{"body":"<html><body>text</body></html>"}'
+JSON_WITH_P_STRING = '{"description":"<p>summary</p>"}'
+JSON_ARRAY_WITH_DIV_STRING = '["<div>rendered preview</div>"]'
+
+# Generic XML whose children merely share names with HTML elements.
+XML_RESPONSE_WITH_BODY = (
+    '<?xml version="1.0"?><response><body>ok</body></response>'
+)
+XML_ROOT_WITH_P = "<root><p>value</p></root>"
+XML_DOCUMENT_WITH_DIV = "<document><div>value</div></document>"
+
+# Names that merely contain a known token — not mechanisms.
+FORM_ACTION_CHALLENGE_ENTRY = '<form action="/events/challenge-form-entry"></form>'
+DIV_CF_CHALLENGE_ANALYSIS = '<div class="cf-challenge-analysis">notes</div>'
+DIV_AKAM_LOGO_ANALYSIS = '<div id="akam-logo-analysis">notes</div>'

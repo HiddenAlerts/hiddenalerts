@@ -14,6 +14,7 @@ never combined on a page that has real article content. Quoted documentation
 article demonstrating ``fetch('/_sec/verify')`` is not mistaken for one running
 it. These are heuristics, not a parser.
 """
+import json
 import re
 import warnings
 from enum import Enum
@@ -149,24 +150,31 @@ def _js_call(token: str) -> re.Pattern:
     """A request/navigation call whose argument references the token."""
     return re.compile(
         rf"""(?:\.open|fetch|\.ajax|\.post|\.get|location\.(?:href|replace|assign))"""
-        rf"""\s*\([^)]{{0,160}}["'][^"']*(?:{token})""",
+        rf"""\s*\([^)]{{0,160}}["'][^"']*(?:{token})(?![\w-])""",
         re.I,
     )
 
 
 def _dom_lookup(token: str) -> re.Pattern:
     return re.compile(
-        rf"""getElementById\s*\(\s*["'](?:{token})"""
-        rf"""|querySelector(?:All)?\s*\(\s*["'][^"']*(?:{token})""",
+        rf"""getElementById\s*\(\s*["'](?:{token})["']"""
+        rf"""|querySelector(?:All)?\s*\(\s*["'][^"']*(?:{token})(?![\w-])""",
         re.I,
     )
 
 
-_SEC_VERIFY = re.compile(r"/_sec/verify", re.I)
-_DOJ_INTERSTITIAL = re.compile(r"doj-interstitial", re.I)
-_AKAM_LOGO = re.compile(r"akam-logo", re.I)
-_CF_ELEMENT = re.compile(r"cf-browser-verification|cf-challenge", re.I)
-_CF_PLATFORM = re.compile(r"/cdn-cgi/challenge-platform", re.I)
+# Every known token is matched at its own boundaries, so a longer name that
+# merely contains it — challenge-form-entry, cf-challenge-analysis,
+# akam-logo-analysis — is not mistaken for the mechanism itself.
+def _exact(token: str) -> re.Pattern:
+    return re.compile(rf"(?<![\w-])(?:{token})(?![\w-])", re.I)
+
+
+_SEC_VERIFY = _exact(r"/_sec/verify")
+_DOJ_INTERSTITIAL = _exact(r"doj-interstitial")
+_AKAM_LOGO = _exact(r"akam-logo")
+_CF_ELEMENT = _exact(r"cf-browser-verification|cf-challenge")
+_CF_PLATFORM = _exact(r"/cdn-cgi/challenge-platform")
 # Known verification form identifiers, matched as whole tokens so an unrelated
 # name such as "challenge-entry-form" cannot collide.
 _CHALLENGE_FORM_ID = re.compile(
@@ -174,7 +182,7 @@ _CHALLENGE_FORM_ID = re.compile(
     r"cf-browser-verification|captcha-form|verification-form)(?![\w-])",
     re.I,
 )
-_CHALLENGE_ACTION = re.compile(r"challenge-form|captcha-delivery|/cdn-cgi/challenge-platform", re.I)
+_CHALLENGE_ACTION = _exact(r"challenge-form|captcha-delivery|/cdn-cgi/challenge-platform")
 
 
 def _structural_signals(view: _ScanView) -> tuple[str, ...]:
@@ -407,51 +415,107 @@ _LEADING_NOISE = re.compile(r"^\s*(?:<!--.*?-->|<!doctype\s+[^>]*>)\s*", re.I | 
 _FEED_ROOT = re.compile(r"^\s*<(?:rss|feed|rdf:RDF)\b", re.I)
 _HTML_ROOT = re.compile(r"^\s*(?:<!doctype\s+html\b|<html\b)", re.I)
 _HTML_PROLOGUE = re.compile(r"^\s*<!doctype\s+html|^\s*<html\b", re.I)
-_HTML_ANYWHERE = re.compile(r"<html\b|<head\b|<body\b|<!doctype\s+html", re.I)
-# Structural tags that mean HTML even in a fragment with no document wrapper.
-_HTML_FRAGMENT = re.compile(
-    r"</?(article|section|main|div|p|span|table|tbody|tr|td|ul|ol|li|h[1-6]|"
-    r"nav|form|figure|blockquote|img|br|hr|strong|em)\b", re.I
-)
+# Root element names that mean HTML even without a document wrapper. Only the
+# *root* is consulted — a <p> nested inside <response> does not make the document
+# HTML.
+_HTML_FRAGMENT_ROOTS = frozenset({
+    "article", "section", "main", "div", "p", "span", "table", "tbody", "thead",
+    "tr", "td", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "nav",
+    "form", "figure", "blockquote", "img", "br", "hr", "strong", "em", "header",
+    "footer", "aside", "picture", "video", "audio", "template", "dl",
+})
+_FEED_ROOTS = frozenset({"rss", "feed", "rdf:rdf"})
+_FIRST_TAG = re.compile(r"^\s*<\s*([a-zA-Z][\w:.-]*)")
+_COMMENT_OR_PI = re.compile(r"^\s*(?:<!--.*?-->|<\?[^>]*\?>|<!\[CDATA\[.*?\]\]>)\s*", re.S)
+# Bounded confirmation for an undeclared JSON body.
+_MAX_JSON_PROBE = 1_000_000
+
+
+def _strip_prologue(head: str) -> str:
+    """Drop comments and processing instructions preceding the root element."""
+    previous = None
+    while previous != head:
+        previous = head
+        head = _COMMENT_OR_PI.sub("", head, count=1)
+    return head
+
+
+def _root_tag(probe: str) -> str:
+    """Name of the document's first element, lowercased, or "" if none."""
+    match = _FIRST_TAG.match(probe)
+    return match.group(1).lower() if match else ""
+
+
+def _is_top_level_json(stripped: str, declared: str) -> bool:
+    """True when the *document* is a JSON object or array.
+
+    A declared JSON type is taken at its word; otherwise the body is parsed once,
+    under a size bound. Markup inside a JSON string value is a value, not the
+    document's type.
+    """
+    if stripped[:1] not in ("{", "["):
+        return False
+    if declared in _JSON_TYPES:
+        return True
+    if len(stripped) > _MAX_JSON_PROBE:
+        return False
+    try:
+        return isinstance(json.loads(stripped), (dict, list))
+    except (ValueError, RecursionError):
+        return False
 
 
 def sniff_body_kind(body: str, raw: bytes = b"", content_type: str = "") -> BodyKind:
-    """Classify a body by inspection. Deliberately small — not a MIME parser.
+    """Classify a body from its top level. Deliberately small — not a MIME parser.
 
-    Explicit feed markers win outright. Otherwise HTML is identified structurally,
-    including bare fragments, and the declared type only breaks a genuine tie —
-    so a mislabelled challenge page is still seen as HTML while ordinary XML
-    labelled ``application/xml`` stays XML.
+    Decided by the document root, never by nested markup: a JSON object whose
+    value happens to contain ``<html>`` is JSON, and an XML ``<response>`` holding
+    a ``<p>`` is XML. Only after the root is inconclusive does the declared
+    content type break the tie.
     """
     if raw and any(raw.startswith(sig) for sig in _BINARY_SIGNATURES):
         return BodyKind.BINARY
     if not body or not body.strip():
         return BodyKind.EMPTY
 
+    declared = _base_type(content_type)
+    stripped = body.lstrip()
+
+    # 2. The document itself is JSON.
+    if _is_top_level_json(stripped, declared):
+        return BodyKind.JSON
+
     head = body[:4096]
     # An XML declaration says how the bytes are encoded, not what the document
     # is — XHTML starts with one too. Look past it at the actual root element.
     had_xml_declaration = bool(_XML_DECLARATION.match(head))
     probe = _XML_DECLARATION.sub("", head, count=1) if had_xml_declaration else head
-    probe = _LEADING_NOISE.sub("", probe, count=1)
 
-    if _FEED_ROOT.match(probe):
-        return BodyKind.XML
-    if _HTML_ROOT.match(probe) or _HTML_ANYWHERE.search(head):
+    # 4a. An HTML doctype is decisive before any other stripping.
+    if _HTML_ROOT.match(probe):
         return BodyKind.HTML
-    if had_xml_declaration:
-        return BodyKind.XML
-    if _HTML_FRAGMENT.search(head):
-        return BodyKind.HTML
+    probe = _strip_prologue(probe)
 
-    stripped = body.lstrip()
-    if stripped[:1] in ("{", "["):
+    root = _root_tag(probe)
+    # 3. Explicit feed root.
+    if root in _FEED_ROOTS:
+        return BodyKind.XML
+    # 4b. HTML root, with or without a preceding declaration.
+    if root == "html" or _HTML_ROOT.match(probe):
+        return BodyKind.HTML
+    # 5. Generic root in a document that declared itself XML.
+    if root and (had_xml_declaration or declared in _FEED_TYPES):
+        return BodyKind.XML
+    # 6. A known bare HTML fragment root.
+    if root in _HTML_FRAGMENT_ROOTS:
+        return BodyKind.HTML
+    # 7. Genuinely ambiguous markup — fall back to what the server declared.
+    if declared in _HTML_TYPES:
+        return BodyKind.HTML
+    if declared in _JSON_TYPES:
         return BodyKind.JSON
+    # 8. Conservative fallback.
     if stripped.startswith("<"):
-        # Ambiguous markup: honour the declared type before defaulting to XML.
-        declared = _base_type(content_type)
-        if declared in _HTML_TYPES:
-            return BodyKind.HTML
         return BodyKind.XML
     return BodyKind.UNKNOWN_TEXT
 
