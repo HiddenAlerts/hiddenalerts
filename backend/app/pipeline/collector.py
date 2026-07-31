@@ -14,7 +14,7 @@ from app.pipeline.deduplicator import get_known_url_hashes, is_content_duplicate
 from app.pipeline.normalizer import compute_content_hash, compute_url_hash
 from app.services.collection_guard import claim_source_run, release_source_run
 from app.sources.base import RawItemStub, _safe_url, summary_fallback_allowed
-from app.sources.http_errors import SourceFetchError
+from app.sources.http_errors import DestinationExcluded, SourceFetchError
 from app.sources.registry import get_adapter
 
 log = logging.getLogger(__name__)
@@ -38,8 +38,12 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
 
     On a run that completes successfully the counters account for every fetched
     stub: ``items_fetched == items_new + items_skipped_url + items_skipped_content
-    + items_skipped_invalid``. A run that fails part-way keeps whatever counts it
-    reached, so that identity does not hold for ``status='failed'`` rows.
+    + items_skipped_invalid``. ``items_skipped_invalid`` currently also absorbs
+    items skipped because their content belongs to another source
+    (``DestinationExcluded``); the recovery-preview work will report those
+    separately as ``external_destination_excluded`` rather than add a column here.
+    A run that fails part-way keeps whatever counts it reached, so that identity
+    does not hold for ``status='failed'`` rows.
 
     Raises if the final commit fails, because in that case nothing was persisted
     and the returned counters would be fiction.
@@ -112,6 +116,19 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
                 try:
                     raw_text, raw_html = await adapter.fetch_full_article(stub.item_url)
                     content_origin = "article"
+                except DestinationExcluded as exc:
+                    # The item's content lives outside the domains this source
+                    # owns, so another source is canonical for it. That is a
+                    # deliberate skip, not a failure: no summary substitute, no
+                    # stored item, no content hash, and the run continues.
+                    run_log.items_skipped_invalid += 1
+                    log.info(
+                        "Source %s '%s': skipping %s — destination %s is outside "
+                        "this source's domains",
+                        source.id, source.name, _safe_url(stub.item_url),
+                        exc.destination or "(unknown)",
+                    )
+                    continue
                 except SourceFetchError as exc:
                     raw_text, raw_html = "", ""
                     content_origin = "none"

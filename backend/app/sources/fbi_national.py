@@ -1,8 +1,9 @@
+from app.sources.fbi_policy import FBIHostedContentMixin
 from app.sources.rss_adapter import RSSAdapter
 
 
-class FBINationalAdapter(RSSAdapter):
-    """FBI National Press Releases RSS feed."""
+class FBINationalAdapter(FBIHostedContentMixin, RSSAdapter):
+    """FBI National Press Releases RSS feed — FBI-hosted articles only."""
 
     @property
     def rss_url(self) -> str:

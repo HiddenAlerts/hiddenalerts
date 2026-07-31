@@ -899,7 +899,12 @@ def test_registry_shape_is_unchanged():
 
 
 def test_untouched_sources_keep_their_adapters():
-    """FBI, FBI News Blog and BleepingComputer are out of scope this slice."""
+    """BleepingComputer keeps every default; the FBI feeds keep the RSS path.
+
+    The FBI adapters' ``summary_fallback`` is deliberately overridden by the
+    canonical-source policy (Slice 3B.2E) — asserted in that slice's tests. What
+    matters here is that this slice's detail-fetch hook left them alone.
+    """
     from app.sources.bleeping import BleepingAdapter
     from app.sources.fbi_blog import FBIBlogAdapter
     from app.sources.fbi_national import FBINationalAdapter
@@ -908,7 +913,8 @@ def test_untouched_sources_keep_their_adapters():
     for cls in (FBINationalAdapter, FBIBlogAdapter, FBINewsAdapter, BleepingAdapter):
         assert issubclass(cls, RSSAdapter)
         assert cls.should_fetch_article is source_base.BaseSourceAdapter.should_fetch_article
-        assert cls.summary_fallback is source_base.BaseSourceAdapter.summary_fallback
+
+    assert BleepingAdapter.summary_fallback is source_base.BaseSourceAdapter.summary_fallback
 
 
 def test_no_api_surface_was_touched():

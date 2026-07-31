@@ -1,8 +1,13 @@
+from app.sources.fbi_policy import FBIHostedContentMixin
 from app.sources.rss_adapter import RSSAdapter
 
 
-class FBINewsAdapter(RSSAdapter):
-    """FBI in the News RSS feed."""
+class FBINewsAdapter(FBIHostedContentMixin, RSSAdapter):
+    """FBI in the News RSS feed — FBI-hosted articles only.
+
+    Most entries point at externally hosted coverage; those are excluded at the
+    article boundary rather than collected under an FBI identity.
+    """
 
     @property
     def rss_url(self) -> str:

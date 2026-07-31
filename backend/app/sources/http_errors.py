@@ -129,3 +129,32 @@ class TooManyRedirects(SourceFetchError):
 
 class UnsupportedRedirectScheme(UnsafeRequestTarget):
     """Location pointed somewhere other than http/https."""
+
+
+class DestinationExcluded(SourceFetchError):
+    """A valid public URL that this source is not allowed to collect from.
+
+    Raised when an article request — or a redirect it would follow — leaves the
+    domains the adapter owns. FBI feeds routinely point at justice.gov, where DOJ
+    is the canonical source, so following the redirect would collect the same
+    release twice under two identities.
+
+    This is *not* :class:`UnsafeRequestTarget`: the destination is a legitimate
+    public site we simply do not want *this* source to speak for. It is also not
+    a parser failure, and it is never eligible for a summary fallback — the item
+    belongs to another source, so there is nothing here to substitute.
+
+    ``destination`` is a normalized hostname only: no query string, no response
+    body, and no raw Location header.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        url: str = "",
+        destination: str = "",
+        status: int | None = None,
+    ) -> None:
+        super().__init__(message, url=url, status=status)
+        self.destination = (destination or "").strip().lower().rstrip(".")

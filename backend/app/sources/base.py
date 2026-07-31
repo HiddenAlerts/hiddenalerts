@@ -3,6 +3,7 @@ import ipaddress
 import logging
 import socket
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -17,6 +18,7 @@ from pydantic import BaseModel
 from app.sources.host_limiter import host_limiter, normalize_host
 from app.sources.http_errors import (
     ChallengeDetected,
+    DestinationExcluded,
     EmptyContent,
     SourceFetchError,
     UnsafeRequestTarget,
@@ -134,7 +136,9 @@ _FALLBACK_ELIGIBLE = (
 )
 # Failures that mean we asked for the wrong thing, or something is misconfigured.
 # Substituting a summary would paper over a defect.
-_FALLBACK_TERMINAL = (UnsafeRequestTarget, RedirectLoop, TooManyRedirects)
+_FALLBACK_TERMINAL = (
+    UnsafeRequestTarget, RedirectLoop, TooManyRedirects, DestinationExcluded,
+)
 # Statuses that plausibly mean "this article is not available to us right now".
 _EXPECTED_UNAVAILABLE_STATUSES = frozenset({401, 403, 404, 410, 429, 451})
 
@@ -353,6 +357,43 @@ def assert_safe_target(url: str) -> None:
         raise UnsafeRequestTarget(f"refusing to request URL: {reason}", url=_safe_url(url))
 
 
+def host_in_domains(host: str, domains: Sequence[str]) -> bool:
+    """True when ``host`` is one of ``domains`` or a subdomain of one.
+
+    Matching is on the normalized hostname — lowercased, trailing root dot
+    dropped, port excluded — and a subdomain must be separated by a real dot.
+    ``fbi.gov`` therefore accepts ``fbi.gov`` and ``www.fbi.gov`` but not
+    ``evilfbi.gov`` or ``fbi.gov.example.com``.
+    """
+    host = normalize_host(host)
+    if not host:
+        return False
+    for domain in domains:
+        domain = normalize_host(domain)
+        if domain and (host == domain or host.endswith(f".{domain}")):
+            return True
+    return False
+
+
+def assert_allowed_destination(url: str, domains: Sequence[str] | None, *, hop: str) -> None:
+    """Raise :class:`DestinationExcluded` if this URL is outside ``domains``.
+
+    ``domains`` of ``None`` means unrestricted, which is every adapter's default.
+    ``hop`` describes where the check fired ("target" or "redirect") and appears
+    in the message; no URL, host or header value beyond the normalized
+    destination host is recorded.
+    """
+    if domains is None:
+        return
+    host = normalize_host(urlsplit(url).hostname)
+    if host_in_domains(host, domains):
+        return
+    raise DestinationExcluded(
+        f"refusing {hop}: {host or '(no host)'} is outside this source's domains",
+        url=url, destination=host,
+    )
+
+
 def _resolve_redirect(current_url: str, location: str) -> str:
     """Resolve a Location header into a target we are willing to request.
 
@@ -387,12 +428,17 @@ async def _follow(
     send,
     limiter,
     source_label: str,
+    allowed_domains: Sequence[str] | None = None,
 ) -> FetchResult:
     """Issue one request and follow redirects manually, spacing every hop.
 
     ``send`` is an awaitable ``(url, headers) -> (status, response_headers, body,
     raw)`` so the httpx and requests tiers share this logic and tests can supply a
     transport without touching the network.
+
+    ``allowed_domains`` restricts where the chain may go. Every redirect target is
+    checked *before* it is adopted, so an excluded destination never reaches the
+    host limiter, never becomes a request, and never escalates a tier.
     """
     seen: set[str] = set()
     hosts: list[str] = []
@@ -425,6 +471,10 @@ async def _follow(
                     f"exceeded {MAX_REDIRECTS} redirects", url=current, status=status
                 )
             target = _resolve_redirect(current, location)
+            # Checked here, before the next iteration acquires the target's host
+            # limiter or sends anything to it. fbi.gov → justice.gov stops on this
+            # line: justice.gov is never contacted through an FBI source.
+            assert_allowed_destination(target, allowed_domains, hop="redirect")
             next_host = normalize_host(urlsplit(target).hostname)
             if _origin(target) != _origin(current):
                 log.debug(
@@ -504,6 +554,13 @@ async def _playwright_get(
 
 
 class BaseSourceAdapter(ABC):
+    #: Domains this source is allowed to collect article content from, or ``None``
+    #: for unrestricted — the default, which preserves every existing adapter.
+    #: A domain matches itself and its subdomains (see :func:`host_in_domains`).
+    #: Applied to article/detail requests only, never to feed or listing
+    #: discovery, and enforced on every redirect hop before it is requested.
+    allowed_article_domains: tuple[str, ...] | None = None
+
     def __init__(self, source: object) -> None:
         self.source = source
 
@@ -555,7 +612,10 @@ class BaseSourceAdapter(ABC):
         ``ChallengeDetected`` and ``UnsupportedDocument`` — so a blocked or
         non-readable page is never mistaken for an article with no text.
         """
-        result = await self.fetch(url, accept=AcceptPolicy.ARTICLE)
+        result = await self.fetch(
+            url, accept=AcceptPolicy.ARTICLE,
+            allowed_domains=self.allowed_article_domains,
+        )
         text = extract_text_from_html(result.text)
         if not text.strip():
             # Nothing readable survived extraction. Raising lets the collector use
@@ -574,6 +634,7 @@ class BaseSourceAdapter(ABC):
         timeout: float = 30.0,
         allow_browser: bool = False,
         limiter=None,
+        allowed_domains: Sequence[str] | None = None,
     ) -> FetchResult:
         """Fetch one URL through the shared boundary and return a structured result.
 
@@ -594,6 +655,7 @@ class BaseSourceAdapter(ABC):
         it explicitly rather than inheriting browser mode by default.
         """
         assert_safe_target(url)
+        assert_allowed_destination(url, allowed_domains, hop="target")
         limiter = limiter or host_limiter
         label = self._source_label()
 
@@ -619,6 +681,7 @@ class BaseSourceAdapter(ABC):
                 return await _follow(
                     url, policy=accept, headers=_BROWSER_HEADERS, timeout=timeout,
                     send=_httpx_send, limiter=limiter, source_label=label,
+                    allowed_domains=allowed_domains,
                 )
             except ChallengeDetected as exc:
                 log.warning(
@@ -674,6 +737,7 @@ class BaseSourceAdapter(ABC):
                 return await _follow(
                     url, policy=accept, headers=headers, timeout=timeout,
                     send=_requests_send, limiter=limiter, source_label=label,
+                    allowed_domains=allowed_domains,
                 )
             except PermanentFetchError as exc:
                 if exc.status != 403:
@@ -702,7 +766,9 @@ class BaseSourceAdapter(ABC):
 
         log.debug("%s: escalating %s to browser rendering", label, _safe_url(url))
         try:
-            return await self._browser_fetch(url, accept, limiter, label)
+            return await self._browser_fetch(
+                url, accept, limiter, label, allowed_domains=allowed_domains
+            )
         except SourceFetchError:
             # The browser is the last tier, and it classified the response — that
             # verdict is the answer, not something to flatten into a generic error.
@@ -712,7 +778,9 @@ class BaseSourceAdapter(ABC):
 
         raise PermanentFetchError("all fetch tiers failed", url=url) from last_exc
 
-    async def _browser_fetch(self, url, accept, limiter, label) -> FetchResult:
+    async def _browser_fetch(
+        self, url, accept, limiter, label, *, allowed_domains: Sequence[str] | None = None
+    ) -> FetchResult:
         """Render with a browser and validate the result like any other response.
 
         The rendered page gets the same treatment as a direct fetch: a challenge,
@@ -756,7 +824,11 @@ class BaseSourceAdapter(ABC):
         _validate_success_body(final_url, status, content_type, html, kind, accept)
 
         # Only the initial and final hosts are knowable: intermediate browser
-        # redirect hops are not observable without request interception.
+        # redirect hops are not observable without request interception. A
+        # restricted source therefore also checks where the browser landed —
+        # weaker than the per-hop check on the direct tiers, but it still refuses
+        # to hand back a page from outside the source's domains.
+        assert_allowed_destination(final_url, allowed_domains, hop="rendered destination")
         initial_host = normalize_host(urlsplit(url).hostname)
         final_host = normalize_host(urlsplit(final_url).hostname)
         hosts = (initial_host,) if final_host in ("", initial_host) else (initial_host, final_host)
