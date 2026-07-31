@@ -452,3 +452,75 @@ def test_health_route_has_no_admin_dependency():
     routes = [r for r in health_router.routes if isinstance(r, APIRoute)]
     assert routes
     assert not any(_requires_admin(r) for r in routes)
+
+
+# ---------------------------------------------------------------------------
+# External-exclusion telemetry (Slice 3B.2H)
+# ---------------------------------------------------------------------------
+
+
+def test_run_log_schema_exposes_external_exclusions():
+    """Ken must be able to tell a deliberate exclusion from invalid content."""
+    from app.schemas.run_log import RunLogRead
+
+    fields = RunLogRead.model_fields
+    for name in ("items_new", "items_skipped_url", "items_skipped_content",
+                 "items_skipped_invalid", "items_skipped_external"):
+        assert name in fields, name
+    assert fields["items_skipped_external"].annotation is int
+
+
+def test_openapi_documents_the_new_counter():
+    """An intentional, additive OpenAPI change."""
+    from app.main import app
+
+    schema = app.openapi()
+    run_log = schema["components"]["schemas"]["RunLogRead"]
+    properties = run_log["properties"]
+
+    assert "items_skipped_external" in properties
+    assert properties["items_skipped_external"]["type"] == "integer"
+    # The counters that existed before are untouched.
+    for name in ("items_fetched", "items_new", "items_duplicate",
+                 "items_skipped_url", "items_skipped_content",
+                 "items_skipped_invalid"):
+        assert name in properties, name
+    assert "items_skipped_external" in run_log.get("required", [])
+
+
+def test_source_runs_endpoint_still_requires_admin():
+    """The new field changes the payload, not the authorization."""
+    paths = app.openapi()["paths"]
+    assert "/api/v1/sources/{source_id}/runs" in paths
+    assert ("GET", "/api/v1/sources/1/runs") in PROTECTED_ROUTES
+
+
+@pytest.mark.asyncio
+async def test_source_runs_payload_carries_external_counts(client, db_session):
+    """End to end: a run with exclusions reports them distinctly."""
+    from datetime import datetime
+
+    from sqlalchemy import delete
+
+    from app.models.run_log import RunLog
+
+    admin = await _make_user(db_session)
+    source = await _make_source(db_session)
+
+    db_session.add(RunLog(
+        source_id=source.id, run_started_at=datetime.utcnow(), status="success",
+        items_fetched=10, items_new=2, items_duplicate=3, items_skipped_url=3,
+        items_skipped_content=0, items_skipped_invalid=1, items_skipped_external=4,
+    ))
+    await db_session.commit()
+
+    resp = await client.get(f"/api/v1/sources/{source.id}/runs", headers=_auth(admin))
+    assert resp.status_code == 200
+
+    run = resp.json()[0]
+    assert run["items_skipped_external"] == 4
+    assert run["items_skipped_invalid"] == 1, "distinct from external"
+    assert run["items_new"] == 2
+
+    await db_session.execute(delete(RunLog).where(RunLog.source_id == source.id))
+    await db_session.commit()

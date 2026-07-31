@@ -29,6 +29,10 @@ class Source(Base):
     # Relationships
     raw_items: Mapped[list["RawItem"]] = relationship("RawItem", back_populates="source")  # noqa: F821
     run_logs: Mapped[list["RunLog"]] = relationship("RunLog", back_populates="source")  # noqa: F821
+    url_decisions: Mapped[list["SourceURLDecision"]] = relationship(  # noqa: F821
+        "SourceURLDecision", back_populates="source",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Source id={self.id} name={self.name!r}>"

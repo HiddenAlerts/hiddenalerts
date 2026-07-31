@@ -842,6 +842,8 @@ def test_run_log_schema_is_additive_and_backward_compatible():
         "items_skipped_url",
         "items_skipped_content",
         "items_skipped_invalid",
+        # Added in Slice 3B.2H — a deliberate, additive OpenAPI change.
+        "items_skipped_external",
         "error_message",
     }
 

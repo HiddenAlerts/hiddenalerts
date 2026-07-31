@@ -45,6 +45,7 @@ from app.models.raw_item import RawItem
 from app.models.run_log import RunLog
 from app.models.source import Source
 from app.pipeline.normalizer import compute_content_hash, compute_url_hash
+from app.services.source_url_decisions import get_suppressing_decisions
 from app.sources.http_errors import (
     DestinationExcluded,
     SourceFetchError,
@@ -252,6 +253,8 @@ class SourcePreview:
     batch_duplicates: int = 0
     unique_urls: int = 0
     known_urls: int = 0
+    #: URLs this source has already ruled out — recorded decisions, not backlog.
+    previously_excluded_external: int = 0
     prospective_unseen: int = 0
     missing_titles: int = 0
     missing_dates: int = 0
@@ -305,11 +308,17 @@ def _iso(value: Any) -> str | None:
     return value.isoformat() if isinstance(value, datetime) else None
 
 
-async def classify_stubs(session: AsyncSession, stubs: list) -> dict[str, Any]:
+async def classify_stubs(
+    session: AsyncSession, stubs: list, source_id: int | None = None
+) -> dict[str, Any]:
     """Split fetched stubs the way the collector's pre-filter does.
 
-    Uses production ``compute_url_hash`` and the same batch known-hash query, so
-    the unseen count here is the count the collector would act on.
+    Uses production ``compute_url_hash``, the same batch known-hash query and the
+    same source-scoped decision lookup, so the unseen count here is the count the
+    collector would act on. A URL this source has already excluded is reported
+    under ``previously_excluded_external`` and is *not* prospective backlog.
+
+    Read-only: the lookup never advances ``occurrence_count`` or ``last_seen_at``.
     """
     invalid = 0
     batch: dict[str, Any] = {}
@@ -332,14 +341,22 @@ async def classify_stubs(session: AsyncSession, stubs: list) -> dict[str, Any]:
     from app.pipeline.deduplicator import get_known_url_hashes
 
     known = await get_known_url_hashes(session, set(batch))
-    unseen = [(h, s) for h, s in batch.items() if h not in known]
+    unstored = [(h, s) for h, s in batch.items() if h not in known]
+
+    decisions = (
+        await get_suppressing_decisions(session, source_id, {h for h, _ in unstored})
+        if source_id is not None
+        else {}
+    )
+    unseen = [(h, s) for h, s in unstored if h not in decisions]
 
     dates = [s.published_at for _, s in unseen if getattr(s, "published_at", None)]
     return {
         "invalid_urls": invalid,
         "batch_duplicates": duplicates,
         "unique_urls": len(batch),
-        "known_urls": len(batch) - len(unseen),
+        "known_urls": len(batch) - len(unstored),
+        "previously_excluded_external": len(unstored) - len(unseen),
         "unseen": unseen,
         "missing_titles": sum(1 for _, s in unseen if not (getattr(s, "title", "") or "").strip()),
         "missing_dates": sum(1 for _, s in unseen if not getattr(s, "published_at", None)),
@@ -488,11 +505,12 @@ async def preview_source(
         return preview
 
     preview.stubs_fetched = len(stubs)
-    classified = await classify_stubs(session, stubs)
+    classified = await classify_stubs(session, stubs, row.id)
     preview.invalid_urls = classified["invalid_urls"]
     preview.batch_duplicates = classified["batch_duplicates"]
     preview.unique_urls = classified["unique_urls"]
     preview.known_urls = classified["known_urls"]
+    preview.previously_excluded_external = classified["previously_excluded_external"]
     preview.missing_titles = classified["missing_titles"]
     preview.missing_dates = classified["missing_dates"]
     preview.oldest_prospective = classified["oldest"]
@@ -571,6 +589,7 @@ def build_totals(previews: list[SourcePreview]) -> dict[str, int]:
         "sources_previewed": len(previews),
         "stubs_fetched": total("stubs_fetched"),
         "known_urls": total("known_urls"),
+        "previously_excluded_external": total("previously_excluded_external"),
         "batch_duplicates": total("batch_duplicates"),
         "invalid_urls": total("invalid_urls"),
         "prospective_unseen": total("prospective_unseen"),
@@ -670,15 +689,17 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "## Sources",
         "",
-        "| ID | Name | Status | Fetched | Known | Unseen | Checked | Storable | Excluded |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|",
+        "| ID | Name | Status | Fetched | Known | Prev. external | Unseen | "
+        "Checked | Storable | Excluded |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for source in report["sources"]:
         lines.append(
-            "| {id} | {name} | `{status}` | {fetched} | {known} | {unseen} | "
-            "{checked} | {storable} | {excluded} |".format(
+            "| {id} | {name} | `{status}` | {fetched} | {known} | {prev} | "
+            "{unseen} | {checked} | {storable} | {excluded} |".format(
                 id=source["source_id"], name=source["name"], status=source["status"],
                 fetched=source["stubs_fetched"], known=source["known_urls"],
+                prev=source["previously_excluded_external"],
                 unseen=source["prospective_unseen"], checked=source["checked_unseen"],
                 storable=source["predicted_storable"],
                 excluded=source["outcome_counts"].get(EXTERNAL_DESTINATION_EXCLUDED, 0),

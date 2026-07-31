@@ -556,10 +556,13 @@ async def test_exclusions_do_not_fail_the_run_and_valid_items_survive(
     assert run.status == "success"
     assert run.items_fetched == 5
     assert run.items_new == 1
-    assert run.items_skipped_invalid == 4
+    # Since Slice 3B.2H these are counted apart from "invalid": they are
+    # deliberate, not defective.
+    assert run.items_skipped_external == 4
+    assert run.items_skipped_invalid == 0
     assert run.items_fetched == (
         run.items_new + run.items_skipped_url + run.items_skipped_content
-        + run.items_skipped_invalid
+        + run.items_skipped_invalid + run.items_skipped_external
     )
 
     # Only the FBI-hosted article is stored, and DOJ content never arrived.
@@ -641,7 +644,8 @@ async def test_later_valid_items_still_process_after_an_exclusion(
 
     assert run.status == "success"
     assert set(stored) == {FBI_DIRECT_URL_2}
-    assert run.items_skipped_invalid == 2
+    assert run.items_skipped_external == 2
+    assert run.items_skipped_invalid == 0
 
 
 @pytest.mark.asyncio
@@ -683,7 +687,7 @@ async def test_exclusion_logging_is_structured_and_leaks_nothing(
     ours = [r.getMessage() for r in caplog.records if r.name.startswith("app.")]
     assert ours
     assert not any("SUPERSECRET123" in m for m in ours), ours
-    assert run.items_skipped_invalid == 1
+    assert run.items_skipped_external == 1
 
 
 @pytest.mark.asyncio
@@ -762,7 +766,8 @@ async def test_fbi_in_the_news_keeps_only_its_fbi_hosted_item(
     stored = await _rows(db_session, source)
 
     assert set(stored) == {FBI_DIRECT_URL_2}
-    assert run.items_skipped_invalid == 3
+    assert run.items_skipped_external == 3
+    assert run.items_skipped_invalid == 0
     assert not any("ic3.gov" in url for url in rec.requested)
     assert not any("justice.gov" in url for url in rec.requested)
 
@@ -841,7 +846,8 @@ async def test_blog_excludes_a_future_external_item(
 
     assert run.status == "success"
     assert run.items_new == 0
-    assert run.items_skipped_invalid == 1
+    assert run.items_skipped_external == 1
+    assert run.items_skipped_invalid == 0
     assert await _rows(db_session, source) == {}
     assert not any("treasury.gov" in url for url in rec.requested)
 
@@ -972,10 +978,10 @@ def test_feed_urls_and_registry_keys_are_unchanged():
     assert FBIBlogAdapter(blank).rss_url == FBI_BLOG_FEED
 
 
-def test_run_log_has_no_new_column():
-    """The exclusion count rides in items_skipped_invalid; no migration 0013."""
+def test_run_log_counts_exclusions_in_their_own_column():
+    """Slice 3B.2H gave exclusions a dedicated counter (migration 0013)."""
     columns = {c.name for c in RunLog.__table__.columns}
-    assert "external_destination_excluded" not in columns
+    assert "items_skipped_external" in columns
     assert "items_skipped_invalid" in columns
 
 

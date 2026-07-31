@@ -10,9 +10,15 @@ from app.database import AsyncSessionLocal
 from app.models.raw_item import RawItem
 from app.models.run_log import RunLog
 from app.models.source import Source
+from app.models.source_url_decision import EXTERNAL_DESTINATION_EXCLUDED
 from app.pipeline.deduplicator import get_known_url_hashes, is_content_duplicate
 from app.pipeline.normalizer import compute_content_hash, compute_url_hash
 from app.services.collection_guard import claim_source_run, release_source_run
+from app.services.source_url_decisions import (
+    get_suppressing_decisions,
+    record_external_exclusion,
+    touch_seen_decisions,
+)
 from app.sources.base import RawItemStub, _safe_url, summary_fallback_allowed
 from app.sources.http_errors import DestinationExcluded, SourceFetchError
 from app.sources.registry import get_adapter
@@ -37,13 +43,19 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
     rather than calling this directly outside tests.
 
     On a run that completes successfully the counters account for every fetched
-    stub: ``items_fetched == items_new + items_skipped_url + items_skipped_content
-    + items_skipped_invalid``. ``items_skipped_invalid`` currently also absorbs
-    items skipped because their content belongs to another source
-    (``DestinationExcluded``); the recovery-preview work will report those
-    separately as ``external_destination_excluded`` rather than add a column here.
-    A run that fails part-way keeps whatever counts it reached, so that identity
-    does not hold for ``status='failed'`` rows.
+    stub::
+
+        items_fetched == items_new
+                       + items_skipped_url
+                       + items_skipped_content
+                       + items_skipped_invalid
+                       + items_skipped_external
+
+    ``items_skipped_external`` counts items whose content belongs to another
+    source — both a fresh ``DestinationExcluded`` and a URL a previous run already
+    decided. Those are deliberate and are never also counted as invalid. A run
+    that fails part-way keeps whatever counts it reached, so the identity does not
+    hold for ``status='failed'`` rows.
 
     Raises if the final commit fails, because in that case nothing was persisted
     and the returned counters would be fiction.
@@ -59,6 +71,7 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
         items_skipped_url=0,
         items_skipped_content=0,
         items_skipped_invalid=0,
+        items_skipped_external=0,
     )
     session.add(run_log)
     await session.flush()
@@ -93,15 +106,39 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
             batch[url_hash] = stub
 
         known_hashes = await get_known_url_hashes(session, set(batch))
-        new_stubs = [(h, stub) for h, stub in batch.items() if h not in known_hashes]
-        run_log.items_skipped_url += len(batch) - len(new_stubs)
+        unstored = [(h, stub) for h, stub in batch.items() if h not in known_hashes]
+        run_log.items_skipped_url += len(batch) - len(unstored)
+
+        # A URL this source has already ruled out stays ruled out. Checked after
+        # the RawItem filter and before any article request, so a terminal
+        # decision costs nothing but the one batch query that found it.
+        decisions = await get_suppressing_decisions(
+            session, source.id, {h for h, _ in unstored}
+        )
+        new_stubs = [(h, stub) for h, stub in unstored if h not in decisions]
+        seen_again = [decisions[h] for h, _ in unstored if h in decisions]
+        if seen_again:
+            run_log.items_skipped_external += len(seen_again)
+            await touch_seen_decisions(session, seen_again)
+            log.info(
+                "Source %s '%s': %d listing item(s) already decided as external, "
+                "not requested",
+                source.id, source.name, len(seen_again),
+            )
+            for decision in seen_again:
+                log.debug(
+                    "Source %s: %s previously excluded → %s",
+                    source.id, decision.item_url, decision.destination_host or "?",
+                )
 
         log.info(
-            "Source %s '%s': %d fetched → %d skipped by URL → %d to retrieve",
+            "Source %s '%s': %d fetched → %d skipped by URL → %d already external "
+            "→ %d to retrieve",
             source.id,
             source.name,
             run_log.items_fetched,
             run_log.items_skipped_url,
+            len(seen_again),
             len(new_stubs),
         )
 
@@ -121,12 +158,27 @@ async def run_source(source: Source, session: AsyncSession) -> RunLog:
                     # owns, so another source is canonical for it. That is a
                     # deliberate skip, not a failure: no summary substitute, no
                     # stored item, no content hash, and the run continues.
-                    run_log.items_skipped_invalid += 1
+                    #
+                    # The verdict is recorded so later runs skip the URL before
+                    # requesting it. A persistence failure is *not* swallowed —
+                    # it fails the run, because a successful run must never claim
+                    # an exclusion was remembered when it was not.
+                    await record_external_exclusion(
+                        session,
+                        source_id=source.id,
+                        url_hash=url_hash,
+                        item_url=_safe_url(stub.item_url),
+                        destination_host=exc.destination,
+                        reason_code=type(exc).__name__,
+                        published_at=stub.published_at,
+                    )
+                    run_log.items_skipped_external += 1
                     log.info(
-                        "Source %s '%s': skipping %s — destination %s is outside "
-                        "this source's domains",
+                        "Source %s '%s': skipping %s (hash %s) — destination %s is "
+                        "outside this source's domains, decision %s recorded",
                         source.id, source.name, _safe_url(stub.item_url),
-                        exc.destination or "(unknown)",
+                        url_hash[:12], exc.destination or "(unknown)",
+                        EXTERNAL_DESTINATION_EXCLUDED,
                     )
                     continue
                 except SourceFetchError as exc:

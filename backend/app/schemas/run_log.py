@@ -15,6 +15,7 @@ class RunLogRead(BaseModel):
     items_skipped_url: int
     items_skipped_content: int
     items_skipped_invalid: int
+    items_skipped_external: int
     error_message: str | None
 
     model_config = {"from_attributes": True}

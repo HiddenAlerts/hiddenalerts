@@ -34,6 +34,12 @@ class RunLog(Base):
     items_skipped_invalid: Mapped[int] = mapped_column(
         Integer, default=0, server_default=text("0"), nullable=False
     )
+    # Content another source owns — a terminal destination exclusion, recorded in
+    # source_url_decisions. Deliberate, and counted apart from "invalid" so a
+    # healthy FBI run is not mistaken for a broken one.
+    items_skipped_external: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0"), nullable=False
+    )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     details_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 

@@ -942,3 +942,165 @@ async def test_report_is_deterministic(monkeypatch, db_session, source):
         for volatile in ("generated_at", "branch", "commit"):
             report.pop(volatile)
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+
+
+# ===========================================================================
+# Persisted terminal decisions (Slice 3B.2H)
+# ===========================================================================
+
+
+async def _record_decision(db_session, source, url, destination="www.justice.gov"):
+    from app.models.source_url_decision import (
+        EXTERNAL_DESTINATION_EXCLUDED,
+        SourceURLDecision,
+    )
+
+    decision = SourceURLDecision(
+        source_id=source.id, url_hash=compute_url_hash(url), item_url=url,
+        decision=EXTERNAL_DESTINATION_EXCLUDED, destination_host=destination,
+        first_seen_at=datetime(2026, 7, 1), last_seen_at=datetime(2026, 7, 1),
+        occurrence_count=1,
+    )
+    db_session.add(decision)
+    await db_session.commit()
+    return decision
+
+
+@pytest.fixture
+async def clean_decisions(db_session):
+    from app.models.source_url_decision import SourceURLDecision
+
+    yield
+    await db_session.rollback()
+    await db_session.execute(delete(SourceURLDecision))
+    await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_persisted_decisions_leave_prospective_unseen(
+    monkeypatch, db_session, source, clean_decisions
+):
+    excluded = "https://preview.test/excluded"
+    await _record_decision(db_session, source, excluded)
+    _use_adapter(monkeypatch, StubAdapter(
+        source, [_stub(excluded), _stub("https://preview.test/fresh")],
+    ))
+
+    entry = (await _run(db_session, source))["sources"][0]
+
+    assert entry["stubs_fetched"] == 2
+    assert entry["previously_excluded_external"] == 1
+    assert entry["prospective_unseen"] == 1, "the decided URL is not backlog"
+    assert entry["known_urls"] == 0, "it is not a stored RawItem either"
+
+
+@pytest.mark.asyncio
+async def test_preview_makes_no_article_request_for_a_decided_url(
+    monkeypatch, db_session, source, clean_decisions
+):
+    excluded = "https://preview.test/excluded"
+    await _record_decision(db_session, source, excluded)
+    adapter = _use_adapter(monkeypatch, StubAdapter(source, [_stub(excluded)]))
+
+    entry = (await _run(db_session, source, mode="content"))["sources"][0]
+
+    assert adapter.fetched == []
+    assert entry["prospective_unseen"] == 0
+    assert entry["checked_unseen"] == 0
+    assert entry["predicted_storable"] == 0
+
+
+@pytest.mark.asyncio
+async def test_decision_lookup_is_source_scoped_in_the_preview(
+    monkeypatch, db_session, source, clean_decisions
+):
+    """A decision recorded for one source must not hide the URL from another."""
+    other = Source(
+        name="Other Preview Source", base_url="https://preview.test/news",
+        source_type="rss", rss_url=FEED_URL,
+        adapter_class="krebs.KrebsAdapter", is_active=True,
+    )
+    db_session.add(other)
+    await db_session.commit()
+    await db_session.refresh(other)
+
+    shared = "https://preview.test/shared-article"
+    await _record_decision(db_session, source, shared)
+    _use_adapter(monkeypatch, StubAdapter(other, [_stub(shared)]))
+
+    entry = (await _run(db_session, other))["sources"][0]
+    assert entry["previously_excluded_external"] == 0
+    assert entry["prospective_unseen"] == 1
+
+    await db_session.execute(delete(Source).where(Source.id == other.id))
+    await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_the_preview_never_mutates_a_decision(
+    monkeypatch, db_session, source, clean_decisions
+):
+    """Read-only means occurrence_count and last_seen_at do not move."""
+    from app.models.source_url_decision import SourceURLDecision
+
+    excluded = "https://preview.test/excluded"
+    await _record_decision(db_session, source, excluded)
+    _use_adapter(monkeypatch, StubAdapter(source, [_stub(excluded)]))
+
+    await _run(db_session, source, mode="content")
+
+    row = (await db_session.execute(
+        select(SourceURLDecision).where(SourceURLDecision.source_id == source.id)
+    )).scalar_one()
+    assert row.occurrence_count == 1
+    assert row.last_seen_at == datetime(2026, 7, 1)
+
+
+@pytest.mark.asyncio
+async def test_totals_and_markdown_include_previously_excluded(
+    monkeypatch, db_session, source, session_factory, tmp_path, clean_decisions
+):
+    excluded = "https://preview.test/excluded"
+    await _record_decision(db_session, source, excluded)
+    _use_adapter(monkeypatch, StubAdapter(
+        source, [_stub(excluded), _stub("https://preview.test/fresh")],
+    ))
+    json_path, md_path = tmp_path / "p.json", tmp_path / "p.md"
+
+    code = await tool.main(
+        ["--source-id", str(source.id),
+         "--output-json", str(json_path), "--output-markdown", str(md_path)],
+        session_factory=session_factory,
+    )
+    assert code == EXIT_OK
+
+    report = json.loads(json_path.read_text())
+    markdown = md_path.read_text()
+
+    assert report["totals"]["previously_excluded_external"] == 1
+    for key, value in report["totals"].items():
+        assert f"| {key.replace('_', ' ')} | {value} |" in markdown
+    assert "Prev. external" in markdown
+
+
+def test_preview_still_offers_no_write_option():
+    parser = tool.build_parser()
+    options = {opt for action in parser._actions for opt in action.option_strings}
+    assert options == {
+        "-h", "--help", "--source-id", "--all-enabled", "--exclude-source-id",
+        "--overlay", "--mode", "--max-unseen-per-source",
+        "--output-json", "--output-markdown",
+    }
+
+
+def test_preview_decision_lookup_is_the_shared_helper():
+    """One definition of "suppressing" for the collector and the preview."""
+    import inspect
+
+    from app.services import source_url_decisions
+
+    assert tool.get_suppressing_decisions is source_url_decisions.get_suppressing_decisions
+    # The read-only tool must not reach for the mutating helpers.
+    source = inspect.getsource(tool)
+    assert "record_external_exclusion" not in source
+    assert "touch_seen_decisions" not in source
