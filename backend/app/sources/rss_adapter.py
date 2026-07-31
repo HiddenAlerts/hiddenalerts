@@ -1,5 +1,6 @@
 import calendar
 import logging
+import re
 from abc import abstractmethod
 from datetime import datetime
 from urllib.parse import urljoin
@@ -11,11 +12,55 @@ from app.sources.base import (
     BaseSourceAdapter,
     RawItemData,
     RawItemStub,
+    _safe_url,
     _unsafe_target_reason,
 )
+from app.sources.http_errors import ContentTypeMismatch
 from app.sources.response_policy import AcceptPolicy
 
 log = logging.getLogger(__name__)
+
+
+# Everything that may legally precede a feed's root element: a byte-order mark,
+# whitespace, the XML declaration, comments, and a DOCTYPE.
+_FEED_PROLOGUE = re.compile(
+    r"\A(?:\ufeff|\s+|<\?xml[^>]*\?>|<!--.*?-->|<!DOCTYPE[^>]*>)*", re.I | re.S
+)
+# The three feed roots, with or without a namespace prefix: RSS, Atom and RDF.
+_FEED_ROOT = re.compile(r"<(?:[A-Za-z_][\w.-]*:)?(?:rss|feed|RDF)\b", re.I)
+
+
+def has_feed_root(text: str) -> bool:
+    """True when the document's *top-level element* is rss, feed or rdf:RDF.
+
+    Root-driven on purpose: a feed element nested inside an HTML page — an
+    example in an article, say — must not make that page look like a feed.
+    """
+    if not text or not text.strip():
+        return False
+    body = _FEED_PROLOGUE.sub("", text, count=1)
+    return bool(_FEED_ROOT.match(body))
+
+
+def parse_feed_document(text: str):
+    """Parse ``text`` as a feed, or return ``None`` if it is not one.
+
+    Two independent signals must agree: the top-level element is a feed root,
+    **and** feedparser recognized a feed version (``rss20``, ``atom10``, ``rdf``…).
+    Requiring both is what keeps ordinary HTML and arbitrary XML out — neither
+    gets a version, and neither has a feed root.
+
+    Entry count is deliberately *not* a signal: a valid feed with nothing in it is
+    a healthy empty feed, and an HTML page also has zero entries. Treating "zero
+    entries" as evidence either way is exactly the confusion this function exists
+    to prevent.
+    """
+    if not has_feed_root(text):
+        return None
+    parsed = feedparser.parse(text)
+    if not parsed.get("version"):
+        return None
+    return parsed
 
 
 def _parse_feed_date(date_str: str | None) -> datetime | None:
@@ -48,10 +93,27 @@ class RSSAdapter(BaseSourceAdapter):
         return self.source.rss_url  # type: ignore[attr-defined]
 
     async def fetch_item_stubs(self) -> list[RawItemStub]:
-        """Parse RSS feed — returns stubs with no full article fetches."""
+        """Parse RSS feed — returns stubs with no full article fetches.
+
+        One fetch under :data:`AcceptPolicy.FEED`, the long-standing behaviour for
+        every RSS source.
+        """
         log.info(f"Fetching RSS feed (stubs): {self.rss_url}")
-        rss_content = (await self.fetch(self.rss_url, accept=AcceptPolicy.FEED)).text
-        feed = feedparser.parse(rss_content)
+        result = await self.fetch(self.rss_url, accept=AcceptPolicy.FEED)
+        return self.stubs_from_document(result.text)
+
+    def stubs_from_document(self, text: str) -> list[RawItemStub]:
+        """Turn one feed body into stubs, or raise if it is not a feed.
+
+        Shared with any adapter that has to obtain the body differently — the
+        recognition rule and the entry handling stay in one place.
+        """
+        feed = parse_feed_document(text)
+        if feed is None:
+            raise ContentTypeMismatch(
+                "feed URL did not return a recognizable RSS/Atom/RDF document",
+                url=_safe_url(self.rss_url),
+            )
 
         if feed.bozo:
             log.warning(f"RSS feed {self.rss_url} has minor format issues: {feed.bozo_exception}")

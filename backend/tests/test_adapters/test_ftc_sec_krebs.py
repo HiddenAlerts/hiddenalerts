@@ -18,7 +18,16 @@ from app.sources import base as source_base
 from app.sources.base import RawItemStub
 from app.sources.ftc_feeds import FTCFeedsAdapter
 from app.sources.host_limiter import HostRateLimiter
-from app.sources.http_errors import ChallengeDetected
+from app.sources.http_errors import (
+    ChallengeDetected,
+    ContentTypeMismatch,
+    PermanentFetchError,
+    RateLimitedError,
+    RedirectLoop,
+    TooManyRedirects,
+    TransientFetchError,
+    UnsafeRequestTarget,
+)
 from app.sources.krebs import OFFICIAL_FEED_URL as KREBS_OFFICIAL_FEED
 from app.sources.krebs import KrebsAdapter
 from app.sources.registry import ADAPTER_REGISTRY
@@ -923,3 +932,337 @@ def test_no_api_surface_was_touched():
     schema = str(app.openapi()).lower()
     for token in ("ftc", "krebs", "should_fetch_article", "pressreleases.rss"):
         assert token not in schema, token
+
+
+# ===========================================================================
+# Krebs feed reliability (Slice 3B.2G)
+# ===========================================================================
+
+VALID_RSS = KREBS_FULL_FEED
+VALID_ATOM = (
+    '<?xml version="1.0" encoding="utf-8"?>'
+    '<feed xmlns="http://www.w3.org/2005/Atom">'
+    "<title>Krebs on Security</title>"
+    f'<link href="{KREBS_POST_1}"/><updated>2026-07-21T18:05:00Z</updated>'
+    "<entry><title>Inside a Phishing-as-a-Service Operation</title>"
+    f'<link href="{KREBS_POST_1}"/>'
+    "<updated>2026-07-21T18:05:00Z</updated>"
+    "<summary>A phishing-as-a-service operation sold ready-made login pages.</summary>"
+    "</entry></feed>"
+)
+VALID_EMPTY_RSS = KREBS_EMPTY_FEED
+ORDINARY_HTML = (
+    "<!DOCTYPE html><html><head><title>Krebs on Security</title></head><body>"
+    "<h1>Krebs on Security</h1><p>In-depth security news and investigation.</p>"
+    "<article><h2>Inside a Phishing-as-a-Service Operation</h2></article>"
+    "</body></html>"
+)
+NON_FEED_XML = (
+    '<?xml version="1.0"?><catalog><book id="1"><title>Not a feed</title></book></catalog>'
+)
+JSON_BODY = '{"items": [{"title": "Not a feed", "link": "https://krebsonsecurity.com/x"}]}'
+
+HTML_CT = "text/html; charset=UTF-8"
+RSS_CT = "application/rss+xml; charset=UTF-8"
+
+
+def _sequence(monkeypatch, adapter, responses):
+    """Serve one canned (body, content_type) per fetch call, recording attempts."""
+    seen: list[str] = []
+    queue = list(responses)
+
+    async def _fetch(url, *, accept=AcceptPolicy.ANY_TEXT, **kw):
+        seen.append(url)
+        body, ctype = queue.pop(0)
+        return source_base.FetchResult(
+            url=url, final_url=url, status=200, content_type=ctype, text=body,
+        )
+
+    monkeypatch.setattr(adapter, "fetch", _fetch)
+    return seen
+
+
+# --- Documents the strict parser must accept or reject --------------------
+
+
+@pytest.mark.parametrize("body", [VALID_RSS, VALID_ATOM, VALID_EMPTY_RSS])
+def test_feed_documents_are_recognized(body):
+    from app.sources.rss_adapter import parse_feed_document
+
+    assert parse_feed_document(body) is not None
+
+
+@pytest.mark.parametrize("body", [
+    ORDINARY_HTML, NON_FEED_XML, JSON_BODY, "", "   ", "just some text",
+    "<!DOCTYPE html><html><body><pre>&lt;rss version='2.0'&gt;</pre></body></html>",
+])
+def test_non_feed_documents_are_rejected(body):
+    from app.sources.rss_adapter import parse_feed_document
+
+    assert parse_feed_document(body) is None
+
+
+def test_zero_entries_alone_proves_nothing():
+    """A valid empty feed parses; an HTML page with no entries does not."""
+    from app.sources.rss_adapter import parse_feed_document
+
+    empty = parse_feed_document(VALID_EMPTY_RSS)
+    assert empty is not None and len(empty.entries) == 0
+    assert parse_feed_document(ORDINARY_HTML) is None
+
+
+def test_feed_root_must_be_top_level():
+    from app.sources.rss_adapter import has_feed_root
+
+    assert has_feed_root('<?xml version="1.0"?>\n<!-- c -->\n<rss version="2.0"></rss>')
+    assert has_feed_root('﻿<feed xmlns="http://www.w3.org/2005/Atom"></feed>')
+    assert has_feed_root('<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>')
+    assert not has_feed_root("<html><body><rss version='2.0'></rss></body></html>")
+
+
+# --- Krebs attempt policy -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_krebs_normal_rss_content_type_succeeds(monkeypatch):
+    adapter = _krebs()
+    seen = _sequence(monkeypatch, adapter, [(VALID_RSS, RSS_CT)])
+
+    stubs = await adapter.fetch_item_stubs()
+    assert [s.item_url for s in stubs] == [KREBS_POST_1, KREBS_POST_2]
+    assert len(seen) == 1, "a healthy feed costs exactly one request"
+
+
+@pytest.mark.asyncio
+async def test_krebs_valid_rss_declared_text_html_succeeds(monkeypatch):
+    """The live defect: a valid feed mislabeled as text/html."""
+    adapter = _krebs()
+    seen = _sequence(monkeypatch, adapter, [(VALID_RSS, HTML_CT)])
+
+    stubs = await adapter.fetch_item_stubs()
+    assert [s.item_url for s in stubs] == [KREBS_POST_1, KREBS_POST_2]
+    assert stubs[0].summary == KREBS_SUMMARY_1
+    assert stubs[0].published_at == datetime(2026, 7, 21, 18, 5)
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_krebs_valid_atom_declared_text_html_succeeds(monkeypatch):
+    adapter = _krebs()
+    _sequence(monkeypatch, adapter, [(VALID_ATOM, HTML_CT)])
+
+    stubs = await adapter.fetch_item_stubs()
+    assert [s.item_url for s in stubs] == [KREBS_POST_1]
+    assert stubs[0].published_at == datetime(2026, 7, 21, 18, 5)
+
+
+@pytest.mark.asyncio
+async def test_krebs_valid_empty_feed_declared_text_html_returns_zero_stubs(monkeypatch):
+    adapter = _krebs()
+    seen = _sequence(monkeypatch, adapter, [(VALID_EMPTY_RSS, HTML_CT)])
+
+    assert await adapter.fetch_item_stubs() == []
+    assert len(seen) == 1, "a valid empty feed is an answer, not a reason to retry"
+
+
+@pytest.mark.asyncio
+async def test_ordinary_html_never_becomes_an_empty_feed(monkeypatch):
+    """The rule that matters: silence must never be manufactured from a web page."""
+    adapter = _krebs()
+    seen = _sequence(monkeypatch, adapter, [(ORDINARY_HTML, HTML_CT)] * 3)
+
+    with pytest.raises(ContentTypeMismatch):
+        await adapter.fetch_item_stubs()
+    assert len(seen) == 3
+
+
+@pytest.mark.asyncio
+async def test_two_bad_documents_then_rss_succeeds_on_the_third(monkeypatch):
+    adapter = _krebs()
+    seen = _sequence(monkeypatch, adapter, [
+        (ORDINARY_HTML, HTML_CT), (ORDINARY_HTML, HTML_CT), (VALID_RSS, RSS_CT),
+    ])
+
+    stubs = await adapter.fetch_item_stubs()
+    assert [s.item_url for s in stubs] == [KREBS_POST_1, KREBS_POST_2]
+    assert len(seen) == 3
+
+
+@pytest.mark.asyncio
+async def test_three_bad_documents_fail_visibly(monkeypatch):
+    adapter = _krebs()
+    seen = _sequence(monkeypatch, adapter, [(ORDINARY_HTML, HTML_CT)] * 3)
+
+    with pytest.raises(ContentTypeMismatch, match="3 attempts"):
+        await adapter.fetch_item_stubs()
+    assert len(seen) == 3, "bounded at exactly MAX_FEED_ATTEMPTS"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body,ctype", [
+    (NON_FEED_XML, "application/xml"), (JSON_BODY, "application/json"),
+    ("plain words", "text/plain"),
+])
+async def test_other_non_feed_bodies_also_fail(monkeypatch, body, ctype):
+    adapter = _krebs()
+    _sequence(monkeypatch, adapter, [(body, ctype)] * 3)
+
+    with pytest.raises(ContentTypeMismatch):
+        await adapter.fetch_item_stubs()
+
+
+# --- Errors this logic must never retry or swallow ------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [
+    ChallengeDetected("interstitial"),
+    UnsafeRequestTarget("private address"),
+    RedirectLoop("loop"),
+    TooManyRedirects("too many"),
+    PermanentFetchError("HTTP 403", status=403),
+    RateLimitedError("rate limited", status=429),
+    TransientFetchError("upstream busy", status=503),
+    RuntimeError("adapter bug"),
+], ids=["challenge", "unsafe", "loop", "redirects", "403", "429", "503", "bug"])
+async def test_typed_failures_are_not_converted_into_feed_retries(monkeypatch, error):
+    adapter = _krebs()
+    attempts: list[str] = []
+
+    async def _fetch(url, **kw):
+        attempts.append(url)
+        raise error
+
+    monkeypatch.setattr(adapter, "fetch", _fetch)
+
+    with pytest.raises(type(error)):
+        await adapter.fetch_item_stubs()
+    assert len(attempts) == 1, "the failure propagated on the first attempt"
+
+
+@pytest.mark.asyncio
+async def test_krebs_never_enables_the_browser_or_scrapes_html(monkeypatch):
+    import inspect
+
+    from app.sources import krebs
+
+    src = inspect.getsource(krebs)
+    for token in ("allow_browser", "HTMLScraperAdapter", "parse_listing_page",
+                  "BeautifulSoup", "_KrebsRSSAdapter", "entry-title"):
+        assert token not in src, token
+    assert not hasattr(KrebsAdapter, "parse_listing_page")
+
+
+@pytest.mark.asyncio
+async def test_krebs_retries_still_pass_through_the_host_limiter(monkeypatch):
+    """Each attempt is a real fetch, so each acquires the shared limiter."""
+    acquired: list[str] = []
+    routes = {KREBS_FEED_URL: (ORDINARY_HTML, "text/html", 200)}
+    _routes(monkeypatch, routes)
+
+    limiter = source_base.host_limiter
+    real_acquire = limiter.acquire
+
+    async def _acquire(host):
+        acquired.append(host)
+        return await real_acquire(host)
+
+    monkeypatch.setattr(limiter, "acquire", _acquire)
+
+    with pytest.raises(ContentTypeMismatch):
+        await _krebs().fetch_item_stubs()
+    assert acquired == ["krebsonsecurity.com"] * 3
+
+
+def test_krebs_adds_no_sleep_of_its_own():
+    """Pacing is the limiter's job; the adapter must not stall a run itself.
+
+    Checked on call nodes, not prose — the docstring says the word.
+    """
+    import ast
+    import inspect
+
+    from app.sources import krebs
+
+    sleeps = [
+        node for node in ast.walk(ast.parse(inspect.getsource(krebs)))
+        if isinstance(node, ast.Call)
+        and (getattr(node.func, "id", "") == "sleep"
+             or getattr(node.func, "attr", "") == "sleep")
+    ]
+    assert sleeps == []
+
+
+@pytest.mark.asyncio
+async def test_krebs_malformed_entries_are_still_skipped(monkeypatch):
+    adapter = _krebs()
+    _sequence(monkeypatch, adapter, [(KREBS_FEED_WITH_MALFORMED, HTML_CT)])
+
+    stubs = await adapter.fetch_item_stubs()
+    assert [s.item_url for s in stubs] == [KREBS_POST_1]
+
+
+@pytest.mark.asyncio
+async def test_krebs_configured_rss_url_still_takes_precedence(monkeypatch):
+    adapter = _krebs("https://custom.test/krebs.xml")
+    seen = _sequence(monkeypatch, adapter, [(VALID_RSS, RSS_CT)])
+
+    await adapter.fetch_item_stubs()
+    assert seen == ["https://custom.test/krebs.xml"]
+
+
+def test_krebs_attempt_bound_is_three():
+    from app.sources.krebs import MAX_FEED_ATTEMPTS
+
+    assert MAX_FEED_ATTEMPTS == 3
+
+
+# --- Every other RSS source keeps the plain single-fetch FEED behaviour ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_key", [
+    "sec_press.SECPressAdapter", "fbi_national.FBINationalAdapter",
+    "fbi_blog.FBIBlogAdapter", "fbi_news.FBINewsAdapter",
+    "bleeping.BleepingAdapter", "doj_press.DOJPressAdapter",
+])
+async def test_other_rss_sources_use_one_feed_policy_fetch(monkeypatch, adapter_key):
+    cls = ADAPTER_REGISTRY[adapter_key]
+    src = _Src()
+    src.id, src.name, src.rss_url = 99, "S", "https://example.test/feed.xml"
+    src.base_url = "https://example.test"
+    adapter = cls(src)
+
+    calls: list[tuple] = []
+
+    async def _fetch(url, *, accept=AcceptPolicy.ANY_TEXT, **kw):
+        calls.append((url, accept))
+        return source_base.FetchResult(
+            url=url, final_url=url, status=200, content_type=RSS_CT, text=VALID_RSS,
+        )
+
+    monkeypatch.setattr(adapter, "fetch", _fetch)
+    await adapter.fetch_item_stubs()
+
+    assert len(calls) == 1
+    assert calls[0][1] is AcceptPolicy.FEED
+
+
+@pytest.mark.asyncio
+async def test_generic_rss_rejects_a_non_feed_body(monkeypatch):
+    """The strict parser applies to every RSS source, not only Krebs."""
+    from app.sources.bleeping import BleepingAdapter
+
+    src = _Src()
+    src.name, src.rss_url = "B", "https://example.test/feed.xml"
+    adapter = BleepingAdapter(src)
+
+    async def _fetch(url, *, accept=AcceptPolicy.ANY_TEXT, **kw):
+        return source_base.FetchResult(
+            url=url, final_url=url, status=200, content_type="application/xml",
+            text=NON_FEED_XML,
+        )
+
+    monkeypatch.setattr(adapter, "fetch", _fetch)
+    with pytest.raises(ContentTypeMismatch, match="recognizable"):
+        await adapter.fetch_item_stubs()
