@@ -1,11 +1,23 @@
-"""Route inventory and legacy-dependency guards (Slice 3B.2K).
+"""Route inventory and interface-area guards (Slice 3B.2K).
 
-This module pins what the 2026-08-02 audit *proved*, not what would be
-convenient. Routes with confirmed callers or insufficient evidence are asserted
-**present**; nothing is asserted absent unless it was actually removed.
+Every route belongs to exactly one interface area, and each area has its own
+authentication model and migration state:
 
-Evidence behind each retention is recorded in
-``reports/legacy_route_cleanup_slice3b2k_20260802.md``.
+``legacy_jinja``   inactive, intentionally retained until the Admin UI covers
+                   the remaining monitoring and source-management actions
+``admin_api``      target administrative surface (internal JWT)
+``subscriber_api`` active paid-content surface (Supabase token + subscription)
+``client_api``     transitional internal surface (internal JWT)
+``public_api``     transitional unauthenticated surface
+``infrastructure`` uptime and documentation endpoints
+
+These tests assert **route registration and authentication**, which are facts
+about the code. They deliberately say nothing about whether an interface is
+*operationally used* — that is a product fact, recorded in
+``reports/legacy_route_cleanup_slice3b2k_20260802.md``. A Jinja route being
+registered is not evidence that anyone uses it.
+
+Nothing is asserted absent unless it was actually removed.
 """
 import ast
 import inspect
@@ -151,13 +163,32 @@ def test_documented_public_routes_are_retained(path):
     "/dashboard", "/dashboard/monitoring", "/dashboard/events",
     "/dashboard/alerts/{alert_id}", "/login", "/logout",
 ])
-def test_jinja_dashboard_is_retained(path):
-    """A real admin login on 26 Jul 2026 landed on /dashboard with HTTP 200.
+def test_legacy_jinja_routes_remain_registered_during_migration(path):
+    """Registered, not endorsed.
 
-    Source Health APIs replace the *monitoring* view, but the dashboard is still
-    in use and its removal belongs to a later slice.
+    The owner has confirmed the Jinja interface is **no longer operationally
+    used**. It stays mounted only until the Admin UI covers the remaining
+    monitoring and source-management actions; this asserts it has not been
+    removed prematurely, and says nothing about usage.
     """
     assert any(m for (m, p) in ROUTES if p == path), path
+
+
+def test_every_legacy_jinja_capability_has_an_api_replacement():
+    """Backend parity is complete — the outstanding gap is Admin UI screens."""
+    replacements = {
+        ("GET", "/dashboard"): ("GET", "/api/v1/alerts"),
+        ("GET", "/dashboard/alerts/{alert_id}"): ("GET", "/api/v1/alerts/{alert_id}"),
+        ("POST", "/dashboard/alerts/{alert_id}/review"):
+            ("POST", "/api/v1/alerts/{alert_id}/review"),
+        ("GET", "/dashboard/events"): ("GET", "/api/v1/events"),
+        ("GET", "/dashboard/events/{event_id}"): ("GET", "/api/v1/events/{event_id}"),
+        ("GET", "/dashboard/monitoring"): ("GET", "/api/v1/admin/sources/health"),
+        ("POST", "/login"): ("POST", "/api/v1/auth/login"),
+    }
+    for legacy, replacement in replacements.items():
+        assert legacy in ROUTES, f"legacy route vanished: {legacy}"
+        assert replacement in ROUTES, f"no API replacement for {legacy}"
 
 
 def test_every_jinja_template_is_still_referenced():
@@ -270,3 +301,142 @@ def test_no_new_public_route_was_introduced():
         "/api/alerts", "/api/alerts/top", "/api/alerts/stats",
         "/api/alerts/{alert_id}", "/api/search/alerts", "/api/v1/health",
     }
+
+
+# ===========================================================================
+# Interface-area authentication boundaries
+# ===========================================================================
+#
+# Each area's guard is asserted by its *actual* dependency name, not by the
+# product-level label. Where the two differ the report records both.
+
+#: product "Admin API (internal JWT)" → require_admin → get_current_active_user
+ADMIN_GUARD = "require_admin"
+#: product "Subscriber API (Supabase + active subscription)"
+SUBSCRIBER_GUARDS = {"require_active_subscription", "get_current_subscriber"}
+#: product "Client API (internal JWT)" → require_subscriber_or_admin
+CLIENT_GUARD = "require_subscriber_or_admin"
+
+
+def _api_routes():
+    return {
+        (method, path): route
+        for (method, path), route in ROUTES.items()
+        if isinstance(route, APIRoute)
+    }
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/v1/sources"),
+    ("GET", "/api/v1/sources/{source_id}"),
+    ("PATCH", "/api/v1/sources/{source_id}"),
+    ("GET", "/api/v1/sources/{source_id}/runs"),
+    ("POST", "/api/v1/sources/{source_id}/trigger"),
+    ("GET", "/api/v1/raw-items"),
+    ("GET", "/api/v1/stats"),
+    ("GET", "/api/v1/admin/alerts/categories"),
+    ("GET", "/api/v1/admin/intelligence-briefs"),
+])
+def test_admin_api_routes_keep_the_admin_guard(method, path):
+    """Target administrative surface — retained, never a cleanup candidate."""
+    assert (method, path) in ROUTES
+    assert ADMIN_GUARD in _auth_deps(method, path)
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/v1/subscriber/alerts"),
+    ("GET", "/api/v1/subscriber/alerts/top"),
+    ("GET", "/api/v1/subscriber/alerts/stats"),
+    ("GET", "/api/v1/subscriber/alerts/{alert_id}"),
+    ("GET", "/api/v1/subscriber/search/alerts"),
+    ("GET", "/api/v1/subscriber/intelligence-briefs"),
+])
+def test_subscriber_api_routes_require_an_active_subscription(method, path):
+    assert (method, path) in ROUTES
+    assert "require_active_subscription" in _auth_deps(method, path)
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/v1/subscriber/me"),
+    ("GET", "/api/v1/subscriber/access"),
+])
+def test_subscriber_identity_routes_need_a_token_but_not_a_subscription(method, path):
+    """Deliberate: a signed-in user without a subscription can still be told so."""
+    deps = _auth_deps(method, path)
+    assert SUBSCRIBER_GUARDS & deps
+    assert "require_active_subscription" not in deps
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/v1/client/alerts"),
+    ("GET", "/api/v1/client/alerts/{alert_id}"),
+])
+def test_client_api_routes_keep_their_internal_guard(method, path):
+    """A distinct transitional area — not Public, not Subscriber."""
+    assert (method, path) in ROUTES
+    assert CLIENT_GUARD in _auth_deps(method, path)
+    # Never reachable anonymously, and never behind the Supabase model.
+    assert not (SUBSCRIBER_GUARDS & _auth_deps(method, path))
+
+
+def test_client_and_public_areas_do_not_overlap():
+    client = {p for (_, p) in ROUTES if p.startswith("/api/v1/client")}
+    public = {
+        p for (m, p), route in _api_routes().items()
+        if m == "GET" and p.startswith("/api")
+        and not {
+            d.call.__name__ for d in route.dependant.dependencies
+            if getattr(d, "call", None)
+        } & ({ADMIN_GUARD, CLIENT_GUARD} | SUBSCRIBER_GUARDS
+             | {"get_current_user", "get_current_active_user"})
+    }
+    assert client and public
+    assert client & public == set(), "client routes must never be unauthenticated"
+
+
+def test_no_protected_content_is_served_by_a_public_route():
+    """Subscriber-only areas must not appear under an unauthenticated path."""
+    for (method, path), route in _api_routes().items():
+        deps = {
+            d.call.__name__ for d in route.dependant.dependencies
+            if getattr(d, "call", None)
+        }
+        if "subscriber" in path or "client" in path or "admin" in path:
+            assert deps - {"get_db"}, f"{method} {path} has no auth dependency"
+
+
+def test_interface_areas_partition_every_api_route():
+    """Each API route belongs to exactly one area — no route is unclassified."""
+    def area(path: str, deps: set[str]) -> str:
+        if path.startswith(("/dashboard", "/login", "/logout")):
+            return "legacy_jinja"
+        if path in ("/api/v1/health", "/docs", "/redoc", "/openapi.json"):
+            return "infrastructure"
+        if path.startswith("/api/v1/client"):
+            return "client_api"
+        if path.startswith("/api/v1/subscriber"):
+            return "subscriber_api"
+        if ADMIN_GUARD in deps or path.startswith("/api/v1/admin"):
+            return "admin_api"
+        if deps <= {"get_db"}:
+            return "public_api"
+        return "admin_api"  # remaining internal-JWT routes
+
+    counts: dict[str, int] = {}
+    for (method, path), route in ROUTES.items():
+        deps = (
+            {d.call.__name__ for d in route.dependant.dependencies
+             if getattr(d, "call", None)}
+            if isinstance(route, APIRoute) else set()
+        )
+        counts[area(path, deps)] = counts.get(area(path, deps), 0) + 1
+
+    # Every area is represented, and nothing fell outside the taxonomy.
+    assert set(counts) <= {
+        "legacy_jinja", "admin_api", "subscriber_api", "client_api",
+        "public_api", "infrastructure",
+    }
+    for expected in ("legacy_jinja", "admin_api", "subscriber_api",
+                     "client_api", "public_api", "infrastructure"):
+        assert counts.get(expected, 0) > 0, f"no routes classified as {expected}"
+    assert sum(counts.values()) == len(ROUTES)
