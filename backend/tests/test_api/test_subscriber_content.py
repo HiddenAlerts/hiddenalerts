@@ -632,10 +632,12 @@ class TestSubscriberSearch:
 # Risk-band filter + stats (Critical/High/Medium/Low, matching the badges)
 # ---------------------------------------------------------------------------
 
+from app.api import public_alerts as public_alerts_api  # noqa: E402
 from app.api.subscriber import (  # noqa: E402
     _BAND_CRITICAL_MIN,
     _BAND_HIGH_MIN,
     _BAND_MEDIUM_MIN,
+    _to_top_alert_read,
 )
 from app.pipeline.publishing.risk_bands import compute_risk_band  # noqa: E402
 
@@ -733,3 +735,257 @@ class TestSubscriberStatsCritical:
 
         assert after["critical_count"] == before["critical_count"] + 1
         assert after["high_count"] == before["high_count"] + 1  # critical not double-counted
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Normalise a model datetime to UTC for comparison.
+
+    ``RawItem.published_at`` is a naive-mapped column while
+    ``ProcessedAlert.published_at`` is ``DateTime(timezone=True)``, so the display
+    date arrives naive and the fallback arrives aware.
+    """
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _instant(value: str | None) -> datetime | None:
+    """Parse an API timestamp, treating a naive value as UTC.
+
+    ``RawItem.published_at`` is a naive-mapped column while
+    ``ProcessedAlert.published_at`` is ``DateTime(timezone=True)``, so the same
+    JSON field serialises with or without an offset depending on which date it
+    carries. These tests compare instants, not string forms.
+    """
+    if value is None:
+        return None
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+class TestSubscriberTopAlertsDisplayDate:
+    """Selection uses HiddenAlerts publication time; display prefers the source date.
+
+    Two distinct timestamps, deliberately:
+
+    * ``ProcessedAlert.published_at`` — ours. Decides the seven-day window and the
+      ordering. Never shown when a source date exists.
+    * ``source_published_at`` — the original article date. What the Dashboard
+      shows, with our timestamp as the fallback.
+
+    An alert we published this week may therefore display an older article date.
+    That is expected and is not evidence the weekly filter failed.
+
+    Selection assertions go through the service with a wide limit and filter to
+    the alerts each test created: the session-scoped database carries alerts from
+    every other test in the module, and only three positions exist.
+    """
+
+    async def _alert(self, db_session, *, source_date, our_date, score=25):
+        source = await _seed_source(db_session, name=f"Src {uuid.uuid4()}")
+        raw = await _seed_raw_item(
+            db_session, source, url=f"https://x/{uuid.uuid4()}", published_at=source_date
+        )
+        alert = await _seed_alert(
+            db_session, raw, is_published=True, signal_score=score,
+            published_at=our_date or datetime.now(timezone.utc),
+        )
+        if our_date is None:
+            # _seed_alert coalesces None to "now"; force the NULL we actually want.
+            alert.published_at = None
+            await db_session.commit()
+
+        # Load the relationships the mapper reads, exactly as the service does —
+        # a lazy load would fail under asyncio.
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        from app.models.processed_alert import ProcessedAlert
+        from app.models.raw_item import RawItem
+
+        loaded = (
+            await db_session.execute(
+                select(ProcessedAlert)
+                .where(ProcessedAlert.id == alert.id)
+                .options(
+                    selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source)
+                )
+            )
+        ).scalar_one()
+        return loaded
+
+    async def _selected_ids(self, db_session, *ids):
+        from app.services.top_alerts_service import get_top_alerts
+
+        alerts = await get_top_alerts(db_session, now=datetime.now(timezone.utc), limit=200)
+        wanted = set(ids)
+        return [a.id for a in alerts if a.id in wanted]
+
+    # --- display date ----------------------------------------------------
+
+    async def test_display_date_prefers_the_source_article_date(self, db_session):
+        source_date = datetime(2026, 7, 29, 9, 0, tzinfo=timezone.utc)
+        ours = datetime(2026, 8, 1, 15, 0, tzinfo=timezone.utc)
+        alert = await self._alert(db_session, source_date=source_date, our_date=ours)
+
+        read = _to_top_alert_read(alert)
+        assert _as_utc(read.published_at) == source_date
+        assert _as_utc(read.published_at) != ours
+
+    async def test_source_published_at_remains_exposed_separately(self, db_session):
+        source_date = datetime(2026, 7, 30, 8, 0, tzinfo=timezone.utc)
+        alert = await self._alert(
+            db_session, source_date=source_date,
+            our_date=datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc),
+        )
+
+        read = _to_top_alert_read(alert)
+        assert _as_utc(read.source_published_at) == source_date
+        assert read.published_at == read.source_published_at
+
+    async def test_falls_back_to_our_publication_time_without_a_source_date(
+        self, db_session
+    ):
+        ours = datetime(2026, 8, 1, 11, 0, tzinfo=timezone.utc)
+        alert = await self._alert(db_session, source_date=None, our_date=ours)
+
+        read = _to_top_alert_read(alert)
+        assert read.source_published_at is None
+        assert _as_utc(read.published_at) == ours
+
+    async def test_every_other_field_survives_the_copy(self, db_session):
+        alert = await self._alert(
+            db_session, source_date=datetime(2026, 7, 28, tzinfo=timezone.utc),
+            our_date=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        )
+        base = public_alerts_api._to_public_read(alert)
+        top = _to_top_alert_read(alert)
+
+        differing = {
+            k for k in base.model_dump()
+            if getattr(base, k) != getattr(top, k)
+        }
+        assert differing == {"published_at"}, differing
+
+    async def test_the_mapper_does_not_mutate_the_orm_instance(self, db_session):
+        source_date = datetime(2026, 7, 15, 5, 0, tzinfo=timezone.utc)
+        ours = datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc)
+        alert = await self._alert(db_session, source_date=source_date, our_date=ours)
+
+        read = _to_top_alert_read(alert)
+        assert _as_utc(read.published_at) == source_date
+
+        # The ORM row is untouched, in memory and after a refresh.
+        assert _as_utc(alert.published_at) == ours
+        assert _as_utc(alert.raw_item.published_at) == source_date
+        await db_session.refresh(alert)
+        assert _as_utc(alert.published_at) == ours
+
+    # --- eligibility is unaffected by the display date -------------------
+
+    async def test_an_old_article_published_by_us_this_week_qualifies(self, db_session):
+        alert = await self._alert(
+            db_session, source_date=datetime(2025, 3, 1, tzinfo=timezone.utc),
+            our_date=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        assert await self._selected_ids(db_session, alert.id) == [alert.id]
+        assert _as_utc(_to_top_alert_read(alert).published_at).year == 2025
+
+    async def test_a_recent_article_published_by_us_long_ago_is_excluded(
+        self, db_session
+    ):
+        alert = await self._alert(
+            db_session, source_date=datetime.now(timezone.utc) - timedelta(hours=2),
+            our_date=datetime.now(timezone.utc) - timedelta(days=40),
+        )
+        assert await self._selected_ids(db_session, alert.id) == []
+
+    async def test_a_source_date_cannot_rescue_a_null_publication_time(self, db_session):
+        alert = await self._alert(
+            db_session, source_date=datetime.now(timezone.utc), our_date=None
+        )
+        assert alert.published_at is None
+        assert await self._selected_ids(db_session, alert.id) == []
+
+    async def test_ordering_follows_our_timestamp_while_display_follows_the_source(
+        self, db_session
+    ):
+        """Same band, same score — A wins on our timestamp despite an older article."""
+        now = datetime.now(timezone.utc)
+        alert_a = await self._alert(                       # older article, newer by us
+            db_session, source_date=datetime(2026, 6, 1, tzinfo=timezone.utc),
+            our_date=now - timedelta(hours=1),
+        )
+        alert_b = await self._alert(                       # newer article, older by us
+            db_session, source_date=datetime(2026, 7, 31, tzinfo=timezone.utc),
+            our_date=now - timedelta(days=3),
+        )
+
+        assert await self._selected_ids(db_session, alert_a.id, alert_b.id) == [
+            alert_a.id, alert_b.id
+        ], "ordering must use HiddenAlerts publication time, not the displayed date"
+
+        assert _as_utc(_to_top_alert_read(alert_a).published_at).month == 6
+        assert _as_utc(_to_top_alert_read(alert_b).published_at).month == 7
+
+    # --- nothing else changed --------------------------------------------
+
+    async def test_the_public_mapper_still_reports_our_timestamp(self, db_session):
+        source_date = datetime(2026, 7, 20, 7, 0, tzinfo=timezone.utc)
+        ours = datetime(2026, 8, 1, 13, 0, tzinfo=timezone.utc)
+        alert = await self._alert(db_session, source_date=source_date, our_date=ours)
+
+        public = public_alerts_api._to_public_read(alert)
+        assert _as_utc(public.published_at) == ours, "public behaviour is unchanged"
+        assert _as_utc(public.source_published_at) == source_date
+
+    async def test_other_subscriber_endpoints_keep_the_shared_mapper(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Only /alerts/top uses the display-date mapper in this refinement."""
+        source_date = datetime(2026, 7, 21, 6, 0, tzinfo=timezone.utc)
+        ours = datetime(2026, 8, 1, 10, 0, tzinfo=timezone.utc)
+        alert = await self._alert(db_session, source_date=source_date, our_date=ours)
+        sub_id = f"othermap-{uuid.uuid4()}"
+        await _seed_profile_with_subscription(db_session, sub_id=sub_id, status="active")
+
+        with _patch_validator(_claims(sub=sub_id)):
+            listing = await client.get(
+                "/api/v1/subscriber/alerts?limit=500", headers=_AUTH
+            )
+        row = next(a for a in listing.json()["alerts"] if a["id"] == alert.id)
+        assert _instant(row["published_at"]) == ours, "unchanged on the feed"
+        assert _instant(row["source_published_at"]) == source_date
+
+    async def test_the_shared_public_mapper_is_unchanged(self):
+        import inspect
+
+        from app.api import public_alerts, subscriber
+
+        assert "source_published_at or" not in inspect.getsource(
+            public_alerts._to_public_read
+        )
+        wrapper = inspect.getsource(subscriber._to_top_alert_read)
+        assert "_to_public_read" in wrapper
+        assert "model_copy" in wrapper
+
+    async def test_response_model_and_openapi_are_unchanged(self):
+        from app.main import app
+
+        spec = app.openapi()
+        operation = spec["paths"]["/api/v1/subscriber/alerts/top"]["get"]
+        schema_ref = operation["responses"]["200"]["content"]["application/json"]["schema"]
+        assert schema_ref["$ref"].endswith("PublicAlertsResponse")
+
+        alert_schema = spec["components"]["schemas"]["PublicAlertRead"]["properties"]
+        assert "published_at" in alert_schema
+        assert "source_published_at" in alert_schema
+
+    async def test_authorization_and_empty_shape_are_unchanged(
+        self, client: AsyncClient
+    ):
+        with _patch_validator(_claims(sub=f"top-noauth-{uuid.uuid4()}")):
+            denied = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
+        assert denied.status_code == 403
+        assert (await client.get("/api/v1/subscriber/alerts/top")).status_code == 401

@@ -37,6 +37,7 @@ from app.models.raw_item import RawItem
 from app.models.source import Source
 from app.models.subscription import Subscription
 from app.schemas.alert import (
+    PublicAlertRead,
     PublicAlertsResponse,
     SubscriberAlertDetail,
     SubscriberAlertRead,
@@ -209,6 +210,27 @@ async def subscriber_alert_stats(
     )
 
 
+def _to_top_alert_read(alert: ProcessedAlert) -> PublicAlertRead:
+    """Public mapping, with the original article date shown as ``published_at``.
+
+    Two different dates are in play, and only one of them is the user's:
+
+    * ``ProcessedAlert.published_at`` — when *HiddenAlerts* published the alert.
+      This decides weekly eligibility and ordering, and is never displayed when a
+      source date exists.
+    * ``source_published_at`` — when the original article was published. This is
+      what the Dashboard shows, falling back to our own timestamp only when the
+      source gave us no date.
+
+    A copy is returned; neither the ORM instance nor the shared public mapper is
+    touched, and ``source_published_at`` stays populated in its own field.
+    """
+    read = public_alerts_api._to_public_read(alert)
+    if read.source_published_at is None:
+        return read
+    return read.model_copy(update={"published_at": read.source_published_at})
+
+
 @router.get("/alerts/top", response_model=PublicAlertsResponse)
 async def subscriber_top_alerts(
     _: ActiveSubscriberContext = Depends(require_active_subscription),
@@ -221,6 +243,10 @@ async def subscriber_top_alerts(
     Dashboard widget was showing January 2026 and 2025 alerts. See
     :mod:`app.services.top_alerts_service` for the eligibility and ordering rules.
 
+    Selection uses HiddenAlerts publication time; the date shown prefers the
+    original article date — see :func:`_to_top_alert_read`. An alert published by
+    us this week may therefore display an older article date.
+
     Returns at most three alerts and an empty list when nothing qualifies — there
     is no fallback to older alerts. The response shape is unchanged, so the
     frontend needs no integration change.
@@ -229,7 +255,7 @@ async def subscriber_top_alerts(
     """
     alerts = await get_top_alerts(db, now=datetime.now(timezone.utc))
     return PublicAlertsResponse(
-        alerts=[public_alerts_api._to_public_read(alert) for alert in alerts]
+        alerts=[_to_top_alert_read(alert) for alert in alerts]
     )
 
 
