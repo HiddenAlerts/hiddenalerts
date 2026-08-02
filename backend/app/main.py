@@ -73,6 +73,7 @@ app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads"
 # Register routers
 from app.api.health import router as health_router  # noqa: E402
 from app.api.sources import router as sources_router  # noqa: E402
+from app.api.source_health import router as source_health_router  # noqa: E402
 from app.api.raw_items import router as raw_items_router  # noqa: E402
 from app.api.alerts import router as alerts_router  # noqa: E402
 from app.api.alerts_admin import router as alerts_admin_router  # noqa: E402
@@ -89,6 +90,7 @@ from app.api.intelligence_briefs_subscriber import router as intelligence_briefs
 
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(sources_router, prefix="/api/v1")
+app.include_router(source_health_router, prefix="/api/v1")  # Admin read-only observability
 app.include_router(raw_items_router, prefix="/api/v1")
 app.include_router(alerts_router, prefix="/api/v1")
 app.include_router(alerts_admin_router, prefix="/api/v1")  # Admin alert metadata
