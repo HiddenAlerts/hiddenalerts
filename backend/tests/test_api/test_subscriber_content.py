@@ -274,9 +274,17 @@ class TestSubscriberAlertsContent:
 
 @pytest.mark.asyncio
 class TestSubscriberTopAlerts:
-    async def test_shape_matches_public(
+    """Slice 3B.2J: the subscriber widget is "this week", the public one is all-time.
+
+    The payload *shape* stays identical so the frontend needs no change, but the
+    two selections are intentionally allowed to diverge during this transition —
+    this class no longer asserts payload equality.
+    """
+
+    async def test_payload_shape_matches_public(
         self, client: AsyncClient, db_session: AsyncSession
     ):
+        """Same keys and types, so Hasnain's integration is unaffected."""
         await _seed_published_alert(db_session, signal_score=20)
         sub_id = f"top-{uuid.uuid4()}"
         await _seed_profile_with_subscription(
@@ -285,13 +293,108 @@ class TestSubscriberTopAlerts:
         public = await client.get("/api/alerts/top")
         with _patch_validator(_claims(sub=sub_id)):
             sub = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
+
         assert public.status_code == 200 and sub.status_code == 200
-        assert sub.json() == public.json()
+        assert set(sub.json()) == set(public.json()) == {"alerts"}
+
+        sub_alerts, public_alerts = sub.json()["alerts"], public.json()["alerts"]
+        assert sub_alerts, "a freshly published Critical alert qualifies this week"
+        assert set(sub_alerts[0]) == set(public_alerts[0])
+        for key, value in sub_alerts[0].items():
+            assert type(value) is type(public_alerts[0][key]) or value is None, key
+
+    async def test_diverges_from_public_on_an_old_alert(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """The whole point of the slice: public keeps it, subscriber does not."""
+        old = await _seed_published_alert(
+            db_session, signal_score=25,
+            published_at=datetime(2026, 1, 5, tzinfo=timezone.utc),
+        )
+        sub_id = f"top-old-{uuid.uuid4()}"
+        await _seed_profile_with_subscription(
+            db_session, sub_id=sub_id, status="active"
+        )
+        public = await client.get("/api/alerts/top")
+        with _patch_validator(_claims(sub=sub_id)):
+            sub = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
+
+        assert old.id in [a["id"] for a in public.json()["alerts"]]
+        assert old.id not in [a["id"] for a in sub.json()["alerts"]]
+
+    async def test_out_of_window_alert_is_never_a_fallback(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """An old alert stays out even when it would fill an unused position.
+
+        The session-scoped test database carries alerts from earlier tests, so
+        this asserts on *this* alert rather than an exact empty payload — the
+        empty-list contract itself is pinned in the service tests.
+        """
+        old = await _seed_published_alert(
+            db_session, signal_score=25,
+            published_at=datetime(2025, 2, 1, tzinfo=timezone.utc),
+        )
+        sub_id = f"top-empty-{uuid.uuid4()}"
+        await _seed_profile_with_subscription(
+            db_session, sub_id=sub_id, status="active"
+        )
+        with _patch_validator(_claims(sub=sub_id)):
+            resp = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert set(body) == {"alerts"} and isinstance(body["alerts"], list)
+        assert len(body["alerts"]) <= 3
+        assert old.id not in [a["id"] for a in body["alerts"]]
 
     async def test_requires_active_subscription(self, client: AsyncClient):
         with _patch_validator(_claims(sub=f"top-nosub-{uuid.uuid4()}")):
             resp = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
         assert resp.status_code == 403
+
+    async def test_unauthenticated_is_rejected(self, client: AsyncClient):
+        assert (await client.get("/api/v1/subscriber/alerts/top")).status_code == 401
+
+    async def test_route_no_longer_delegates_to_the_legacy_implementation(self):
+        import ast
+        import inspect
+
+        from app.api import subscriber
+
+        tree = ast.parse(inspect.getsource(subscriber.subscriber_top_alerts))
+        called = {
+            node.func.attr for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        } | {
+            node.func.id for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        assert "top_alerts_impl" not in called
+        assert "get_top_alerts" in called
+
+    async def test_no_cache_is_applied_to_the_subscriber_route(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Each call re-evaluates the window; nothing is memoised."""
+        sub_id = f"top-cache-{uuid.uuid4()}"
+        await _seed_profile_with_subscription(
+            db_session, sub_id=sub_id, status="active"
+        )
+        with _patch_validator(_claims(sub=sub_id)):
+            first = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
+        assert "cache-control" not in {k.lower() for k in first.headers}
+
+        # A top-scoring alert published now must outrank whatever was there.
+        fresh = await _seed_published_alert(db_session, signal_score=25)
+        assert fresh.id not in [a["id"] for a in first.json()["alerts"]]
+
+        with _patch_validator(_claims(sub=sub_id)):
+            second = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
+
+        assert fresh.id in [a["id"] for a in second.json()["alerts"]], (
+            "a newly published alert must appear immediately — no memoisation"
+        )
 
 
 @pytest.mark.asyncio

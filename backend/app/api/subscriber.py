@@ -11,6 +11,7 @@ are identical.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -50,6 +51,7 @@ from app.schemas.subscriber import (
     SubscriptionMeRead,
 )
 from app.services import alert_category_service
+from app.services.top_alerts_service import get_top_alerts
 from app.services.subscription_service import has_active_subscription_access
 
 log = logging.getLogger(__name__)
@@ -212,8 +214,23 @@ async def subscriber_top_alerts(
     _: ActiveSubscriberContext = Depends(require_active_subscription),
     db: AsyncSession = Depends(get_db),
 ) -> PublicAlertsResponse:
-    """Curated top alerts — mirrors GET /api/alerts/top."""
-    return await public_alerts_api.top_alerts_impl(db)
+    """Top Alerts This Week — Critical and High published in the last seven days.
+
+    Deliberately **not** the public all-time endpoint. That one ranks the
+    highest-scored published alerts with no time window, which is why the
+    Dashboard widget was showing January 2026 and 2025 alerts. See
+    :mod:`app.services.top_alerts_service` for the eligibility and ordering rules.
+
+    Returns at most three alerts and an empty list when nothing qualifies — there
+    is no fallback to older alerts. The response shape is unchanged, so the
+    frontend needs no integration change.
+
+    Evaluated per request against the current window; nothing here is cached.
+    """
+    alerts = await get_top_alerts(db, now=datetime.now(timezone.utc))
+    return PublicAlertsResponse(
+        alerts=[public_alerts_api._to_public_read(alert) for alert in alerts]
+    )
 
 
 @router.get("/alerts/categories", response_model=AlertCategoriesResponse)
