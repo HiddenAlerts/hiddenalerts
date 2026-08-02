@@ -21,7 +21,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from sqlalchemy import case, func, select, text
+from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.processed_alert import ProcessedAlert
@@ -280,41 +280,91 @@ def _window_sum(column, since_column, cutoff):
     )
 
 
-async def _recent_runs_by_source(
-    session: AsyncSession, source_ids: list[int], limit_per_source: int
-) -> dict[int, list[RunLog]]:
-    """The N most recent runs for every source, in one windowed query.
+@dataclass
+class _RunHistory:
+    """What one source's run history says, at two different depths.
 
-    A per-source ``LIMIT`` loop would be one query per source; ``ROW_NUMBER()``
-    keeps it at one regardless of how many sources exist, and bounds how much run
-    history is ever loaded.
+    ``recent`` is bounded — streaks are a statement about *now*, and walking all
+    history to compute them would be unbounded work for no extra meaning.
+
+    ``latest_success`` and ``latest_failed`` are **not** bounded. Whether a source
+    has ever succeeded is a fact about its whole life: a success thirty runs ago is
+    still a success, and treating it as absent would report a working source as
+    ``no_successful_run``.
+    """
+
+    recent: list[RunLog] = field(default_factory=list)
+    latest_success: RunLog | None = None
+    latest_failed: RunLog | None = None
+
+
+#: Statuses whose most recent occurrence is tracked across all history.
+_TRACKED_STATUSES = ("success", "failed")
+
+
+async def _run_history_by_source(
+    session: AsyncSession, source_ids: list[int], limit_per_source: int
+) -> dict[int, _RunHistory]:
+    """Bounded recent runs *and* all-history success/failure, in one query.
+
+    Two window functions over the same scan:
+
+    * ``overall_rank`` — newest-first position within the source, for the streak
+      window;
+    * ``status_rank`` — newest-first position within (source, status), so the
+      latest success and the latest failure are reachable however old they are.
+
+    A row is returned when it is inside the recent window **or** it is the most
+    recent run of a tracked status. That adds at most two rows per source beyond
+    the window, and keeps the query count at one however many sources exist.
     """
     if not source_ids:
         return {}
 
     ranked = (
         select(
-            RunLog,
+            RunLog.id.label("run_id"),
             func.row_number()
             .over(
                 partition_by=RunLog.source_id,
                 order_by=RunLog.run_started_at.desc(),
             )
-            .label("rank"),
+            .label("overall_rank"),
+            func.row_number()
+            .over(
+                partition_by=(RunLog.source_id, RunLog.status),
+                order_by=RunLog.run_started_at.desc(),
+            )
+            .label("status_rank"),
         )
         .where(RunLog.source_id.in_(source_ids))
         .subquery()
     )
     statement = (
-        select(RunLog)
-        .join(ranked, RunLog.id == ranked.c.id)
-        .where(ranked.c.rank <= limit_per_source)
+        select(RunLog, ranked.c.overall_rank)
+        .join(ranked, RunLog.id == ranked.c.run_id)
+        .where(
+            or_(
+                ranked.c.overall_rank <= limit_per_source,
+                and_(
+                    ranked.c.status_rank == 1,
+                    RunLog.status.in_(_TRACKED_STATUSES),
+                ),
+            )
+        )
         .order_by(RunLog.source_id, RunLog.run_started_at.desc())
     )
 
-    grouped: dict[int, list[RunLog]] = {}
-    for run in (await session.execute(statement)).scalars().all():
-        grouped.setdefault(run.source_id, []).append(run)
+    grouped: dict[int, _RunHistory] = {}
+    for run, overall_rank in (await session.execute(statement)).all():
+        history = grouped.setdefault(run.source_id, _RunHistory())
+        if overall_rank <= limit_per_source:
+            history.recent.append(run)
+        # Rows arrive newest-first per source, so the first of each status wins.
+        if run.status == "success" and history.latest_success is None:
+            history.latest_success = run
+        elif run.status == "failed" and history.latest_failed is None:
+            history.latest_failed = run
     return grouped
 
 
@@ -412,10 +462,24 @@ async def _published_alert_totals(
     }
 
 
-def _streaks_and_latest(metrics: SourceHealthMetrics, runs: list[RunLog]) -> None:
-    """Fill latest-activity fields and streaks from newest-first ``runs``."""
+def _streaks_and_latest(metrics: SourceHealthMetrics, history: _RunHistory) -> None:
+    """Fill latest-activity fields and streaks from one source's history.
+
+    All-history facts come from ``latest_success``/``latest_failed``; streaks come
+    from the bounded ``recent`` window only.
+    """
+    runs = history.recent
     metrics.total_runs_considered = len(runs)
     metrics.has_any_run = bool(runs)
+
+    # Across the whole run history, however deep.
+    if history.latest_success is not None:
+        metrics.has_any_success = True
+        metrics.last_success_at = history.latest_success.run_started_at
+    if history.latest_failed is not None:
+        metrics.last_error_at = history.latest_failed.run_started_at
+        metrics.last_error_message = history.latest_failed.error_message
+
     if not runs:
         return
 
@@ -428,16 +492,7 @@ def _streaks_and_latest(metrics: SourceHealthMetrics, runs: list[RunLog]) -> Non
             latest.run_finished_at - latest.run_started_at
         ).total_seconds()
 
-    for run in runs:
-        if run.status == "success":
-            if metrics.last_success_at is None:
-                metrics.last_success_at = run.run_started_at
-            metrics.has_any_success = True
-        elif run.status == "failed" and metrics.last_error_at is None:
-            metrics.last_error_at = run.run_started_at
-            metrics.last_error_message = run.error_message
-
-    # Streaks stop at the first run that does not match.
+    # Streaks stop at the first run that does not match, within the window only.
     for run in runs:
         if run.status == "failed":
             metrics.consecutive_failed_runs += 1
@@ -471,7 +526,7 @@ async def collect_source_metrics(
         return []
 
     source_ids = [source.id for source in sources]
-    runs = await _recent_runs_by_source(
+    histories = await _run_history_by_source(
         session, source_ids, thresholds.recent_runs_considered
     )
     windows = await _run_window_totals(session, source_ids, now)
@@ -488,7 +543,7 @@ async def collect_source_metrics(
             is_active=bool(source.is_active),
             credibility_score=source.credibility_score,
         )
-        _streaks_and_latest(metrics, runs.get(source.id, []))
+        _streaks_and_latest(metrics, histories.get(source.id) or _RunHistory())
 
         for key, value in (windows.get(source.id) or {}).items():
             setattr(metrics, key, value)

@@ -523,3 +523,183 @@ async def test_null_dates_do_not_crash(db_session, health_source):
 @pytest.mark.asyncio
 async def test_no_sources_returns_no_metrics(db_session):
     assert await collect_source_metrics(db_session, [], now=NOW) == []
+
+
+# ===========================================================================
+# All-history activity versus bounded streaks (3B.2I refinement)
+# ===========================================================================
+#
+# Streaks are deliberately bounded to the latest `recent_runs_considered` runs.
+# Whether a source has *ever* succeeded is not — a success 30 runs ago is still a
+# success, and reporting `no_successful_run` for it would be wrong.
+
+
+def _filler_runs(source, count, *, status="running", start_hours_ago=1):
+    """`count` runs newer than anything else, none of them success or failure."""
+    return [
+        RunLog(
+            source_id=source.id,
+            run_started_at=NOW - timedelta(hours=start_hours_ago + n),
+            run_finished_at=NOW - timedelta(hours=start_hours_ago + n) + timedelta(seconds=5),
+            status=status, items_fetched=0, items_new=0, items_duplicate=0,
+            items_skipped_url=0, items_skipped_content=0, items_skipped_invalid=0,
+            items_skipped_external=0,
+        )
+        for n in range(count)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_success_older_than_the_recent_window_is_still_found(
+    db_session, health_source
+):
+    source = await health_source()
+    db_session.add_all(_filler_runs(source, 25))
+    db_session.add(_run(source, started=NOW - timedelta(hours=200), fetched=9, new=4))
+    await db_session.commit()
+
+    metrics = await _metrics_for(db_session, source)
+
+    assert metrics.has_any_success is True
+    assert metrics.last_success_at == NOW - timedelta(hours=200)
+    assert metrics.total_runs_considered == T.recent_runs_considered
+
+
+@pytest.mark.asyncio
+async def test_failure_older_than_the_recent_window_is_still_found(
+    db_session, health_source
+):
+    source = await health_source()
+    db_session.add_all(_filler_runs(source, 25))
+    db_session.add_all([
+        _run(source, started=NOW - timedelta(hours=200), fetched=9, new=4),
+        _run(source, started=NOW - timedelta(hours=180), status="failed",
+             error="ancient boom"),
+    ])
+    await db_session.commit()
+
+    metrics = await _metrics_for(db_session, source)
+
+    assert metrics.last_error_at == NOW - timedelta(hours=180)
+    assert metrics.last_error_message == "ancient boom"
+
+
+@pytest.mark.asyncio
+async def test_an_old_success_prevents_a_false_no_successful_run_error(
+    db_session, health_source
+):
+    """The bug this refinement fixes: a healthy source misreported as error."""
+    source = await health_source()
+    # 20 recent failures — enough to fill the window on their own.
+    db_session.add_all([
+        _run(source, started=NOW - timedelta(hours=1 + n), status="failed",
+             error=f"boom {n}")
+        for n in range(20)
+    ])
+    db_session.add(_run(source, started=NOW - timedelta(hours=500), fetched=5, new=2))
+    await db_session.commit()
+
+    metrics = await _metrics_for(db_session, source)
+    result = _classify(metrics)
+
+    assert metrics.has_any_success is True
+    assert metrics.last_success_at == NOW - timedelta(hours=500)
+    # Still an error — but for the honest reason, not "never succeeded".
+    assert result.state == ERROR
+    assert result.reason_code == REPEATED_FAILURES
+    assert result.reason_code != NO_SUCCESSFUL_RUN
+
+
+@pytest.mark.asyncio
+async def test_a_source_that_truly_never_succeeded_still_reports_it(
+    db_session, health_source
+):
+    source = await health_source()
+    db_session.add_all([
+        _run(source, started=NOW - timedelta(hours=1 + n), status="running")
+        for n in range(25)
+    ])
+    await db_session.commit()
+
+    metrics = await _metrics_for(db_session, source)
+
+    assert metrics.has_any_success is False
+    assert metrics.last_success_at is None
+    assert _classify(metrics).reason_code == NO_SUCCESSFUL_RUN
+
+
+@pytest.mark.asyncio
+async def test_streaks_still_use_only_the_bounded_recent_window(
+    db_session, health_source
+):
+    """25 failures then an older success: the streak counts the window, not all."""
+    source = await health_source()
+    db_session.add_all([
+        _run(source, started=NOW - timedelta(hours=1 + n), status="failed",
+             error=f"boom {n}")
+        for n in range(25)
+    ])
+    db_session.add(_run(source, started=NOW - timedelta(hours=500), fetched=5, new=2))
+    await db_session.commit()
+
+    metrics = await _metrics_for(db_session, source)
+
+    assert metrics.consecutive_failed_runs == T.recent_runs_considered
+    assert metrics.total_runs_considered == T.recent_runs_considered
+
+
+@pytest.mark.asyncio
+async def test_the_latest_run_and_duration_stay_exact_with_deep_history(
+    db_session, health_source
+):
+    source = await health_source()
+    db_session.add_all(_filler_runs(source, 25, start_hours_ago=3))
+    newest = NOW - timedelta(minutes=30)
+    db_session.add(RunLog(
+        source_id=source.id, run_started_at=newest,
+        run_finished_at=newest + timedelta(seconds=77), status="success",
+        items_fetched=7, items_new=3, items_duplicate=0, items_skipped_url=0,
+        items_skipped_content=0, items_skipped_invalid=0, items_skipped_external=6,
+    ))
+    await db_session.commit()
+
+    metrics = await _metrics_for(db_session, source)
+
+    assert metrics.last_run_at == newest
+    assert metrics.last_run_status == "success"
+    assert metrics.last_run_duration_seconds == 77.0
+    assert metrics.latest_run_items_skipped_external == 6
+
+
+@pytest.mark.asyncio
+async def test_deep_history_costs_no_extra_queries(db_session, health_source):
+    """The all-history fields must not become a per-source lookup."""
+    from sqlalchemy import event
+
+    sources = [await health_source(f"Deep {n}") for n in range(3)]
+    for source in sources:
+        db_session.add_all(_filler_runs(source, 25))
+        db_session.add(_run(source, started=NOW - timedelta(hours=300), fetched=1, new=1))
+    await db_session.commit()
+
+    statements: list[str] = []
+    engine = db_session.bind.sync_engine
+
+    def _record(conn, cursor, statement, params, context, executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _record)
+    try:
+        statements.clear()
+        await collect_source_metrics(db_session, sources[:1], now=NOW)
+        one = len(statements)
+
+        statements.clear()
+        await collect_source_metrics(db_session, sources, now=NOW)
+        three = len(statements)
+    finally:
+        event.remove(engine, "before_cursor_execute", _record)
+
+    assert one == three, f"query count grew from {one} to {three} for 3 sources"
+    assert all(m.has_any_success for m in await collect_source_metrics(
+        db_session, sources, now=NOW))

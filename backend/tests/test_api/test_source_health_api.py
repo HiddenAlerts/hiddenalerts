@@ -539,3 +539,117 @@ def test_openapi_schemas_expose_external_fields():
                  "items_skipped_external_24h", "items_skipped_external_7d",
                  "alembic_revision"):
         assert name in summary, name
+
+
+# ===========================================================================
+# Query budget (3B.2I refinement)
+# ===========================================================================
+
+
+async def _count_queries(db_session, client, url, headers) -> int:
+    """SQL statements executed while serving one request to ``url``."""
+    from sqlalchemy import event
+
+    statements: list[str] = []
+    engine = db_session.bind.sync_engine
+
+    def _record(conn, cursor, statement, params, context, executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _record)
+    try:
+        statements.clear()
+        response = await client.get(url, headers=headers)
+        assert response.status_code == 200, url
+        return len(statements)
+    finally:
+        event.remove(engine, "before_cursor_execute", _record)
+
+
+@pytest.mark.asyncio
+async def test_measured_query_budget_per_endpoint(client, db_session, health_fixture):
+    """Ceilings on end-to-end queries, so a regression cannot quietly inflate them.
+
+    Ceilings rather than exact equality: one statement — the endpoint's own
+    ``db.get(Source, ...)`` — is skipped when the row is already in the session
+    identity map, which depends on the caller, not on this code. The property that
+    matters is that the count never *grows*, and that is asserted directly by the
+    two constancy tests below.
+    """
+    admin = await _make_user(db_session)
+    headers = _auth(admin)
+
+    # 1 admin-auth lookup + 1 source load + 4 bounded aggregation queries.
+    assert await _count_queries(db_session, client, LIST_URL, headers) <= 6
+    # + 1 run-history select, - the identity-map hit on db.get.
+    assert await _count_queries(
+        db_session, client, _detail_url(health_fixture["healthy"].id), headers
+    ) <= 7
+    # + 3 instance-wide totals + 1 Alembic revision.
+    assert await _count_queries(db_session, client, SUMMARY_URL, headers) <= 10
+
+
+@pytest.mark.asyncio
+async def test_query_budget_is_unchanged_by_deep_run_history(
+    client, db_session, health_fixture
+):
+    """All-history success/error fields must not cost an extra query."""
+    admin = await _make_user(db_session)
+    headers = _auth(admin)
+    now = datetime.utcnow()
+
+    before = await _count_queries(db_session, client, LIST_URL, headers)
+
+    db_session.add_all([
+        RunLog(source_id=health_fixture["healthy"].id,
+               run_started_at=now - timedelta(hours=30 + n),
+               run_finished_at=now - timedelta(hours=30 + n), status="success",
+               items_fetched=1, items_new=0, items_duplicate=0, items_skipped_url=1,
+               items_skipped_content=0, items_skipped_invalid=0,
+               items_skipped_external=0)
+        for n in range(40)
+    ])
+    await db_session.commit()
+
+    after = await _count_queries(db_session, client, LIST_URL, headers)
+    assert after == before, "40 extra runs must not cost another query"
+
+
+@pytest.mark.asyncio
+async def test_deep_history_keeps_list_and_detail_in_agreement(
+    client, db_session, health_fixture
+):
+    """A success older than the recent window must read the same on both routes."""
+    admin = await _make_user(db_session)
+    source = health_fixture["failing"]
+    now = datetime.utcnow()
+
+    # Bury the one success under more than `recent_runs_considered` failures.
+    db_session.add_all([
+        RunLog(source_id=source.id, run_started_at=now - timedelta(hours=2 + n),
+               run_finished_at=now - timedelta(hours=2 + n), status="failed",
+               items_fetched=0, items_new=0, items_duplicate=0, items_skipped_url=0,
+               items_skipped_content=0, items_skipped_invalid=0,
+               items_skipped_external=0, error_message="buried boom")
+        for n in range(25)
+    ])
+    db_session.add(RunLog(
+        source_id=source.id, run_started_at=now - timedelta(days=30),
+        run_finished_at=now - timedelta(days=30), status="success",
+        items_fetched=4, items_new=2, items_duplicate=0, items_skipped_url=0,
+        items_skipped_content=0, items_skipped_invalid=0, items_skipped_external=0,
+    ))
+    await db_session.commit()
+
+    listed = next(
+        r for r in (await client.get(LIST_URL, headers=_auth(admin))).json()
+        if r["source_id"] == source.id
+    )
+    detailed = (await client.get(
+        _detail_url(source.id), headers=_auth(admin)
+    )).json()["health"]
+
+    assert listed["last_success_at"] is not None
+    assert listed["last_success_at"] == detailed["last_success_at"]
+    assert listed["reason_code"] == detailed["reason_code"] == "repeated_failures"
+    assert listed["last_error_message"] == detailed["last_error_message"]
