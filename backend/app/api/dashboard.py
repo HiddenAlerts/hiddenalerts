@@ -28,7 +28,6 @@ from app.models.raw_item import RawItem
 from app.models.review import AlertReview
 from app.models.run_log import RunLog
 from app.models.source import Source
-from app.models.user import User
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["dashboard"])

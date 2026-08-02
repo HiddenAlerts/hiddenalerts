@@ -121,11 +121,6 @@ def _risk_from_score(score: int | None, *, title_case: bool = False) -> str | No
     return risk_level_from_score(score, title_case=title_case)
 
 
-def _title_case_level(level: str | None) -> str | None:
-    """Convert lowercase risk-level value ('high'/'medium'/'low') to title case."""
-    return level.capitalize() if level else None
-
-
 # Agency-name detection moved to the shared app.pipeline.entities module (Slice 4)
 # so event grouping and the public API use one stoplist. Imported under the
 # original private name to keep call sites (`_primary_entity_key`, `_entity_set`)
