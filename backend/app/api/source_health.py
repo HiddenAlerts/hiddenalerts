@@ -10,7 +10,7 @@ from invalid content so a busy FBI source reads as *running fine, mostly not our
 rather than as broken.
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -57,6 +57,20 @@ def _scheduler_interval_hours() -> float:
     Health cadence must reflect what really happens.
     """
     return float(settings.scheduler_interval_hours)
+
+
+def _utc_now() -> datetime:
+    """The request clock: one aware UTC instant.
+
+    Aware rather than ``utcnow()`` because the timestamps it is compared against
+    come back from PostgreSQL as aware UTC — ``TIMESTAMPTZ`` columns, whatever
+    the model annotations say. A naive clock here made every Source Health route
+    raise ``TypeError`` in production while the SQLite suite stayed green.
+
+    Each route calls this **once** and passes the result down, so every figure in
+    one response is measured from the same instant.
+    """
+    return datetime.now(timezone.utc)
 
 
 def _scheduler_running() -> bool:
@@ -123,7 +137,7 @@ async def list_source_health(
     sources = await load_sources(db)
     if not sources:
         return []
-    return _by_severity(await _health_records(db, sources, datetime.utcnow()))
+    return _by_severity(await _health_records(db, sources, _utc_now()))
 
 
 @router.get("/sources/{source_id}/health", response_model=SourceHealthDetail)
@@ -138,7 +152,7 @@ async def get_source_health(
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    records = await _health_records(db, [source], datetime.utcnow())
+    records = await _health_records(db, [source], _utc_now())
     runs = (
         await db.execute(
             select(RunLog)
@@ -160,7 +174,7 @@ async def get_system_health_summary(
     _user: User = Depends(require_admin),
 ) -> SystemHealthSummary:
     """Instance-wide collection health. Read-only."""
-    now = datetime.utcnow()
+    now = _utc_now()
     sources = await load_sources(db)
     records = _by_severity(await _health_records(db, sources, now))
 

@@ -6,7 +6,8 @@ in-memory test database only.
 """
 import ast
 import inspect
-from datetime import datetime, timedelta
+import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import delete
@@ -703,3 +704,237 @@ async def test_deep_history_costs_no_extra_queries(db_session, health_source):
     assert one == three, f"query count grew from {one} to {three} for 3 sources"
     assert all(m.has_any_success for m in await collect_source_metrics(
         db_session, sources, now=NOW))
+
+
+# ---------------------------------------------------------------------------
+# Datetime awareness (Slice 3B.2M)
+#
+# `run_logs.run_started_at`, `raw_items.fetched_at` and the rest are physically
+# TIMESTAMPTZ but are mapped as bare `Mapped[datetime]`. PostgreSQL therefore
+# returns them **aware** while the SQLite database behind this suite returns
+# them **naive**. Mixing the two in Python arithmetic raised `TypeError` and made
+# all three Source Health endpoints 500 in production while this suite stayed
+# green — so these tests deliberately assert on the combinations SQLite alone
+# can never produce.
+# ---------------------------------------------------------------------------
+
+AWARE_NOW = datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _aware(moment: datetime) -> datetime:
+    return moment.replace(tzinfo=timezone.utc)
+
+
+def test_aware_now_with_aware_metrics_does_not_raise():
+    """The production combination: PostgreSQL aware values, aware request clock."""
+    result = _classify(
+        _metrics(
+            last_run_at=_aware(NOW - timedelta(hours=1)),
+            last_success_at=_aware(NOW - timedelta(hours=1)),
+            last_new_item_at=_aware(NOW - timedelta(hours=2)),
+            latest_upstream_published_at=_aware(NOW - timedelta(days=1)),
+        ),
+        now=AWARE_NOW,
+    )
+    assert result.state == HEALTHY
+
+
+def test_aware_now_with_naive_metrics_does_not_raise():
+    """Aware clock against SQLite-style naive values — the mixed case that broke."""
+    result = _classify(_metrics(), now=AWARE_NOW)
+    assert result.state == HEALTHY
+
+
+def test_naive_now_with_aware_metrics_does_not_raise():
+    """Defensive inverse: a naive clock must still cope with aware timestamps."""
+    result = _classify(
+        _metrics(
+            last_run_at=_aware(NOW - timedelta(hours=1)),
+            last_success_at=_aware(NOW - timedelta(hours=1)),
+            last_new_item_at=_aware(NOW - timedelta(hours=2)),
+            latest_upstream_published_at=_aware(NOW - timedelta(days=1)),
+        ),
+        now=NOW,
+    )
+    assert result.state == HEALTHY
+
+
+def test_age_days_handles_aware_and_aware():
+    assert service._age_days(_aware(NOW - timedelta(days=3)), AWARE_NOW) == pytest.approx(3.0)
+
+
+def test_age_days_handles_aware_now_and_naive_moment():
+    assert service._age_days(NOW - timedelta(days=3), AWARE_NOW) == pytest.approx(3.0)
+
+
+def test_age_days_handles_naive_now_and_aware_moment():
+    assert service._age_days(_aware(NOW - timedelta(days=3)), NOW) == pytest.approx(3.0)
+
+
+def test_age_days_still_returns_none_for_missing_moment():
+    assert service._age_days(None, AWARE_NOW) is None
+
+
+def test_as_utc_preserves_the_instant_across_offsets():
+    """A non-UTC aware value is converted, not relabelled."""
+    plus_five = timezone(timedelta(hours=5))
+    moment = datetime(2026, 8, 1, 17, 0, 0, tzinfo=plus_five)
+    assert service._as_utc(moment) == AWARE_NOW
+    assert service._as_utc(AWARE_NOW) == AWARE_NOW
+    assert service._as_utc(NOW) == AWARE_NOW  # naive is assumed UTC
+
+
+@pytest.mark.parametrize("hours,expected_state,expected_code", [
+    (6.0, HEALTHY, OK),
+    (12.1, WARNING, COLLECTION_OVERDUE),
+    (24.1, ERROR, SCHEDULER_OVERDUE),
+])
+def test_overdue_boundaries_identical_under_both_awareness_forms(
+    hours, expected_state, expected_code
+):
+    """The boundary must not move because the timestamps arrived aware."""
+    naive = _classify(_metrics(
+        last_run_at=NOW - timedelta(hours=hours),
+        last_success_at=NOW - timedelta(hours=hours),
+        last_new_item_at=NOW - timedelta(hours=hours),
+    ))
+    aware = _classify(
+        _metrics(
+            last_run_at=_aware(NOW - timedelta(hours=hours)),
+            last_success_at=_aware(NOW - timedelta(hours=hours)),
+            last_new_item_at=_aware(NOW - timedelta(hours=hours)),
+        ),
+        now=AWARE_NOW,
+    )
+    assert (naive.state, naive.reason_code) == (expected_state, expected_code)
+    assert (aware.state, aware.reason_code) == (naive.state, naive.reason_code)
+    assert aware.additional_reason_codes == naive.additional_reason_codes
+
+
+@pytest.mark.parametrize("days,should_be_stale", [(13, False), (15, True)])
+def test_stale_ingestion_boundary_identical_under_both_awareness_forms(days, should_be_stale):
+    naive = _classify(_metrics(last_new_item_at=NOW - timedelta(days=days)))
+    aware = _classify(
+        _metrics(last_new_item_at=_aware(NOW - timedelta(days=days))), now=AWARE_NOW
+    )
+    codes_naive = [naive.reason_code, *naive.additional_reason_codes]
+    codes_aware = [aware.reason_code, *aware.additional_reason_codes]
+    assert (STALE_INGESTION in codes_naive) is should_be_stale
+    assert codes_aware == codes_naive
+    assert aware.state == naive.state
+
+
+@pytest.mark.parametrize("days,should_be_stale", [(29, False), (31, True)])
+def test_stale_upstream_boundary_identical_under_both_awareness_forms(days, should_be_stale):
+    naive = _classify(_metrics(latest_upstream_published_at=NOW - timedelta(days=days)))
+    aware = _classify(
+        _metrics(latest_upstream_published_at=_aware(NOW - timedelta(days=days))),
+        now=AWARE_NOW,
+    )
+    codes_naive = [naive.reason_code, *naive.additional_reason_codes]
+    codes_aware = [aware.reason_code, *aware.additional_reason_codes]
+    assert (STALE_UPSTREAM in codes_naive) is should_be_stale
+    assert codes_aware == codes_naive
+    assert aware.state == naive.state
+
+
+def test_equivalent_naive_and_aware_inputs_classify_identically_across_states():
+    """Same instants, two representations, one verdict — state, codes and message."""
+    cases = [
+        dict(is_active=False),
+        dict(consecutive_failed_runs=3),
+        dict(has_any_run=True, has_any_success=False),
+        dict(last_run_at=NOW - timedelta(hours=30), last_success_at=NOW - timedelta(hours=30)),
+        dict(last_run_status="failed"),
+        dict(),
+    ]
+    for overrides in cases:
+        naive_metrics = _metrics(**overrides)
+        aware_overrides = {
+            key: (_aware(value) if isinstance(value, datetime) else value)
+            for key, value in overrides.items()
+        }
+        aware_metrics = _metrics(**aware_overrides)
+        for field_name in (
+            "last_run_at", "last_success_at", "last_new_item_at",
+            "latest_upstream_published_at",
+        ):
+            if field_name not in aware_overrides:
+                current = getattr(aware_metrics, field_name)
+                if current is not None:
+                    setattr(aware_metrics, field_name, _aware(current))
+
+        naive = _classify(naive_metrics)
+        aware = _classify(aware_metrics, now=AWARE_NOW)
+        assert (aware.state, aware.reason_code, aware.reason_detail) == (
+            naive.state, naive.reason_code, naive.reason_detail
+        ), f"divergence for {overrides}"
+
+
+def test_classifier_remains_deterministic_for_an_injected_now():
+    metrics = _metrics(last_run_at=_aware(NOW - timedelta(hours=20)))
+    first = _classify(metrics, now=AWARE_NOW)
+    second = _classify(metrics, now=AWARE_NOW)
+    assert (first.state, first.reason_code, first.reason_detail) == (
+        second.state, second.reason_code, second.reason_detail
+    )
+
+
+def test_classifier_still_has_no_clock_of_its_own():
+    """The fix must not have smuggled a clock into the pure classifier."""
+    tree = ast.parse(inspect.getsource(classify_source_health))
+    called = {
+        node.func.attr for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    assert not called & {"utcnow", "now", "today"}
+
+
+def test_sql_bind_values_match_the_mapped_column_awareness():
+    """Window bounds must be bound in the form the mapped column declares.
+
+    SQLAlchemy picks the bind type from the *mapped* column, not the physical
+    one. `RunLog.run_started_at` is mapped naive, so asyncpg encodes parameters
+    for it with its naive timestamp codec and rejects an aware value — a second,
+    distinct failure mode from the Python-side arithmetic bug, and invisible to
+    SQLite either way.
+    """
+    assert service._as_naive_utc(AWARE_NOW).tzinfo is None
+    assert service._as_naive_utc(NOW).tzinfo is None
+    # Same instant in both directions.
+    assert service._as_naive_utc(AWARE_NOW) == NOW
+    assert service._as_utc(service._as_naive_utc(AWARE_NOW)) == AWARE_NOW
+    plus_five = timezone(timedelta(hours=5))
+    assert service._as_naive_utc(datetime(2026, 8, 1, 17, 0, 0, tzinfo=plus_five)) == NOW
+
+
+@pytest.mark.asyncio
+async def test_window_totals_identical_for_aware_and_naive_clocks(db_session):
+    """The same instant expressed either way must produce the same counters."""
+    source = Source(
+        name=f"awareness-{uuid.uuid4().hex[:8]}", base_url="https://awareness.test",
+        source_type="rss", adapter_class="x.Y", is_active=True,
+    )
+    db_session.add(source)
+    await db_session.flush()
+
+    db_session.add_all([
+        RunLog(source_id=source.id, status="success",
+               run_started_at=NOW - timedelta(hours=2),
+               items_fetched=5, items_new=2),
+        RunLog(source_id=source.id, status="success",
+               run_started_at=NOW - timedelta(days=3),
+               items_fetched=4, items_new=1),
+    ])
+    await db_session.flush()
+
+    try:
+        aware = await service._run_window_totals(db_session, [source.id], AWARE_NOW)
+        naive = await service._run_window_totals(db_session, [source.id], NOW)
+        assert aware == naive
+        assert aware[source.id]["items_new_24h"] == 2
+        assert aware[source.id]["items_new_7d"] == 3
+    finally:
+        await db_session.execute(delete(RunLog).where(RunLog.source_id == source.id))
+        await db_session.execute(delete(Source).where(Source.id == source.id))
+        await db_session.commit()

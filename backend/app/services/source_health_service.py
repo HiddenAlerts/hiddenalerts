@@ -19,7 +19,7 @@ Two distinctions the classification exists to preserve:
 """
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -154,10 +154,51 @@ class HealthClassification:
     additional_reason_codes: list[str] = field(default_factory=list)
 
 
+def _as_utc(value: datetime) -> datetime:
+    """The same instant, as an aware UTC datetime.
+
+    The timestamps this service reads — ``run_logs.run_started_at``,
+    ``raw_items.fetched_at`` and friends — are physically ``TIMESTAMPTZ`` in
+    PostgreSQL but are mapped as bare ``Mapped[datetime]``. The annotation is
+    what misleads: PostgreSQL returns them **aware**, while the SQLite test
+    database returns them **naive**. Subtracting one kind from the other raises
+    ``TypeError``, so every Python-side comparison normalises through here first.
+
+    A naive value is *assumed to be UTC* — true for both the SQLite suite and any
+    legacy row, since the database session runs at ``TimeZone = UTC``.
+    """
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _as_naive_utc(value: datetime) -> datetime:
+    """The same instant, as a **naive** UTC datetime, for SQL bind parameters.
+
+    SQLAlchemy chooses the bind type from the **mapped** column, not the physical
+    one. ``RunLog.run_started_at`` and ``RawItem.fetched_at`` are mapped as bare
+    ``Mapped[datetime]`` — i.e. ``DateTime()`` with ``timezone=False`` — even
+    though PostgreSQL stores them as ``TIMESTAMPTZ``. asyncpg therefore encodes
+    parameters for them with its *naive* timestamp codec, which rejects an aware
+    value outright:
+
+        asyncpg.pgproto.pgproto.timestamp_encode
+        TypeError: can't subtract offset-naive and offset-aware datetimes
+
+    So window bounds compared against those columns must be handed over naive.
+    The instant is unchanged — the database session runs at ``TimeZone = UTC`` —
+    and PostgreSQL coerces the value on comparison exactly as it did before.
+
+    Columns genuinely mapped ``DateTime(timezone=True)``, such as
+    ``ProcessedAlert.published_at``, take the aware form from :func:`_as_utc`.
+    """
+    return _as_utc(value).replace(tzinfo=None)
+
+
 def _age_days(moment: datetime | None, now: datetime) -> float | None:
     if moment is None:
         return None
-    return (now - moment).total_seconds() / 86400.0
+    return (_as_utc(now) - _as_utc(moment)).total_seconds() / 86400.0
 
 
 def classify_source_health(
@@ -180,7 +221,9 @@ def classify_source_health(
 
     interval = timedelta(hours=scheduler_interval_hours)
     since_last_run = (
-        now - metrics.last_run_at if metrics.last_run_at is not None else None
+        _as_utc(now) - _as_utc(metrics.last_run_at)
+        if metrics.last_run_at is not None
+        else None
     )
 
     # --- Error: demonstrated collector or scheduling failure ---------------
@@ -375,8 +418,10 @@ async def _run_window_totals(
     if not source_ids:
         return {}
 
+    # Bound against RunLog.run_started_at, which is mapped naive — see _as_naive_utc.
+    base = _as_naive_utc(now)
     day, week, month = (
-        now - timedelta(days=1), now - timedelta(days=7), now - timedelta(days=30)
+        base - timedelta(days=1), base - timedelta(days=7), base - timedelta(days=30)
     )
     started = RunLog.run_started_at
     statement = (
@@ -579,7 +624,11 @@ async def get_alembic_revision(session: AsyncSession) -> str | None:
 
 async def system_totals(session: AsyncSession, now: datetime) -> dict[str, object]:
     """Instance-wide counters for the summary endpoint, in three queries."""
-    day, week = now - timedelta(days=1), now - timedelta(days=7)
+    # Two mappings, two bind forms, one instant: RunLog timestamps are mapped
+    # naive, ProcessedAlert.published_at is mapped DateTime(timezone=True).
+    run_base = _as_naive_utc(now)
+    day, week = run_base - timedelta(days=1), run_base - timedelta(days=7)
+    alert_week = _as_utc(now) - timedelta(days=7)
 
     run_totals = (
         await session.execute(
@@ -621,7 +670,7 @@ async def system_totals(session: AsyncSession, now: datetime) -> dict[str, objec
                         case(
                             (
                                 ProcessedAlert.is_published.is_(True)
-                                & (ProcessedAlert.published_at >= week),
+                                & (ProcessedAlert.published_at >= alert_week),
                                 1,
                             ),
                             else_=0,

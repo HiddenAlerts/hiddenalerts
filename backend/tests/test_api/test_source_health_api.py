@@ -653,3 +653,79 @@ async def test_deep_history_keeps_list_and_detail_in_agreement(
     assert listed["last_success_at"] == detailed["last_success_at"]
     assert listed["reason_code"] == detailed["reason_code"] == "repeated_failures"
     assert listed["last_error_message"] == detailed["last_error_message"]
+
+
+# ---------------------------------------------------------------------------
+# Request clock awareness (Slice 3B.2M)
+# ---------------------------------------------------------------------------
+
+
+def test_request_clock_is_aware_utc():
+    """`_utc_now` must return an aware UTC instant, not a naive one.
+
+    A naive clock here is what made every Source Health route 500 against
+    PostgreSQL, whose TIMESTAMPTZ columns come back aware.
+    """
+    from app.api import source_health as api
+
+    now = api._utc_now()
+    assert now.tzinfo is not None
+    assert now.utcoffset() == timedelta(0)
+
+
+def test_routes_do_not_call_utcnow():
+    """No route may reintroduce a naive clock."""
+    import ast
+    import inspect
+
+    from app.api import source_health as api
+
+    tree = ast.parse(inspect.getsource(api))
+    naive_calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "utcnow"
+    ]
+    assert not naive_calls, "datetime.utcnow() reintroduced in source_health API"
+
+
+def test_each_route_freezes_one_clock_per_request():
+    """Each handler takes the clock once, so one response is measured once."""
+    import ast
+    import inspect
+
+    from app.api import source_health as api
+
+    module = ast.parse(inspect.getsource(api))
+    handlers = {
+        "list_source_health", "get_source_health", "get_system_health_summary",
+    }
+    for node in ast.walk(module):
+        if isinstance(node, ast.AsyncFunctionDef) and node.name in handlers:
+            calls = [
+                child for child in ast.walk(node)
+                if isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Name)
+                and child.func.id == "_utc_now"
+            ]
+            assert len(calls) == 1, f"{node.name} calls the clock {len(calls)} times"
+
+
+@pytest.mark.asyncio
+async def test_endpoints_serialize_timestamps_that_parse_as_utc(client, db_session):
+    """Every timestamp the API emits must round-trip through fromisoformat."""
+    admin = await _make_user(db_session)
+    token = create_access_token({"sub": str(admin.id), "role": admin.role})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = await client.get(LIST_URL, headers=headers)
+    assert response.status_code == 200
+    for record in response.json():
+        for field_name in (
+            "last_run_at", "last_success_at", "last_new_item_at",
+            "latest_upstream_published_at", "last_error_at",
+        ):
+            value = record.get(field_name)
+            if value is not None:
+                datetime.fromisoformat(value)
