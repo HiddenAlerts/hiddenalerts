@@ -1,4 +1,8 @@
-"""Tests for the public search API — GET /api/search/alerts.
+"""Tests for alert search — GET /api/v1/subscriber/search/alerts.
+
+The public ``/api/search/alerts`` route was removed in Slice 3B.2P; these
+assertions were repointed to the subscriber route, which is now the only
+caller of the shared ``search_alerts_impl``.
 
 Mirrors test_public_alerts.py style: SQLite in-memory DB, async client,
 _seed_* helpers. No auth required for any test.
@@ -162,7 +166,12 @@ async def _seed_alert(
 
 @pytest.mark.asyncio
 async def test_search_requires_no_auth(client):
-    """GET /api/search/alerts works without any auth header or cookie."""
+    """The search route answers for an authorized subscriber.
+
+    Was an auth-free assertion against the public route until Slice 3B.2P;
+    the subscription gate is overridden module-wide here so the test still
+    exercises search behaviour rather than authentication.
+    """
     response = await client.get("/api/v1/subscriber/search/alerts?q=anything")
     assert response.status_code == 200
 

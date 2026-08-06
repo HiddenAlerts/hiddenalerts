@@ -1,28 +1,39 @@
-"""Route inventory and interface-area guards (Slice 3B.2K).
+"""Route inventory, interface-area guards and the Slice 3B.2P contract proof.
 
 Every route belongs to exactly one interface area, and each area has its own
-authentication model and migration state:
+authentication model:
 
-``legacy_jinja``   inactive, intentionally retained until the Admin UI covers
-                   the remaining monitoring and source-management actions
-``admin_api``      target administrative surface (internal JWT)
-``subscriber_api`` active paid-content surface (Supabase token + subscription)
-``client_api``     transitional internal surface (internal JWT)
-``public_api``     transitional unauthenticated surface
+``admin_api``      administrative surface (Internal JWT)
+``subscriber_api`` paid-content surface (Supabase token + active subscription)
+``client_api``     retained transitional internal surface (Internal JWT)
+``public_api``     the unauthenticated Landing feed, ``GET /api/alerts``
+``billing``        checkout / status / portal / sync, plus the Stripe webhook
 ``infrastructure`` uptime and documentation endpoints
 
-These tests assert **route registration and authentication**, which are facts
-about the code. They deliberately say nothing about whether an interface is
-*operationally used* — that is a product fact, recorded in
-``reports/legacy_route_cleanup_slice3b2k_20260802.md``. A Jinja route being
-registered is not evidence that anyone uses it.
+**Cleanup state.** Slice 3B.2P removed the legacy Jinja dashboard and the four
+unused Public compatibility routes: 12 OpenAPI paths, 13 operations. There is no
+``legacy_jinja`` area any more, and the public surface is a single route.
 
-Nothing is asserted absent unless it was actually removed.
+``REMOVED_PATHS`` / ``REMOVED_OPERATIONS`` are **regression guards, not
+interface classifications** — they describe forbidden legacy surface. The branch
+that still recognises ``/login`` and ``/dashboard`` exists purely so accidental
+reintroduction fails loudly; it does not mean those routes are supported.
+
+The contract proof diffs the live OpenAPI against a **tracked** fixture,
+``tests/fixtures/api_surface_before_cleanup_20260806.json``. It deliberately does
+not read ``reports/``: that directory is gitignored, so a clean checkout would
+make the proof skip — passing the build while proving nothing. A missing or
+malformed fixture is a failure, never a skip.
+
+These tests assert **route registration and authentication**, which are facts
+about the code. They say nothing about whether an interface is *operationally
+used* — that is a product fact, recorded in the audit reports.
 """
 import ast
 import json
 import inspect
 import pathlib
+import textwrap
 
 import pytest
 from fastapi.routing import APIRoute
@@ -367,26 +378,44 @@ REMOVED_OPERATIONS = frozenset({
 })
 
 #: The backend package root, whether the tree is checked out at
-#: /opt/hiddenalerts/backend or mounted at /src in the test container.
+#: /opt/hiddenalerts/backend or mounted elsewhere in a test container.
 BACKEND_ROOT = pathlib.Path(__file__).resolve().parents[2]
-_BASELINE_CANDIDATES = (
-    BACKEND_ROOT / "reports/api_surface_before_cleanup_20260806.json",
-    REPO_ROOT / "backend/reports/api_surface_before_cleanup_20260806.json",
+
+#: The pre-cleanup surface, **tracked in git** beside these tests.
+#:
+#: It deliberately does not live in ``reports/``: that directory is gitignored,
+#: so a clean checkout has none of it and the contract proof would silently skip
+#: — proving nothing exactly when it matters most. The fixture is sanitized to
+#: path names and HTTP methods only.
+BASELINE_FIXTURE = (
+    BACKEND_ROOT / "tests/fixtures/api_surface_before_cleanup_20260806.json"
 )
 
 
 def _baseline():
-    """Load the before-cleanup surface, whichever layout the tests run under.
+    """Load the tracked pre-cleanup surface.
 
-    The reports directory is gitignored, so a fresh clone legitimately has no
-    baseline and these tests skip. When the file *is* present the proof must
-    actually run — resolving only against the repo root made it skip inside the
-    container, where a skipped contract proof would have proved nothing.
+    Absence or malformed content is a **failure**, never a skip: the fixture is
+    committed, so if it cannot be read something is genuinely wrong.
     """
-    for candidate in _BASELINE_CANDIDATES:
-        if candidate.exists():
-            return json.loads(candidate.read_text())
-    pytest.skip("before-cleanup baseline report is not present (gitignored)")
+    if not BASELINE_FIXTURE.exists():
+        raise AssertionError(
+            f"tracked contract fixture is missing: {BASELINE_FIXTURE}. "
+            f"It is committed to git and must never be optional."
+        )
+    try:
+        data = json.loads(BASELINE_FIXTURE.read_text())
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"contract fixture {BASELINE_FIXTURE} is not valid JSON: {exc}"
+        ) from None
+
+    for key in ("openapi_path_count", "openapi_operation_count", "paths"):
+        if key not in data:
+            raise AssertionError(f"contract fixture is missing {key!r}")
+    if not isinstance(data["paths"], dict) or not data["paths"]:
+        raise AssertionError("contract fixture has no usable 'paths' mapping")
+    return data
 
 
 def test_removed_path_and_operation_counts_are_exactly_twelve_and_thirteen():
@@ -410,7 +439,7 @@ def test_removed_operations_are_no_longer_mounted(method, path):
 def test_openapi_diff_against_baseline_is_exactly_the_approved_removal():
     """Nothing beyond the approved 12 paths may disappear, and nothing may appear."""
     baseline = _baseline()
-    before = set(baseline["openapi_paths"])          # path -> {METHOD: details}
+    before = set(baseline["paths"])                  # path -> [METHOD, ...]
     after = set(app.openapi()["paths"])
 
     assert before - after == set(REMOVED_PATHS), (
@@ -418,7 +447,7 @@ def test_openapi_diff_against_baseline_is_exactly_the_approved_removal():
         f"{sorted((before - after) - REMOVED_PATHS)}"
     )
     assert after - before == set(), f"unexpected new paths: {sorted(after - before)}"
-    assert baseline["counts"]["openapi_paths"] == 59
+    assert baseline["openapi_path_count"] == 59
     assert len(after) == 47
 
 
@@ -427,8 +456,8 @@ def test_retained_paths_keep_every_method_they_had():
     baseline = _baseline()
     before_ops = {
         (method.upper(), path)
-        for path, ops in baseline["openapi_paths"].items()
-        for method in ops
+        for path, methods in baseline["paths"].items()
+        for method in methods
     }
     spec = app.openapi()
     after_ops = {
@@ -535,3 +564,89 @@ def test_app_static_directory_is_gone_and_uploads_directory_is_not():
     assert not (BACKEND_ROOT / "app/templates").exists()
     # /uploads is created at startup, so the mount is what matters here.
     assert "/uploads" in {r.path for r in app.routes if isinstance(r, Mount)}
+
+
+def test_contract_fixture_is_tracked_and_independent_of_reports():
+    """The proof must hold in a clean checkout, where reports/ does not exist.
+
+    `reports/` is gitignored. A contract test that reads from there skips on a
+    fresh clone and in CI — silently passing the build while proving nothing.
+    """
+    assert BASELINE_FIXTURE.exists(), "the fixture must be committed, not generated"
+    assert "reports" not in BASELINE_FIXTURE.parts
+    assert BASELINE_FIXTURE.parent.name == "fixtures"
+
+    # Inspect the loader's own AST — a substring scan would match this test's
+    # assertions and the loader's docstring rather than real behaviour.
+    loader_tree = ast.parse(textwrap.dedent(inspect.getsource(_baseline)))
+
+    called = {
+        node.func.attr
+        for node in ast.walk(loader_tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    assert "skip" not in called, (
+        "a missing or malformed fixture must fail, never skip"
+    )
+
+    literals = {
+        node.value
+        for node in ast.walk(loader_tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    assert not any("reports" in s for s in literals if "gitignored" not in s), (
+        "the contract loader must not read the gitignored reports directory"
+    )
+
+    names = {node.id for node in ast.walk(loader_tree) if isinstance(node, ast.Name)}
+    assert "BASELINE_FIXTURE" in names
+
+
+def test_contract_fixture_holds_only_sanitized_surface_data():
+    """Path names and methods only — no environment, servers or credentials."""
+    raw = BASELINE_FIXTURE.read_text()
+    lowered = raw.lower()
+    for forbidden in ("http://", "https://", "servers", "secret", "token",
+                      "generated_at", "database_url"):
+        assert forbidden not in lowered, f"fixture leaks {forbidden!r}"
+
+    data = json.loads(raw)
+    assert set(data["paths"]) and all(
+        isinstance(methods, list) and all(isinstance(m, str) for m in methods)
+        for methods in data["paths"].values()
+    )
+    # The only 'password' occurrence is the change-password *route path*.
+    assert [p for p in data["paths"] if "password" in p] == [
+        "/api/v1/auth/change-password"
+    ]
+
+
+def test_contract_fixture_counts_are_self_consistent():
+    data = _baseline()
+    assert data["openapi_path_count"] == len(data["paths"]) == 59
+    assert data["openapi_operation_count"] == sum(
+        len(m) for m in data["paths"].values()
+    ) == 64
+    # And the removal manifest is a strict subset of what existed before.
+    assert set(REMOVED_PATHS) <= set(data["paths"])
+
+
+def test_missing_or_malformed_fixture_fails_rather_than_skips(tmp_path, monkeypatch):
+    """A broken fixture must stop the build, not quietly disappear from it."""
+    import tests.test_api.test_route_inventory as module
+
+    monkeypatch.setattr(module, "BASELINE_FIXTURE", tmp_path / "absent.json")
+    with pytest.raises(AssertionError, match="missing"):
+        module._baseline()
+
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json")
+    monkeypatch.setattr(module, "BASELINE_FIXTURE", broken)
+    with pytest.raises(AssertionError, match="not valid JSON"):
+        module._baseline()
+
+    incomplete = tmp_path / "incomplete.json"
+    incomplete.write_text(json.dumps({"paths": {}}))
+    monkeypatch.setattr(module, "BASELINE_FIXTURE", incomplete)
+    with pytest.raises(AssertionError, match="missing 'openapi_path_count'"):
+        module._baseline()

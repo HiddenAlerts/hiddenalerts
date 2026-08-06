@@ -1,25 +1,35 @@
-"""Public read-only alerts feed — M3 Slice 4 + Frontend Completion.
+"""Public Landing feed, plus the shared alert mappers and queries.
 
-No authentication required on any route in this module.
-All queries are hard-filtered to published alerts only (is_published = True).
-Unpublished alerts are never exposed, regardless of query parameters.
+This module owns exactly **one unauthenticated route**:
 
-Routes (all mounted at /api/alerts — no /api/v1 prefix):
-  GET /api/alerts            — paginated published alert feed
-  GET /api/alerts/stats      — published alert aggregate counts + category breakdown
-  GET /api/alerts/{id}       — enriched single published alert detail; 404 if absent
-                               or unpublished. Returns Ken's approved frontend-facing
-                               schema (confidence, why_it_matters, key_intelligence,
-                               risk_assessment, sources, timeline, related_signals,
-                               etc.) plus backward-compatibility fields.
+  GET /api/alerts   — paginated published alert feed, used by the Landing Page
+
+Everything else here is **shared implementation** reached through protected
+Subscriber endpoints in ``app/api/subscriber.py``:
+
+  _published_base_stmt / _detail_stmt   the published-only query bases
+  _to_public_read / _to_public_detail   the ORM → schema mappers
+  published_stats_impl                  aggregate counts
+  the enrichment helpers                confidence, why_it_matters,
+                                        key_intelligence, risk_assessment,
+                                        sources, timeline, related_signals
+
+All queries are hard-filtered to published alerts (``is_published = True``);
+unpublished alerts are never exposed, regardless of query parameters.
+
+The ``Public*`` schema names are retained deliberately: they are the shared
+bases the subscriber schemas extend (``SubscriberAlertDetail(PublicAlertDetail)``),
+not a statement that the payload is publicly reachable.
 
 Intentionally separate from:
   /api/v1/alerts             (internal/admin — returns all alerts, auth required)
-  /api/v1/client/alerts      (subscriber — published only, auth required)
+  /api/v1/client/alerts      (client — published only, Internal JWT required)
 
-Route ordering note:
-  /stats must be declared BEFORE /{id} so FastAPI does not try to
-  interpret the literal string "stats" as an integer alert ID.
+Slice 06 August 2026: removed this module's other public routes — ``/api/alerts/top``,
+``/api/alerts/stats`` and ``/api/alerts/{id}`` — after the frontend audit found
+no caller for any of them. Their protected replacements live under
+``/api/v1/subscriber/``. With ``/stats`` and ``/{id}`` both gone, the old
+route-ordering constraint between them no longer applies.
 """
 from __future__ import annotations
 
@@ -670,8 +680,14 @@ async def list_public_alerts(
 async def published_stats_impl(db: AsyncSession) -> PublicAlertStatsResponse:
     """Shared implementation for published-alert aggregate stats.
 
-    Used by public ``GET /api/alerts/stats`` and subscriber
-    ``GET /api/v1/subscriber/alerts/stats``.
+    Serves the Subscriber statistics endpoint,
+    ``GET /api/v1/subscriber/alerts/stats``, which is its only caller since
+    Slice 3B.2P removed the public ``/api/alerts/stats`` route.
+
+    Note that the subscriber endpoint reuses ``total_alerts`` and
+    ``category_breakdown`` from here but recomputes the risk counts with the V1
+    bands (adding ``critical_count``), so the legacy high/medium/low fields on
+    the returned model are no longer surfaced to any client.
     """
     # Counts are derived from signal_score_total (M3 thresholds), matching how
     # risk_level is displayed on list/detail. Alerts with null scores are

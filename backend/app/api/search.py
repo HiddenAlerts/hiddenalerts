@@ -1,7 +1,17 @@
-"""Public search API — GET /api/search/alerts.
+"""Shared subscriber-safe alert search.
 
-No authentication required. Search is hard-filtered to published alerts only;
-unpublished alerts are never exposed regardless of how the query matches.
+This module holds no routes. Its implementation, :func:`search_alerts_impl`,
+serves exactly one endpoint:
+
+  GET /api/v1/subscriber/search/alerts   (Supabase token + active subscription)
+
+Slice 3B.2P removed the unauthenticated ``GET /api/search/alerts`` route — the
+frontend audit found the Alerts Page and Search UI call the subscriber path
+exclusively — and with it this module's ``APIRouter``. The behaviour below is
+unchanged; only the caller and its authentication moved.
+
+Search is hard-filtered to published alerts only; unpublished alerts are never
+exposed regardless of how the query matches.
 
 Matching:
   - Case-insensitive ILIKE %q% on RawItem.title, ProcessedAlert.summary,
@@ -157,10 +167,12 @@ async def search_alerts_impl(
     limit: int,
     group_limit: int,
 ) -> SearchResponse:
-    """Shared implementation for published-alert search.
+    """Published-alert search, backing the Subscriber search endpoint.
 
-    Used by public ``GET /api/search/alerts`` and subscriber
-    ``GET /api/v1/subscriber/search/alerts`` so they behave identically.
+    Its only caller is ``GET /api/v1/subscriber/search/alerts``; the public
+    ``/api/search/alerts`` route it once also served was removed in Slice
+    3B.2P. The behaviour is unchanged — the full test suite for it now runs
+    through the subscriber route.
     Frontend-safe response shape — never exposes review history, score factor
     breakdowns, raw entities_json, ai_model, or other admin metadata.
     """

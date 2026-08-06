@@ -387,5 +387,9 @@ async def subscriber_search_alerts(
     _: ActiveSubscriberContext = Depends(require_active_subscription),
     db: AsyncSession = Depends(get_db),
 ) -> SearchResponse:
-    """Published-alert search — mirrors GET /api/search/alerts."""
+    """Published-alert search for subscribers.
+
+    Backed by the shared ``search_alerts_impl``. This is its only caller
+    since Slice 3B.2P removed the public ``/api/search/alerts`` route.
+    """
     return await search_api.search_alerts_impl(db, q, min_score, limit, group_limit)

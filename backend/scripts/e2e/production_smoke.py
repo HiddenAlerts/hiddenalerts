@@ -44,7 +44,6 @@ from scripts.e2e.common import (
 
 HEALTH_PATH = "/api/v1/health"
 PUBLIC_ALERTS_PATH = "/api/alerts"
-PUBLIC_TOP_PATH = "/api/alerts/top"
 ADMIN_SOURCES_PATH = "/api/v1/sources"
 ADMIN_SOURCE_HEALTH_PATH = "/api/v1/admin/sources/health"
 ADMIN_SYSTEM_SUMMARY_PATH = "/api/v1/admin/system/health-summary"
@@ -394,9 +393,8 @@ async def check_subscriber(
 
 async def check_client_and_legacy(
     client: httpx.AsyncClient, results: ResultSet, admin_header: dict[str, str],
-    *, post_deploy: bool,
 ) -> None:
-    """Both Client routes, plus the surface Slice 3B.2P removed."""
+    """Both Client routes."""
     # --- Route 1: /api/v1/client/alerts -------------------------------------
     unauth, _ = await _get(client, CLIENT_ALERTS_PATH, results, "client list without token → 401")
     if unauth is not None:
@@ -452,12 +450,67 @@ async def check_client_and_legacy(
                                f"keys: {sorted(body)[:6] if isinstance(body, dict) else body}",
                                endpoint=CLIENT_ALERT_DETAIL_PATH, status_code=200)
 
-    # --- Removed surface (Slice 3B.2P) --------------------------------------
-    await check_removed_surface(client, results, post_deploy=post_deploy)
+    # The removed-surface check runs from run_smoke() once a real alert id has
+    # been discovered — see discover_known_alert_id().
+
+
+async def discover_known_alert_id(
+    client: httpx.AsyncClient,
+    results: ResultSet,
+    *,
+    subscriber_header: dict[str, str],
+    admin_header: dict[str, str],
+) -> int | None:
+    """Find a real alert id from a **retained** endpoint.
+
+    The public detail route is gone, so proving that requires an id that really
+    exists — an arbitrary or invented id would 404 either way and the check
+    would pass without testing anything.
+
+    Preference order, per the retained surface:
+
+    1. Subscriber alerts list — subscriber-visible, so the retained detail route
+       can also be verified with it;
+    2. Public Landing feed — unauthenticated, always available;
+    3. Admin alerts list — the last resort.
+    """
+    attempts: list[tuple[str, str, dict[str, str]]] = [
+        ("subscriber alerts", SUBSCRIBER_ALERTS_PATH, subscriber_header),
+        ("public landing feed", PUBLIC_ALERTS_PATH, {}),
+        ("admin alerts", ADMIN_ALERTS_PATH, admin_header),
+    ]
+    for label, path, headers in attempts:
+        if headers is None:
+            continue
+        response, _ = await _get(
+            client, path, results, f"alert id discovery via {label}",
+            headers=headers or None, params={"limit": 1},
+        )
+        if response is None or response.status_code != 200:
+            continue
+        payload = parse_json(response, f"alert id discovery via {label}")
+        rows = payload.get("alerts") if isinstance(payload, dict) else payload
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            alert_id = rows[0].get("id")
+            if isinstance(alert_id, int):
+                results.context["known_alert_id"] = alert_id
+                results.context["known_alert_id_source"] = label
+                results.record(
+                    "known alert id discovered", True,
+                    f"id {alert_id} from the {label}",
+                    endpoint=path, status_code=200,
+                )
+                return alert_id
+    return None
 
 
 async def check_removed_surface(
-    client: httpx.AsyncClient, results: ResultSet, *, post_deploy: bool
+    client: httpx.AsyncClient,
+    results: ResultSet,
+    *,
+    post_deploy: bool,
+    known_alert_id: int | None,
+    subscriber_header: dict[str, str],
 ) -> None:
     """The legacy Jinja dashboard and the four unused Public routes.
 
@@ -465,8 +518,30 @@ async def check_removed_surface(
     expected to answer and their presence is only recorded — a pre-deploy run
     must not go red because the removal has not shipped yet. With
     ``--post-deploy`` every one of them must be **404**.
+
+    Only GETs are issued. Proving the removed POST routes is the route-inventory
+    test's job, not something to demonstrate by sending a write at production.
     """
-    for path in (*REMOVED_JINJA_PATHS, *REMOVED_PUBLIC_PATHS):
+    paths = list(REMOVED_JINJA_PATHS) + list(REMOVED_PUBLIC_PATHS)
+
+    # The fourth public removal is the parameterised detail route, so it needs a
+    # real id rather than a literal path.
+    if known_alert_id is not None:
+        paths.append(f"/api/alerts/{known_alert_id}")
+    elif post_deploy:
+        results.record(
+            "removed: /api/alerts/{known_id}", False,
+            "no alert id could be obtained from any retained endpoint, so the "
+            "public detail route could not be verified — refusing to report a "
+            "pass for an unverified removal",
+        )
+    else:
+        results.skip(
+            "removed: /api/alerts/{known_id}",
+            "no alert id available from a retained endpoint",
+        )
+
+    for path in paths:
         name = f"removed: {path}"
         response, latency = await _get(client, path, results, name)
         if response is None:
@@ -492,6 +567,23 @@ async def check_removed_surface(
                        f"expected 200, got {retained.status_code}",
                        endpoint=PUBLIC_ALERTS_PATH, status_code=retained.status_code,
                        latency_ms=latency)
+
+    # The protected replacement must still serve the same row, when the id came
+    # from a subscriber-visible listing.
+    if known_alert_id is not None and subscriber_header and \
+            results.context.get("known_alert_id_source") == "subscriber alerts":
+        path = f"/api/v1/subscriber/alerts/{known_alert_id}"
+        response, latency = await _get(
+            client, path, results, "retained: subscriber alert detail",
+            headers=subscriber_header,
+        )
+        if response is not None:
+            results.record(
+                "retained: subscriber alert detail", response.status_code == 200,
+                f"expected 200 for the protected replacement, got "
+                f"{response.status_code}",
+                endpoint=path, status_code=response.status_code, latency_ms=latency,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -560,11 +652,20 @@ async def run_smoke(config: E2EConfig, *, post_deploy: bool) -> ResultSet:
         if admin_header:
             await check_admin(client, results, admin_header, subscriber_header,
                               post_deploy=post_deploy)
-            await check_client_and_legacy(client, results, admin_header,
-                                          post_deploy=post_deploy)
+            await check_client_and_legacy(client, results, admin_header)
         if subscriber_header:
             await check_subscriber(client, results, subscriber_header,
                                    post_deploy=post_deploy)
+
+        # Runs last: it needs a real alert id from a retained endpoint.
+        known_alert_id = await discover_known_alert_id(
+            client, results,
+            subscriber_header=subscriber_header, admin_header=admin_header,
+        )
+        await check_removed_surface(
+            client, results, post_deploy=post_deploy,
+            known_alert_id=known_alert_id, subscriber_header=subscriber_header,
+        )
     finally:
         await client.aclose()
 

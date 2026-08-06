@@ -1,7 +1,30 @@
 # HiddenAlerts API Contract V2
 
-**Last updated:** 22 April 2026  
-**Version:** M3 (In Progress) / 0.2.0  
+
+> ## ⚠️ Superseded in part —  (6 August 2026)
+>
+> This document describes the M3-era contract. The following sections are
+> **historical implementation,** and now return **404**:
+>
+> | Retired | Current replacement |
+> |---|---|
+> | `GET /api/alerts/top` | `GET /api/v1/subscriber/alerts/top` |
+> | `GET /api/alerts/{id}` | `GET /api/v1/subscriber/alerts/{alert_id}` |
+> | `GET /api/alerts/stats` | `GET /api/v1/subscriber/alerts/stats` |
+> | `GET /api/search/alerts` | `GET /api/v1/subscriber/search/alerts` |
+> | Server-rendered dashboard at `/dashboard`, `/login`, `/logout` | React Admin UI over the Internal-JWT Admin APIs |
+>
+> **`GET /api/alerts` is retained** and unchanged — it is the Landing Page feed.
+> Admin, Subscriber, Client, Billing, category-metadata, Source Health and
+> Intelligence Brief APIs are all retained. Shared Internal JWT authentication is
+> unchanged. Client APIs were **not** removed.
+>
+> For the current surface see `README.md` and the live OpenAPI at
+> `https://api.hiddenalerts.com/docs`.
+
+
+**Last updated:** 06 August 2026  
+**Version:** 0.2.0  
 **Base URL:** `http://localhost:8000` (local dev)  /  `https://hiddenalerts.com` (production)  
 **Interactive docs (Swagger UI):** `https://api.hiddenalerts.com/docs`  
 **API Prefix:** All JSON REST endpoints live under `/api/v1`
@@ -11,7 +34,7 @@
 
 ## Overview
 
-- **Admin surface** — Ken and internal admins. Full access to all alerts, review workflow, pipeline controls. Currently served by a server-rendered dashboard at `/dashboard`. Admins can also use the API directly.
+- **Admin surface** — Ken and internal admins. Full access to all alerts, review workflow, pipeline controls. Served by the React Admin UI over the Internal-JWT Admin APIs. (The server-rendered `/dashboard` was retired by 06 August 2026.)
 - **Subscriber surface** — End users (newsletter subscribers). Access only to curated, published alerts through the `/client` endpoints.
 - **Public feed** — The endpoint frontend app uses for public display of curated alerts. No authentication required. Returns curated alerts only.
 
@@ -22,9 +45,9 @@ Both admin and subscriber surfaces authenticate through the same backend. Token 
 ## Table of Contents
 0. [**Public Feed — Current Frontend MVP Endpoints**](#0-public-feed--current-frontend-mvp-endpoints)
    - [GET /api/alerts](#01-get-apialerts--published-alert-list)
-   - [GET /api/alerts/{id}](#02-get-apialertsid--published-alert-detail-new)
-   - [GET /api/alerts/top](#03-get-apialertstop--curated-top-alerts-new)
-   - [GET /api/alerts/stats](#04-get-apialertsstats--published-alert-stats-new)
+   - [GET /api/alerts/{id} *(retired)*](#02-get-apialertsid--published-alert-detail-new)
+   - [GET /api/alerts/top *(retired)*](#03-get-apialertstop--curated-top-alerts-new)
+   - [GET /api/alerts/stats *(retired)*](#04-get-apialertsstats--published-alert-stats-new)
 1. [Authentication Overview](#1-authentication-overview)
 2. [Auth Endpoints](#2-auth-endpoints)
 3. [Alerts — Admin](#3-alerts--admin)
@@ -48,9 +71,9 @@ Both admin and subscriber surfaces authenticate through the same backend. Token 
 > | Endpoint | Purpose |
 > |---|---|
 > | `GET /api/alerts` | Paginated list for the main feed |
-> | `GET /api/alerts/top` | Curated top-3 panel (hero) |
-> | `GET /api/alerts/{id}` | Enriched detail page |
-> | `GET /api/alerts/stats` | Counts + category breakdown |
+> | ~~`GET /api/alerts/top`~~ | *retired — `GET /api/v1/subscriber/alerts/top`* |
+> | ~~`GET /api/alerts/{id}`~~ | *retired — `GET /api/v1/subscriber/alerts/{alert_id}`* |
+> | ~~`GET /api/alerts/stats`~~ | *retired — `GET /api/v1/subscriber/alerts/stats`* |
 >
 > Internal `/api/v1/alerts*` endpoints remain admin-only and the
 > subscriber `/api/v1/client/alerts*` set is reserved for future authenticated
@@ -164,7 +187,9 @@ curl "http://localhost:8000/api/alerts?limit=10&offset=0"
 
 ---
 
-### 0.2 GET /api/alerts/{id} — Enriched Public Alert Detail
+### 0.2 GET /api/alerts/{id} *(retired)* — Enriched Public Alert Detail
+
+> **Retired by 06 August 2026 — returns 404.** Replaced by `GET /api/v1/subscriber/alerts/{alert_id}`.
 
 ```
 GET /api/alerts/{id}
@@ -318,7 +343,9 @@ curl http://localhost:8000/api/alerts/42
 
 ---
 
-### 0.3 GET /api/alerts/top — Curated Top Alerts *(NEW)*
+### 0.3 GET /api/alerts/top *(retired)* — Curated Top Alerts
+
+> **Retired — returns 404.** Replaced by `GET /api/v1/subscriber/alerts/top`.
 
 ```
 GET /api/alerts/top
@@ -395,12 +422,14 @@ the response — same field-leakage protection as `GET /api/alerts`.
 
 **Quick Test:**
 ```bash
-curl http://localhost:8000/api/alerts/top
+# retired by  — use GET /api/v1/subscriber/alerts/top (auth required)
 ```
 
 ---
 
-### 0.4 GET /api/alerts/stats — Published Alert Stats *(NEW)*
+### 0.4 GET /api/alerts/stats — Published Alert Stats *(retired)*
+
+> **Retired — returns 404.** Replaced by `GET /api/v1/subscriber/alerts/stats`.
 
 ```
 GET /api/alerts/stats
@@ -445,12 +474,14 @@ Returns aggregate counts for published alerts only. Use this to drive a summary 
 
 **Quick Test:**
 ```bash
-curl http://localhost:8000/api/alerts/stats
+# retired  — use GET /api/v1/subscriber/alerts/stats (auth required)
 ```
 
 ---
 
-### 0.5 GET /api/search/alerts — Search Published Alerts *(NEW)*
+### 0.5 GET /api/search/alerts — Search Published Alerts *(retired)*
+
+> **Retired  — returns 404.** Replaced by `GET /api/v1/subscriber/search/alerts`.
 
 ```
 GET /api/search/alerts?q=Dimitriy&min_score=0&limit=50&group_limit=20
@@ -665,22 +696,21 @@ review history · score-factor breakdowns · raw `entities_json` · `ai_model` �
 **Quick Tests (verified against production):**
 ```bash
 # Entity match — produces an entity group with matched_entity populated.
-curl -s "https://hiddenalerts.com/api/search/alerts?q=Dimitriy" | python3 -m json.tool
+# retired  — use GET /api/v1/subscriber/search/alerts (auth required)
 
 # Same alert, but the query phrase is not in the AI's parsed entities.
 # Lands in a keyword fallback group; matched_entity is null.
-curl -s -G --data-urlencode "q=South American Theft Groups" \
-     "https://hiddenalerts.com/api/search/alerts" | python3 -m json.tool
+# retired  — use GET /api/v1/subscriber/search/alerts (auth required)
 
 # Empty query is rejected.
-curl -s -o /dev/null -w "%{http_code}\n" "https://hiddenalerts.com/api/search/alerts?q="
+# retired  — use GET /api/v1/subscriber/search/alerts (auth required)
 # expect: 422
 
 # Higher-risk filter (only alerts with normalized score ≥ 70).
-curl -s "https://hiddenalerts.com/api/search/alerts?q=fraud&min_score=70" | python3 -m json.tool
+# retired  — use GET /api/v1/subscriber/search/alerts (auth required)
 
 # Unknown query → empty envelope.
-curl -s "https://hiddenalerts.com/api/search/alerts?q=zzunknownzz" | python3 -m json.tool
+# retired  — use GET /api/v1/subscriber/search/alerts (auth required)
 ```
 
 > **Encoding note:** spaces and special characters in `q` must be URL-encoded.
@@ -1374,10 +1404,10 @@ These are **not JSON API routes** — they return HTML pages rendered with Jinja
 | `GET` | `/login` | Admin login page (HTML form) |
 | `POST` | `/login` | Submit login form (admin only) |
 | `GET` | `/logout` | Clear cookie, redirect to `/login` |
-| `GET` | `/dashboard` | Alert index — HIGH/MEDIUM/LOW panels |
-| `GET` | `/dashboard/alerts/{id}` | Alert detail with review form |
-| `POST` | `/dashboard/alerts/{id}/review` | Submit review (form submit) |
-| `GET` | `/dashboard/monitoring` | Source health + run log table |
+| ~~`GET`~~ | ~~`/dashboard`~~ | *(historical implementation, retired by  — now 404)* |
+| ~~`GET`~~ | ~~`/dashboard/alerts/{id}`~~ | *(retired by )* |
+| ~~`POST`~~ | ~~`/dashboard/alerts/{id}/review`~~ | *(retired by  — use `POST /api/v1/alerts/{id}/review`)* |
+| ~~`GET`~~ | ~~`/dashboard/monitoring`~~ | *(retired by  — use `GET /api/v1/admin/sources/health`)* |
 
 > **For frontend development**, always use the `/api/v1/*` JSON endpoints, not these HTML routes.
 
@@ -1391,8 +1421,8 @@ These are **not JSON API routes** — they return HTML pages rendered with Jinja
 | `GET /api/v1/auth/me` | ✅ | ✅ | ❌ 401 |
 | `GET /api/alerts` | ✅ | ✅ | ✅ |
 | `GET /api/alerts/{id}` | ✅ | ✅ | ✅ |
-| `GET /api/alerts/top` | ✅ | ✅ | ✅ |
-| `GET /api/alerts/stats` | ✅ | ✅ | ✅ |
+| ~~`GET /api/alerts/top`~~ | — | — | *retired * |
+| ~~`GET /api/alerts/stats`~~ | — | — | *retired * |
 | `POST /api/v1/auth/change-password` | ✅ | ✅ | ❌ 401 |
 | `GET /api/v1/alerts` | ✅ | ✅ | ❌ 401 |
 | `GET /api/v1/alerts/{id}` | ✅ | ✅ | ❌ 401 |

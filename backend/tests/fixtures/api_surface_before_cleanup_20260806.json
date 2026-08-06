@@ -1,0 +1,191 @@
+{
+ "_comment": "Sanitized pre-cleanup OpenAPI surface, captured at commit 92b92b1 immediately before Slice 3B.2P. Tracked in git so the contract proof runs in a clean checkout \u2014 the reports/ directory is gitignored and must never be a prerequisite for a test. Contains only path names and HTTP methods: no server URLs, environment values, credentials, production data or generation timestamps.",
+ "captured_at_commit": "92b92b1",
+ "slice": "3B.2P",
+ "openapi_path_count": 59,
+ "openapi_operation_count": 64,
+ "paths": {
+  "/api/alerts": [
+   "GET"
+  ],
+  "/api/alerts/stats": [
+   "GET"
+  ],
+  "/api/alerts/top": [
+   "GET"
+  ],
+  "/api/alerts/{alert_id}": [
+   "GET"
+  ],
+  "/api/search/alerts": [
+   "GET"
+  ],
+  "/api/v1/admin/alerts/categories": [
+   "GET"
+  ],
+  "/api/v1/admin/intelligence-briefs": [
+   "GET",
+   "POST"
+  ],
+  "/api/v1/admin/intelligence-briefs/{brief_id}": [
+   "GET",
+   "PUT"
+  ],
+  "/api/v1/admin/intelligence-briefs/{brief_id}/archive": [
+   "POST"
+  ],
+  "/api/v1/admin/intelligence-briefs/{brief_id}/feature": [
+   "POST"
+  ],
+  "/api/v1/admin/intelligence-briefs/{brief_id}/featured-image": [
+   "DELETE",
+   "POST"
+  ],
+  "/api/v1/admin/intelligence-briefs/{brief_id}/publish": [
+   "POST"
+  ],
+  "/api/v1/admin/intelligence-briefs/{brief_id}/unfeature": [
+   "POST"
+  ],
+  "/api/v1/admin/sources/health": [
+   "GET"
+  ],
+  "/api/v1/admin/sources/{source_id}/health": [
+   "GET"
+  ],
+  "/api/v1/admin/system/health-summary": [
+   "GET"
+  ],
+  "/api/v1/alerts": [
+   "GET"
+  ],
+  "/api/v1/alerts/process": [
+   "POST"
+  ],
+  "/api/v1/alerts/{alert_id}": [
+   "GET"
+  ],
+  "/api/v1/alerts/{alert_id}/review": [
+   "POST"
+  ],
+  "/api/v1/auth/change-password": [
+   "POST"
+  ],
+  "/api/v1/auth/login": [
+   "POST"
+  ],
+  "/api/v1/auth/me": [
+   "GET"
+  ],
+  "/api/v1/billing/checkout": [
+   "POST"
+  ],
+  "/api/v1/billing/portal": [
+   "POST"
+  ],
+  "/api/v1/billing/status": [
+   "GET"
+  ],
+  "/api/v1/billing/sync": [
+   "POST"
+  ],
+  "/api/v1/client/alerts": [
+   "GET"
+  ],
+  "/api/v1/client/alerts/{alert_id}": [
+   "GET"
+  ],
+  "/api/v1/events": [
+   "GET"
+  ],
+  "/api/v1/events/{event_id}": [
+   "GET"
+  ],
+  "/api/v1/health": [
+   "GET"
+  ],
+  "/api/v1/raw-items": [
+   "GET"
+  ],
+  "/api/v1/raw-items/{item_id}": [
+   "GET"
+  ],
+  "/api/v1/sources": [
+   "GET"
+  ],
+  "/api/v1/sources/{source_id}": [
+   "GET",
+   "PATCH"
+  ],
+  "/api/v1/sources/{source_id}/runs": [
+   "GET"
+  ],
+  "/api/v1/sources/{source_id}/trigger": [
+   "POST"
+  ],
+  "/api/v1/stats": [
+   "GET"
+  ],
+  "/api/v1/stripe/webhook": [
+   "POST"
+  ],
+  "/api/v1/subscriber/access": [
+   "GET"
+  ],
+  "/api/v1/subscriber/alerts": [
+   "GET"
+  ],
+  "/api/v1/subscriber/alerts/categories": [
+   "GET"
+  ],
+  "/api/v1/subscriber/alerts/stats": [
+   "GET"
+  ],
+  "/api/v1/subscriber/alerts/top": [
+   "GET"
+  ],
+  "/api/v1/subscriber/alerts/{alert_id}": [
+   "GET"
+  ],
+  "/api/v1/subscriber/intelligence-briefs": [
+   "GET"
+  ],
+  "/api/v1/subscriber/intelligence-briefs/featured": [
+   "GET"
+  ],
+  "/api/v1/subscriber/intelligence-briefs/{slug}": [
+   "GET"
+  ],
+  "/api/v1/subscriber/me": [
+   "GET"
+  ],
+  "/api/v1/subscriber/search/alerts": [
+   "GET"
+  ],
+  "/dashboard": [
+   "GET"
+  ],
+  "/dashboard/alerts/{alert_id}": [
+   "GET"
+  ],
+  "/dashboard/alerts/{alert_id}/review": [
+   "POST"
+  ],
+  "/dashboard/events": [
+   "GET"
+  ],
+  "/dashboard/events/{event_id}": [
+   "GET"
+  ],
+  "/dashboard/monitoring": [
+   "GET"
+  ],
+  "/login": [
+   "GET",
+   "POST"
+  ],
+  "/logout": [
+   "GET"
+  ]
+ }
+}

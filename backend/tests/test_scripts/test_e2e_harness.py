@@ -1153,6 +1153,15 @@ def test_stop_condition_maps_to_its_own_exit_code():
 
 from scripts.e2e import production_smoke  # noqa: E402
 
+#: A real alert row, so the removed public-detail check can use a known id
+#: rather than an invented one that would 404 regardless.
+KNOWN_ALERT_ID = 4242
+KNOWN_ALERT = {
+    "id": KNOWN_ALERT_ID, "title": "Known alert", "risk_level": "high",
+    "signal_score": 80, "published_at": "2026-08-01T00:00:00Z",
+    "source_published_at": None,
+}
+
 #: A distinct Supabase token. Reusing the admin JWT would make the
 #: "Supabase token must not authorize an admin route" check vacuous.
 FAKE_SUPABASE_JWT = (
@@ -1204,10 +1213,16 @@ def _smoke_handler(missing: tuple[str, ...] = ()):
         if path == production_smoke.HEALTH_PATH:
             return httpx.Response(200, json={"status": "ok"})
         if path == production_smoke.PUBLIC_ALERTS_PATH:
-            return httpx.Response(200, json={"alerts": []})
+            return httpx.Response(200, json={"alerts": [KNOWN_ALERT]})
+        if path == f"/api/v1/subscriber/alerts/{KNOWN_ALERT_ID}":
+            if not _subscriber_authed(request):
+                return unauthenticated
+            return httpx.Response(200, json=KNOWN_ALERT)
         # Slice 3B.2P removed these; the mock models the cleaned-up release.
         if path in (*production_smoke.REMOVED_JINJA_PATHS,
                     *production_smoke.REMOVED_PUBLIC_PATHS):
+            return httpx.Response(404, json={"detail": "Not Found"})
+        if path == f"/api/alerts/{KNOWN_ALERT_ID}":
             return httpx.Response(404, json={"detail": "Not Found"})
         if path == production_smoke.ADMIN_SOURCES_PATH:
             if not _admin_authed(request):
@@ -1233,11 +1248,11 @@ def _smoke_handler(missing: tuple[str, ...] = ()):
                     production_smoke.SUBSCRIBER_CATEGORIES_PATH):
             return httpx.Response(200, json=_categories_payload())
         if path == production_smoke.ADMIN_ALERTS_PATH:
-            return httpx.Response(200, json=[])
+            return httpx.Response(200, json=[KNOWN_ALERT])
         if path == production_smoke.SUBSCRIBER_ALERTS_PATH:
             if not _subscriber_authed(request):
                 return unauthenticated
-            return httpx.Response(200, json={"alerts": []})
+            return httpx.Response(200, json={"alerts": [KNOWN_ALERT]})
         if path == production_smoke.SUBSCRIBER_STATS_PATH:
             return httpx.Response(200, json={"total": 0})
         if path == production_smoke.SUBSCRIBER_SEARCH_PATH:
@@ -1553,3 +1568,97 @@ async def test_retained_landing_feed_is_asserted_in_both_modes():
         results = await _run_smoke(_smoke_handler(), post_deploy=post_deploy)
         hit = [r for r in results.results if r.name == "retained: /api/alerts still 200"]
         assert hit and hit[0].passed, f"post_deploy={post_deploy}"
+
+
+# ---------------------------------------------------------------------------
+# Slice 3B.2P refinement — all four Public removals, with a known-existing id
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_post_deploy_covers_all_four_public_removals():
+    """Every removed Public route is checked, including the detail route."""
+    results = await _run_smoke(_smoke_handler(), post_deploy=True)
+    checked = {r.endpoint for r in results.results if r.name.startswith("removed: ")}
+    assert {"/api/alerts/top", "/api/alerts/stats", "/api/search/alerts"} <= checked
+    assert f"/api/alerts/{KNOWN_ALERT_ID}" in checked, (
+        "the parameterised public detail route must be verified too"
+    )
+    assert not [r for r in results.failed if r.name.startswith("removed: ")]
+
+
+@pytest.mark.asyncio
+async def test_detail_check_uses_a_known_existing_id_from_a_retained_endpoint():
+    results = await _run_smoke(_smoke_handler(), post_deploy=True)
+    assert results.context["known_alert_id"] == KNOWN_ALERT_ID
+    # Subscriber alerts is the preferred source.
+    assert results.context["known_alert_id_source"] == "subscriber alerts"
+    assert any(r.name == "known alert id discovered" and r.passed
+               for r in results.results)
+
+
+@pytest.mark.asyncio
+async def test_old_public_detail_returning_200_fails_post_deploy():
+    """A release that still serves the detail route must not pass."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == f"/api/alerts/{KNOWN_ALERT_ID}":
+            return httpx.Response(200, json=KNOWN_ALERT)   # not yet removed
+        return _smoke_handler()(request)
+
+    results = await _run_smoke(handler, post_deploy=True)
+    failed = {r.name for r in results.failed}
+    assert f"removed: /api/alerts/{KNOWN_ALERT_ID}" in failed
+
+
+@pytest.mark.asyncio
+async def test_cleaned_public_detail_returning_404_passes_post_deploy():
+    results = await _run_smoke(_smoke_handler(), post_deploy=True)
+    hit = [r for r in results.results
+           if r.name == f"removed: /api/alerts/{KNOWN_ALERT_ID}"]
+    assert hit and hit[0].passed and hit[0].status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_unavailable_id_cannot_produce_a_false_pass():
+    """With no id obtainable, post-deploy must fail rather than skip silently."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Every listing is empty, so no id can be discovered.
+        if request.url.path in (production_smoke.SUBSCRIBER_ALERTS_PATH,
+                                production_smoke.PUBLIC_ALERTS_PATH):
+            return httpx.Response(200, json={"alerts": []})
+        if request.url.path == production_smoke.ADMIN_ALERTS_PATH:
+            return httpx.Response(200, json=[])
+        return _smoke_handler()(request)
+
+    results = await _run_smoke(handler, post_deploy=True)
+    failed = {r.name for r in results.failed}
+    assert "removed: /api/alerts/{known_id}" in failed
+    assert int(results.exit_code()) == int(Exit.ASSERTION_FAILED)
+
+    # Pre-deploy the same situation is a skip, not a failure.
+    pre = await _run_smoke(handler, post_deploy=False)
+    assert "removed: /api/alerts/{known_id}" not in {r.name for r in pre.failed}
+
+
+@pytest.mark.asyncio
+async def test_retained_subscriber_detail_is_verified_alongside_the_removal():
+    results = await _run_smoke(_smoke_handler(), post_deploy=True)
+    hit = [r for r in results.results if r.name == "retained: subscriber alert detail"]
+    assert hit and hit[0].passed and hit[0].status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_pre_deploy_records_the_old_detail_route_without_failing():
+    """Before deployment the old release still serves it — not a failure."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == f"/api/alerts/{KNOWN_ALERT_ID}":
+            return httpx.Response(200, json=KNOWN_ALERT)
+        return _smoke_handler()(request)
+
+    results = await _run_smoke(handler, post_deploy=False)
+    assert not [r for r in results.failed if r.name.startswith("removed: ")]
+    assert any(r.skipped and r.name == f"removed: /api/alerts/{KNOWN_ALERT_ID}"
+               for r in results.results)

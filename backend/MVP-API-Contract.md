@@ -1,5 +1,14 @@
 # HiddenAlerts — MVP API Contract
 
+> ## 📁 Historical document
+>
+> This is the **V1** contract, superseded by `MVP-API-Contract-V2.md` and
+> by the live OpenAPI. The server-rendered dashboard it describes
+> (`/dashboard`, `/login`, `/logout`) is **historical implementation,
+> retired** and now returns 404. Retained as historical
+> evidence only — it is not a current supported contract.
+
+
 **Version:** 1.0 (Milestone 1 & 2 — April 11, 2026)  
 **Base URL (production):** `https://api.hiddenalerts.com`
 **Base URL (dashboard):** `https://hiddenalerts.com/dashboard`

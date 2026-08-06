@@ -1,4 +1,4 @@
-"""Pydantic schemas for the public search API — GET /api/search/alerts.
+"""Pydantic schemas for alert search — GET /api/v1/subscriber/search/alerts.
 
 Schemas are intentionally separate from app/schemas/alert.py so the search
 contract can evolve independently of the public list/detail contracts.
@@ -60,7 +60,7 @@ class SearchGroup(BaseModel):
 
 
 class SearchResponse(BaseModel):
-    """Top-level response shape for GET /api/search/alerts.
+    """Top-level response shape for GET /api/v1/subscriber/search/alerts.
 
     `total_alerts` counts unique alerts across the response. When an alert is
     tagged with multiple matching entities and therefore appears in multiple

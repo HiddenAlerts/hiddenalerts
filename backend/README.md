@@ -578,22 +578,58 @@ Authenticated endpoints accept either a valid `access_token` cookie **or** an `A
 | `GET` | `/api/v1/raw-items` | No | Paginated items (filter: source_id, since, is_duplicate) |
 | `GET` | `/api/v1/raw-items/{id}` | No | Full detail incl. raw_text + raw_html |
 
-### Public Feed — No Auth Required (M3 Slice 4 + Frontend Completion)
+### Public Feed — No Auth Required
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/alerts` | No | Paginated published alert feed |
-| `GET` | `/api/alerts/top` | No | Curated top 3 published alerts (`signal_score >= 60` on the 0–100 API scale; equivalent to internal `signal_score_total >= 15`). Ranked by score → signal-strength → credibility → recency, duplicate primary entities suppressed. Returns `{"alerts": []}` when none qualify. |
-| `GET` | `/api/alerts/{id}` | No | Enriched published alert detail (`confidence`, `why_it_matters`, `key_intelligence`, `risk_assessment`, `sources`, `published_date`, `subcategory`, `affected_group`, `timeline`, `related_signals` + backward-compat aliases). Optional sections omitted when empty. 404 if unpublished. |
-| `GET` | `/api/alerts/stats` | No | Published alert aggregate counts + category breakdown |
-| `GET` | `/api/search/alerts` | No | Free-text search across published alerts. Required `q`; optional `min_score` (0–100, default 0), `limit` (default 50, max 100), `group_limit` (default 20, max 50). Matches title, summary, source name, and parsed entities (case-insensitive ILIKE). Returns entity-grouped results plus a unique top-level `alerts` list; non-entity matches collect into a single `keyword` fallback group. See `MVP-API-Contract-V2.md` §0.5. |
+| `GET` | `/api/alerts` | No | Paginated published alert feed — the Landing Page source |
 
-> Detail-endpoint conventions: `risk_level` and `confidence` are returned in
+> **Retired by 06 August 2026.** `GET /api/alerts/top`, `GET /api/alerts/{id}`,
+> `GET /api/alerts/stats` and `GET /api/search/alerts` were **removed** and now
+> return 404. They had no frontend caller. Their protected replacements are
+> below.
+
+### Subscriber Feed — Supabase token + active subscription
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/subscriber/alerts` | Supabase + subscription | Paginated published feed with the V1 `risk_band`; filters `category`, `risk_level`, `source` |
+| `GET` | `/api/v1/subscriber/alerts/{alert_id}` | Supabase + subscription | Enriched alert detail (replaces the public detail route) |
+| `GET` | `/api/v1/subscriber/alerts/top` | Supabase + subscription | Top Alerts This Week — Critical/High, rolling 7 days, max 3 |
+| `GET` | `/api/v1/subscriber/alerts/stats` | Supabase + subscription | Aggregate counts with V1 bands (`critical_count`) |
+| `GET` | `/api/v1/subscriber/search/alerts` | Supabase + subscription | Free-text search (replaces the public search route) |
+| `GET` | `/api/v1/subscriber/alerts/categories` | Supabase + subscription | Canonical categories with published-scoped counts |
+| `GET` | `/api/v1/subscriber/me` · `/access` | Supabase | Profile and subscription state |
+| `GET` | `/api/v1/subscriber/intelligence-briefs` | Supabase + subscription | Brief library |
+| `GET` | `/api/v1/subscriber/intelligence-briefs/featured` | Supabase + subscription | The single featured Brief (404 when none) |
+| `GET` | `/api/v1/subscriber/intelligence-briefs/{slug}` | Supabase + subscription | Brief detail |
+
+### Admin metadata and monitoring — Internal JWT (admin)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/admin/alerts/categories` | Canonical categories, counts across all processed alerts |
+| `GET` | `/api/v1/admin/sources/health` | Per-source health for every configured source |
+| `GET` | `/api/v1/admin/sources/{source_id}/health` | One source's health plus recent runs |
+| `GET` | `/api/v1/admin/system/health-summary` | Instance-wide collection health, scheduler state, Alembic revision |
+| `GET`/`POST` | `/api/v1/admin/intelligence-briefs*` | Brief CMS — CRUD, publish, archive, feature, unfeature, featured-image |
+
+### Client APIs — Internal JWT (`require_subscriber_or_admin`), retained
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/client/alerts` | Client alert list |
+| `GET` | `/api/v1/client/alerts/{alert_id}` | Client alert detail |
+
+
+> Detail-endpoint conventions (now `GET /api/v1/subscriber/alerts/{alert_id}`):
+> `risk_level` and `confidence` are returned in
 > Title Case (`"High"|"Medium"|"Low"`); `published_date` resolves in priority
 > order `source_published_at` → `published_at` → `processed_at`. See
 > `MVP-API-Contract-V2.md` §0.2 for the full schema.
 
-> Search-endpoint conventions: `q` is trimmed and required (empty/whitespace
+> Search-endpoint conventions (now `GET /api/v1/subscriber/search/alerts`):
+> `q` is trimmed and required (empty/whitespace
 > → 422). `limit > 100` and `group_limit > 50` are clamped (200 OK), values
 > `< 1` are rejected with 422. `min_score` is on the same 0–100 scale used
 > elsewhere; default 0 returns all matching published alerts (low + medium +
@@ -672,11 +708,11 @@ pytest tests/ -v
 | `test_alert_pipeline.py` | 7 | Tier1 auto-publish guard (allowed category + score + credibility + is_relevant); Other category never auto-publishes; irrelevant alert never auto-publishes; manual admin can publish Other; M3 final tier1 — Medium score auto-publishes from credible source, Medium score from low-credibility source does NOT auto-publish, Low score never auto-publishes |
 | `test_event_grouper.py` | 6 | Event creation, entity overlap matching, 7-day window, cross-source recalculation |
 | `test_health.py` | 5 | API health, sources, raw-items, stats smoke tests |
-| `test_auth.py` | 24 | Password/JWT utilities; JSON login (admin + subscriber); Bearer + cookie auth; change-password; role enforcement; inactive user; backwards compat |
+| `test_auth.py` | 29 | Password/JWT utilities; JSON login (admin + subscriber); Bearer + cookie auth; change-password; role enforcement; inactive-account handling. Since 06 August 2026: asserts the removed Jinja `/login`, `/logout` and `/dashboard*` routes return 404 while `POST /api/v1/auth/login` still authenticates and still rejects bad credentials. |
 | `test_alerts_api.py` | 21 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation; publication state; approval publish; client feed access control |
-| `test_public_alerts.py` | 87 | Public list (no auth, published-only, field mapping, ordering, filters); enriched detail (Ken's frontend schema — confidence, why_it_matters, key_intelligence, risk_assessment with strong-factor enrichment, sources, timeline, related_signals; safe-fields-only); public stats (counts, breakdown, empty state); top alerts (no auth, published-only, max 3, score ≥15 threshold, score-then-strength-then-credibility-then-recency ranking, duplicate-entity suppression, fallback key for entity-less alerts, empty when none qualify, no internal-field leakage); agency stoplist (FBI/DOJ/SEC/etc. excluded from primary-entity dedup and entity-overlap matching); derived risk_level from score on every public endpoint; related_signals entity-overlap + 2–4 quantity rule; **M3 final score normalization to 0–100** — `signal_score` / `score` exposed as 0–100, Ken's worked examples (17→68, 19→76, 21→84), band-boundary checks at 9/10 and 17/18 |
+| `test_public_alerts.py` | 71 | Public Landing feed `GET /api/alerts` (no auth, published-only, field mapping, ordering, filters, pagination). Since 06 August 2026 the shared-serializer coverage (`_to_public_read`, `_to_public_detail`, `published_stats_impl`, enrichment) runs through the retained Subscriber endpoints, plus regression tests asserting the four removed public routes return 404 — the detail check uses a known-existing alert id. |
 | `test_signal_scorer.py` | 42 | All 5 scoring factors; M3 final 0–100-aligned bands (≤9 low, 10–17 medium, ≥18 high); boundary tests including the new band-shift cases (16/17 now Medium, 18 is the new High floor); recalibrated victim/financial buckets; realistic alert scenarios |
-| `test_search_api.py` | 39 | GET /api/search/alerts — auth-free 200/422 envelope, matching across title/summary/source/parsed entities (case-insensitive, partial, multi-word literal phrase), unpublished excluded, entity grouping with multi-entity dedup, mixed-mode entity + keyword fallback, group ordering (entity-first), `alertCount`/`sourceCount` correctness, source-published-at earliest/latest, `group_limit` cap; `signal_score` DESC + recency-tiebreaker ranking; `min_score` 0–100 boundary checks (60 → internal 15, 70 → internal 18); `limit`/`group_limit` clamping above max + 422 below 1; no-leak frontend safety; regression on /api/alerts list/top/stats/detail |
+| `test_search_api.py` | 37 | Alert search via `GET /api/v1/subscriber/search/alerts` — matching across title/summary/source/parsed entities (case-insensitive, partial, multi-word literal phrase), unpublished excluded, entity grouping with multi-entity dedup, mixed-mode entity + keyword fallback, group ordering, `alertCount`/`sourceCount`, `group_limit` cap, `signal_score` DESC + recency tiebreaker, `min_score` boundaries, clamping and 422s. The public `/api/search/alerts` route was removed on 06 August 2026; these assertions were repointed to the subscriber route and one asserts the old path now 404s. |
 | **Total** | **265** | |
 
 ---
@@ -770,12 +806,17 @@ Alert pipeline complete: processed=X, no_keywords=Y, failed=0
 After running the script, confirm alerts appear:
 
 ```bash
-# Via API (requires JWT token — log in at /login first, copy cookie)
-curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit=10" \
-  -H "Cookie: access_token=YOUR_JWT_TOKEN"
+# Obtain an Internal JWT, then call the Admin API with a Bearer token.
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"YOUR_ADMIN_EMAIL","password":"YOUR_ADMIN_PASSWORD"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
-# Dashboard: http://localhost:8000/dashboard
-# HIGH/MEDIUM/LOW panels — click any alert to see score breakdown + AI summary
+curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit=10" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Alert review and source monitoring are served by the React Admin UI against
+# these APIs. The legacy Jinja dashboard was removed on 06 August 2026.
 ```
 
 ---
@@ -789,8 +830,8 @@ curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit
 | **M3 — Slice 1** | Role-aware auth foundation (admin/subscriber roles, Bearer token support, JSON auth endpoints) | ✅ Complete |
 | **M3 — Slice 2** | Alert publication workflow — Tier 1 auto-publish, Tier 2 admin review, subscriber-safe client feed | ✅ Complete |
 | **M3 — Slice 3** | Signal score recalibration — stricter HIGH threshold, recalibrated victim/financial buckets, re-scoring script | ✅ Complete |
-| **M3 — Slice 4** | Public read-only alert detail + stats — GET /api/alerts/{id}, GET /api/alerts/stats, category breakdown | ✅ Complete |
-| **M3 — Top Alerts + Inclusion Criteria** | GET /api/alerts/top with score≥15 / strength / credibility / recency ranking + duplicate-entity suppression; AI prompt extended with financial-risk-intelligence scope (OFAC, sanctions, governance, liquidity, network exposure); cybercrime/organized-crime conditional relevance; defensive `is_relevant` guard on auto-publish; agency stoplist excludes FBI/DOJ/SEC/etc. from entity dedup so unrelated alerts no longer collapse together | ✅ Complete |
+| **M3 — Slice 4** *(historical implementation, retired by 06 August 2026)* | Public read-only alert detail + stats — GET /api/alerts/{id}, GET /api/alerts/stats, category breakdown | ✅ Complete |
+| **M3 — Top Alerts + Inclusion Criteria** *(historical implementation, retired by 06 August 2026)* | GET /api/alerts/top with score≥15 / strength / credibility / recency ranking + duplicate-entity suppression; AI prompt extended with financial-risk-intelligence scope (OFAC, sanctions, governance, liquidity, network exposure); cybercrime/organized-crime conditional relevance; defensive `is_relevant` guard on auto-publish; agency stoplist excludes FBI/DOJ/SEC/etc. from entity dedup so unrelated alerts no longer collapse together | ✅ Complete |
 | **M3 — Public-feed cleanup** | Off-topic legacy alerts (CSAM / terrorism / weapons / drug-trafficking) reviewed and unpublished manually; `audit_offtopic_alerts.py` reports the live feed as clean; new pipeline guards prevent these from re-publishing | ✅ Complete |
 | **M3 — QA + VPS deployment handoff** | Backend deployed on VPS, smoke tests green, public endpoints verified live, frontend handoff docs updated | ✅ Complete |
 | **M3 — Risk score normalization (0–100)** | API responses now expose `signal_score` / `signal_score_total` / `score` on a 0–100 scale (normalized server-side from the internal 5–25 sum). No frontend change required. `risk_level` derived from the 0–100 value with Ken-approved bands (≥70 high, 40–69 medium, 1–39 low). Tier 1 auto-publish gate moved from ≥16 to ≥10 so Medium-and-above auto-publishes. Admin and client mappers re-derive `risk_level` so legacy stored values stay consistent with the displayed value. Admin Jinja templates updated to show 0–100 too. | ✅ Complete |
@@ -834,10 +875,20 @@ docker compose logs --tail=100 app
 # 4. Run the test suite inside the container
 docker exec hiddenalerts_app pytest tests/ -q
 
-# 5. Smoke-test the public endpoints from the host
-curl -s https://hiddenalerts.com/api/alerts        | python3 -m json.tool | head -40
-curl -s https://hiddenalerts.com/api/alerts/top    | python3 -m json.tool
-curl -s https://hiddenalerts.com/api/alerts/stats  | python3 -m json.tool
+# 5. Smoke-test the retained endpoints from the host
+#    Public Landing feed — no authentication.
+curl -s https://api.hiddenalerts.com/api/alerts | python3 -m json.tool | head -40
+
+#    Infrastructure health — no authentication.
+curl -s https://api.hiddenalerts.com/api/v1/health | python3 -m json.tool
+
+#    Admin APIs need an Internal JWT (Bearer); Subscriber APIs need a Supabase
+#    access token *and* an active subscription. The full authenticated smoke is
+#    scripted — see scripts/e2e/README.md:
+#      python -m scripts.e2e.production_smoke --env-file /secure/path/e2e.env
+
+#    Removed on 06 August 2026 — these must now return 404:
+#      /api/alerts/top  /api/alerts/stats  /api/alerts/{id}  /api/search/alerts
 ```
 
 ### Code-only changes vs. dependency / Dockerfile changes
