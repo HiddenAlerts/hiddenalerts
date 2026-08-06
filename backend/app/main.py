@@ -61,12 +61,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static files (dashboard CSS, JS)
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
-
-# User-uploaded media (admin-uploaded featured images). Kept separate from the
-# app's own static assets. The directory is created if missing so the mount
-# succeeds on a fresh deployment.
+# User-uploaded media (admin-uploaded Intelligence Brief featured images),
+# served at /uploads/intelligence-briefs/<file>. This is the only static mount:
+# the app serves no static assets of its own since the Jinja dashboard was
+# removed. The directory is created if missing so the mount succeeds on a fresh
+# deployment.
 os.makedirs(settings.upload_dir, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
@@ -79,9 +78,7 @@ from app.api.alerts import router as alerts_router  # noqa: E402
 from app.api.alerts_admin import router as alerts_admin_router  # noqa: E402
 from app.api.auth import router as auth_router  # noqa: E402
 from app.api.client_alerts import router as client_alerts_router  # noqa: E402
-from app.api.dashboard import router as dashboard_router  # noqa: E402
 from app.api.public_alerts import router as public_alerts_router  # noqa: E402
-from app.api.search import router as search_router  # noqa: E402
 from app.api.subscriber import router as subscriber_router  # noqa: E402
 from app.api.billing import router as billing_router  # noqa: E402
 from app.api.stripe_webhooks import router as stripe_webhooks_router  # noqa: E402
@@ -101,6 +98,4 @@ app.include_router(billing_router, prefix="/api/v1")  # Stripe checkout / portal
 app.include_router(stripe_webhooks_router, prefix="/api/v1")  # Stripe webhook (no auth; signature-verified)
 app.include_router(intelligence_briefs_admin_router, prefix="/api/v1")  # Admin CMS
 app.include_router(intelligence_briefs_subscriber_router, prefix="/api/v1")  # Paid subscriber feed
-app.include_router(dashboard_router)  # No prefix — /login, /dashboard, /logout routes
 app.include_router(public_alerts_router)  # No prefix — /api/alerts public feed
-app.include_router(search_router)  # No prefix — /api/search/alerts public search

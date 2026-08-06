@@ -252,7 +252,15 @@ class TestSubscriberAlertsContent:
         sub_alerts = sub.json()["alerts"]
         assert len(sub_alerts) == len(pub_alerts)
         for s, p in zip(sub_alerts, pub_alerts):
-            assert s["risk_band"] in ("critical", "high", "medium", "below_60")
+            # `risk_band` is derived from `signal_score`, which is legitimately
+            # None for an alert that was never scored. The session-scoped test
+            # database accumulates such rows from other modules, so the band is
+            # only asserted where a score exists — the mapping itself is what
+            # this guards, not the seeded corpus.
+            if s["signal_score"] is None:
+                assert s["risk_band"] is None
+            else:
+                assert s["risk_band"] in ("critical", "high", "medium", "below_60")
             assert {k: v for k, v in s.items() if k != "risk_band"} == p
 
     async def test_signal_score_is_0_100_and_risk_derived(
@@ -284,13 +292,18 @@ class TestSubscriberTopAlerts:
     async def test_payload_shape_matches_public(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Same keys and types, so Hasnain's integration is unaffected."""
+        """Same keys and types as the retained public feed item shape.
+
+        The public Top Alerts route was removed in Slice 3B.2P, so the reference
+        shape now comes from the retained Landing feed — both are rendered by the
+        shared `_to_public_read` mapper, which is what this guards.
+        """
         await _seed_published_alert(db_session, signal_score=20)
         sub_id = f"top-{uuid.uuid4()}"
         await _seed_profile_with_subscription(
             db_session, sub_id=sub_id, status="active"
         )
-        public = await client.get("/api/alerts/top")
+        public = await client.get("/api/alerts?limit=500")
         with _patch_validator(_claims(sub=sub_id)):
             sub = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
 
@@ -299,6 +312,7 @@ class TestSubscriberTopAlerts:
 
         sub_alerts, public_alerts = sub.json()["alerts"], public.json()["alerts"]
         assert sub_alerts, "a freshly published Critical alert qualifies this week"
+        assert public_alerts, "the landing feed provides the reference shape"
         assert set(sub_alerts[0]) == set(public_alerts[0])
         for key, value in sub_alerts[0].items():
             assert type(value) is type(public_alerts[0][key]) or value is None, key
@@ -306,7 +320,13 @@ class TestSubscriberTopAlerts:
     async def test_diverges_from_public_on_an_old_alert(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """The whole point of the slice: public keeps it, subscriber does not."""
+        """A high-scoring alert outside the seven-day window is excluded.
+
+        This used to be phrased as "public keeps it, subscriber does not". The
+        public Top Alerts route is gone, so the assertion is now made directly
+        against the weekly contract: the alert is published and visible on the
+        all-time landing feed, yet absent from this week's curated set.
+        """
         old = await _seed_published_alert(
             db_session, signal_score=25,
             published_at=datetime(2026, 1, 5, tzinfo=timezone.utc),
@@ -315,12 +335,16 @@ class TestSubscriberTopAlerts:
         await _seed_profile_with_subscription(
             db_session, sub_id=sub_id, status="active"
         )
-        public = await client.get("/api/alerts/top")
+        landing = await client.get("/api/alerts?limit=500")
         with _patch_validator(_claims(sub=sub_id)):
             sub = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
 
-        assert old.id in [a["id"] for a in public.json()["alerts"]]
-        assert old.id not in [a["id"] for a in sub.json()["alerts"]]
+        assert old.id in [a["id"] for a in landing.json()["alerts"]], (
+            "the alert is published and still served by the retained public feed"
+        )
+        assert old.id not in [a["id"] for a in sub.json()["alerts"]], (
+            "but it falls outside the rolling seven-day window"
+        )
 
     async def test_out_of_window_alert_is_never_a_fallback(
         self, client: AsyncClient, db_session: AsyncSession
@@ -407,22 +431,37 @@ class TestSubscriberAlertDetail:
         await _seed_profile_with_subscription(
             db_session, sub_id=sub_id, status="active"
         )
-        public = await client.get(f"/api/alerts/{alert.id}")
         with _patch_validator(_claims(sub=sub_id)):
             sub = await client.get(
                 f"/api/v1/subscriber/alerts/{alert.id}", headers=_AUTH
             )
-        assert public.status_code == 200 and sub.status_code == 200
+        assert sub.status_code == 200
         sub_body = sub.json()
-        # OPEN-6: subscriber detail = public detail PLUS `risk_band` + the curated
-        # `risk_explanation`. Every other field stays identical to public.
+        # OPEN-6: subscriber detail = the shared public detail mapping PLUS
+        # `risk_band` + the curated `risk_explanation`. The public detail route
+        # was removed in Slice 3B.2P, so the reference now comes from the shared
+        # `_to_public_detail` helper the subscriber route still uses.
         assert sub_body["risk_band"] in ("critical", "high", "medium", "below_60")
         assert "risk_explanation" in sub_body
         rest = {
             k: v for k, v in sub_body.items()
             if k not in ("risk_band", "risk_explanation")
         }
-        assert rest == public.json()
+
+        from app.api.public_alerts import _detail_stmt, _to_public_detail
+        from app.models.processed_alert import ProcessedAlert
+
+        row = (
+            await db_session.execute(_detail_stmt().where(ProcessedAlert.id == alert.id))
+        ).scalars().first()
+        shared = await _to_public_detail(db_session, row)
+        shared_json = shared.model_dump(mode="json")
+
+        # The route's response_model filters a few optional fields out of the
+        # payload, so compare on the keys the API actually returns: every one of
+        # them must come from the shared mapper unchanged.
+        assert set(rest) <= set(shared_json)
+        assert rest == {k: shared_json[k] for k in rest}
 
     async def test_unpublished_returns_404(
         self, client: AsyncClient, db_session: AsyncSession
@@ -469,15 +508,23 @@ class TestSubscriberStats:
         await _seed_profile_with_subscription(
             db_session, sub_id=sub_id, status="active"
         )
-        public = await client.get("/api/alerts/stats")
         with _patch_validator(_claims(sub=sub_id)):
             sub = await client.get("/api/v1/subscriber/alerts/stats", headers=_AUTH)
-        assert public.status_code == 200 and sub.status_code == 200
-        pub_j, sub_j = public.json(), sub.json()
-        # Subscriber stats add critical_count (V1 bands); total + categories are shared.
+        assert sub.status_code == 200
+        sub_j = sub.json()
+
+        # The public stats route was removed in Slice 3B.2P, but the shared
+        # `published_stats_impl` still supplies total_alerts and
+        # category_breakdown here; the subscriber layer adds V1 critical_count.
+        from app.api.public_alerts import published_stats_impl
+
+        shared = await published_stats_impl(db_session)
         assert "critical_count" in sub_j
-        assert sub_j["total_alerts"] == pub_j["total_alerts"]
-        assert sub_j["category_breakdown"] == pub_j["category_breakdown"]
+        assert sub_j["total_alerts"] == shared.total_alerts
+        assert sub_j["category_breakdown"] == [
+            c.model_dump() if hasattr(c, "model_dump") else c
+            for c in shared.category_breakdown
+        ]
 
     async def test_requires_active_subscription(self, client: AsyncClient):
         with _patch_validator(_claims(sub=f"stats-nosub-{uuid.uuid4()}")):
@@ -579,13 +626,18 @@ class TestSubscriberSearch:
         await _seed_profile_with_subscription(
             db_session, sub_id=sub_id, status="active"
         )
-        public = await client.get(f"/api/search/alerts?q={token}")
         with _patch_validator(_claims(sub=sub_id)):
             sub = await client.get(
                 f"/api/v1/subscriber/search/alerts?q={token}", headers=_AUTH
             )
-        assert public.status_code == 200 and sub.status_code == 200
-        assert sub.json() == public.json()
+        assert sub.status_code == 200
+
+        # The public search route was removed; the subscriber route is now the
+        # only caller of the shared `search_alerts_impl`, so compare against it.
+        from app.api.search import search_alerts_impl
+
+        shared = await search_alerts_impl(db_session, token, 0, 50, 20)
+        assert sub.json() == shared.model_dump(mode="json", by_alias=True)
         assert sub.json()["total_alerts"] >= 1
 
     async def test_empty_q_returns_422(

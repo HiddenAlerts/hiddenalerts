@@ -36,6 +36,33 @@ from app.models.raw_item import RawItem
 from app.models.source import Source
 
 
+
+# ---------------------------------------------------------------------------
+# `search_alerts_impl` after Slice 3B.2P
+#
+# The public /api/search/alerts route was removed; the implementation it used is
+# shared and still serves /api/v1/subscriber/search/alerts. Every behavioural
+# assertion below was repointed there so search coverage survived the route.
+# The subscription gate is covered in the subscriber test modules.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _bypass_subscription_gate():
+    from app.auth.subscriber_access import require_active_subscription
+    from app.main import app
+
+    app.dependency_overrides[require_active_subscription] = lambda: None
+    yield
+    app.dependency_overrides.pop(require_active_subscription, None)
+
+
+@pytest.mark.asyncio
+async def test_public_search_route_removed(client):
+    """The unauthenticated search endpoint is gone."""
+    assert (await client.get("/api/search/alerts?q=fraud")).status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # Per-test unique token
 # ---------------------------------------------------------------------------
@@ -136,35 +163,35 @@ async def _seed_alert(
 @pytest.mark.asyncio
 async def test_search_requires_no_auth(client):
     """GET /api/search/alerts works without any auth header or cookie."""
-    response = await client.get("/api/search/alerts?q=anything")
+    response = await client.get("/api/v1/subscriber/search/alerts?q=anything")
     assert response.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_search_q_required(client):
     """Missing q parameter is rejected with 422."""
-    response = await client.get("/api/search/alerts")
+    response = await client.get("/api/v1/subscriber/search/alerts")
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_search_q_empty_rejected(client):
     """Empty q is rejected with 422."""
-    response = await client.get("/api/search/alerts?q=")
+    response = await client.get("/api/v1/subscriber/search/alerts?q=")
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_search_q_whitespace_rejected(client):
     """Whitespace-only q is rejected with 422."""
-    response = await client.get("/api/search/alerts?q=%20%20%20")
+    response = await client.get("/api/v1/subscriber/search/alerts?q=%20%20%20")
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_search_unknown_query_returns_empty_shape(client, tok):
     """An unknown query returns the canonical empty-result envelope."""
-    response = await client.get(f"/api/search/alerts?q={tok}")
+    response = await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")
     assert response.status_code == 200
     body = response.json()
     assert body["query"] == tok
@@ -182,7 +209,7 @@ async def test_search_basic_response_envelope(client, db_session, tok):
     item = await _seed_raw_item(db_session, source, title=f"SEC charges {tok}")
     await _seed_alert(db_session, item, summary="Crypto fraud allegations")
 
-    response = await client.get(f"/api/search/alerts?q={tok}")
+    response = await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")
     assert response.status_code == 200
     body = response.json()
     for key in ("query", "normalized_query", "total_alerts", "group_count",
@@ -204,7 +231,7 @@ async def test_search_matches_title(client, db_session, tok):
     await _seed_alert(db_session, item, summary="Plain summary",
                       entities_json=None)
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert body["total_alerts"] == 1
     assert body["alerts"][0]["title"] == f"SEC charges {tok}"
 
@@ -219,7 +246,7 @@ async def test_search_matches_summary(client, db_session, tok):
         entities_json=None,
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert body["total_alerts"] == 1
 
 
@@ -230,7 +257,7 @@ async def test_search_matches_source_name(client, db_session, tok):
     await _seed_alert(db_session, item, summary="Plain summary",
                       entities_json=None)
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert body["total_alerts"] == 1
 
 
@@ -247,7 +274,7 @@ async def test_search_matches_entity_only(client, db_session, tok):
         entities_json={"names": [f"{tok} Holdings", "Unrelated Person"]},
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert body["total_alerts"] == 1
     assert body["alerts"][0]["matched_entity"] == f"{tok} holdings"
 
@@ -261,7 +288,7 @@ async def test_search_partial_substring(client, db_session, tok):
     )
     await _seed_alert(db_session, item, summary="x")
 
-    body = (await client.get(f"/api/search/alerts?q={tok}Long")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}Long")).json()
     assert body["total_alerts"] == 1
 
 
@@ -273,7 +300,7 @@ async def test_search_case_insensitive(client, db_session, tok):
     item = await _seed_raw_item(db_session, source, title=f"Probe of {upper}")
     await _seed_alert(db_session, item, summary="x")
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert body["total_alerts"] == 1
 
 
@@ -297,7 +324,7 @@ async def test_search_multi_word_phrase(client, db_session, tok):
     )
 
     body = (await client.get(
-        f"/api/search/alerts?q={tok}%20crypto%20fraud"
+        f"/api/v1/subscriber/search/alerts?q={tok}%20crypto%20fraud"
     )).json()
     assert body["total_alerts"] == 1
     assert "Major " in body["alerts"][0]["summary"]
@@ -312,7 +339,7 @@ async def test_search_excludes_unpublished(client, db_session, tok):
     await _seed_alert(db_session, item_pub, is_published=True)
     await _seed_alert(db_session, item_unpub, is_published=False)
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert body["total_alerts"] == 1
     assert body["alerts"][0]["title"] == f"{tok} one"
 
@@ -332,7 +359,7 @@ async def test_search_group_type_entity(client, db_session, tok):
         entities_json={"names": [tok]},
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert body["group_count"] == 1
     g = body["groups"][0]
     assert g["group_type"] == "entity"
@@ -359,7 +386,7 @@ async def test_search_multiple_entity_groups(client, db_session, tok):
         entities_json={"names": [f"{tok}.US"]},
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert body["group_count"] == 2
     entities = sorted(g["entity"] for g in body["groups"])
     assert entities == sorted([f"{tok} holdings", f"{tok}.us"])
@@ -376,7 +403,7 @@ async def test_search_alert_in_multiple_groups_total_dedups(client, db_session, 
         entities_json={"names": [f"{tok} Holdings", f"{tok}.US"]},
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert body["total_alerts"] == 1
     assert body["group_count"] == 2
     assert sum(g["alertCount"] for g in body["groups"]) == 2  # > total_alerts
@@ -393,7 +420,7 @@ async def test_search_keyword_fallback_when_no_entity_match(client, db_session, 
         entities_json={"names": ["Acme Corp"]},  # no entity matches tok
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert body["group_count"] == 1
     g = body["groups"][0]
     assert g["group_type"] == "keyword"
@@ -428,7 +455,7 @@ async def test_search_mixed_entity_and_keyword_fallback(client, db_session, tok)
         entities_json={"names": ["Acme Corp"]},
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
 
     assert body["total_alerts"] == 2
     assert len(body["alerts"]) == 2
@@ -468,7 +495,7 @@ async def test_search_mixed_entity_groups_appear_before_keyword(client, db_sessi
         entities_json={"names": ["Acme"]},
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert body["group_count"] == 2
     types_in_order = [g["group_type"] for g in body["groups"]]
     assert types_in_order == ["entity", "keyword"]
@@ -487,7 +514,7 @@ async def test_search_group_sources_unique(client, db_session, tok):
             entities_json={"names": [tok]},
         )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     # Exactly one entity group (entity == tok) plus the source-name match
     # produces a keyword fallback (source name contains tok via SQL ILIKE).
     by_type = {g["group_type"]: g for g in body["groups"]}
@@ -515,7 +542,7 @@ async def test_search_earliest_latest_from_source_published_at(client, db_sessio
             entities_json={"names": [tok]},
         )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     g_ent = next(g for g in body["groups"] if g["group_type"] == "entity")
     assert g_ent["earliest"].startswith("2025-11-12")
     assert g_ent["latest"].startswith("2026-04-28")
@@ -532,7 +559,7 @@ async def test_search_group_limit_caps_alerts_per_group(client, db_session, tok)
         )
 
     body = (await client.get(
-        f"/api/search/alerts?q={tok}&group_limit=3"
+        f"/api/v1/subscriber/search/alerts?q={tok}&group_limit=3"
     )).json()
     g = next(g for g in body["groups"] if g["group_type"] == "entity")
     assert g["alertCount"] == 5  # un-capped count
@@ -558,7 +585,7 @@ async def test_search_ranks_by_signal_score_desc(client, db_session, tok):
         entities_json={"names": [tok]},
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     titles = [a["title"] for a in body["alerts"]]
     assert titles[0] == "High score"
     assert titles[1] == "Low score"
@@ -584,7 +611,7 @@ async def test_search_recency_breaks_score_ties(client, db_session, tok):
         entities_json={"names": [tok]},
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert [a["title"] for a in body["alerts"]] == ["Newer", "Older"]
 
 
@@ -602,7 +629,7 @@ async def test_search_group_alerts_ranked(client, db_session, tok):
         entities_json={"names": [tok]},
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     g = next(g for g in body["groups"] if g["group_type"] == "entity")
     assert [a["title"] for a in g["alerts"]] == ["High", "Low"]
 
@@ -633,7 +660,7 @@ async def test_search_default_min_score_includes_low_and_medium(client, db_sessi
         entities_json={"names": [tok]},
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     assert body["total_alerts"] == 3
     titles = {a["title"] for a in body["alerts"]}
     assert titles == {"Low Risk Match", "Medium Risk Match", "High Risk Match"}
@@ -656,7 +683,7 @@ async def test_search_min_score_60_filters(client, db_session, tok):
     )
 
     body = (await client.get(
-        f"/api/search/alerts?q={tok}&min_score=60"
+        f"/api/v1/subscriber/search/alerts?q={tok}&min_score=60"
     )).json()
     titles = {a["title"] for a in body["alerts"]}
     assert titles == {"AtBoundary"}
@@ -678,7 +705,7 @@ async def test_search_min_score_70_boundary(client, db_session, tok):
     )
 
     body = (await client.get(
-        f"/api/search/alerts?q={tok}&min_score=70"
+        f"/api/v1/subscriber/search/alerts?q={tok}&min_score=70"
     )).json()
     titles = {a["title"] for a in body["alerts"]}
     assert titles == {"i18"}
@@ -700,7 +727,7 @@ async def test_search_limit_above_max_clamped(client, db_session, tok):
             entities_json={"names": [tok]},
         )
 
-    response = await client.get(f"/api/search/alerts?q={tok}&limit=200")
+    response = await client.get(f"/api/v1/subscriber/search/alerts?q={tok}&limit=200")
     assert response.status_code == 200
     assert len(response.json()["alerts"]) == 5  # clamped (200->100); we seeded 5
 
@@ -716,7 +743,7 @@ async def test_search_group_limit_above_max_clamped(client, db_session, tok):
             entities_json={"names": [tok]},
         )
     response = await client.get(
-        f"/api/search/alerts?q={tok}&group_limit=999"
+        f"/api/v1/subscriber/search/alerts?q={tok}&group_limit=999"
     )
     assert response.status_code == 200
     g = next(
@@ -727,20 +754,20 @@ async def test_search_group_limit_above_max_clamped(client, db_session, tok):
 
 @pytest.mark.asyncio
 async def test_search_limit_zero_rejected(client):
-    response = await client.get("/api/search/alerts?q=anything&limit=0")
+    response = await client.get("/api/v1/subscriber/search/alerts?q=anything&limit=0")
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_search_limit_negative_rejected(client):
-    response = await client.get("/api/search/alerts?q=anything&limit=-5")
+    response = await client.get("/api/v1/subscriber/search/alerts?q=anything&limit=-5")
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_search_group_limit_zero_rejected(client):
     response = await client.get(
-        "/api/search/alerts?q=anything&group_limit=0"
+        "/api/v1/subscriber/search/alerts?q=anything&group_limit=0"
     )
     assert response.status_code == 422
 
@@ -791,7 +818,7 @@ async def test_search_response_does_not_leak_internal_keys(client, db_session, t
         entities_json={"names": [tok]},
     )
 
-    body = (await client.get(f"/api/search/alerts?q={tok}")).json()
+    body = (await client.get(f"/api/v1/subscriber/search/alerts?q={tok}")).json()
     leaked = set(_walk_keys(body)) & _FORBIDDEN_KEYS
     assert leaked == set(), f"Internal keys leaked: {leaked}"
 
@@ -805,21 +832,3 @@ async def test_search_response_does_not_leak_internal_keys(client, db_session, t
 async def test_regression_public_alerts_list(client):
     response = await client.get("/api/alerts")
     assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_regression_public_alerts_top(client):
-    response = await client.get("/api/alerts/top")
-    assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_regression_public_alerts_stats(client):
-    response = await client.get("/api/alerts/stats")
-    assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_regression_public_alert_detail_404(client):
-    response = await client.get("/api/alerts/999999")
-    assert response.status_code == 404

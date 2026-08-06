@@ -23,11 +23,10 @@ Route ordering note:
 """
 from __future__ import annotations
 
-import logging
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -38,7 +37,7 @@ from app.models.event import EventSource
 from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.source import Source
-from app.pipeline.entities import is_agency_name, normalize_entity_name
+from app.pipeline.entities import is_agency_name
 from app.schemas.alert import (
     PublicAlertDetail,
     PublicAlertRead,
@@ -48,7 +47,6 @@ from app.schemas.alert import (
 )
 from app.services.alert_category_service import published_alert_filter
 
-log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/alerts", tags=["public"])
 
 
@@ -413,16 +411,6 @@ def _sources_list(alert: ProcessedAlert) -> list[dict] | None:
 _RELATED_SIGNALS_MIN = 2
 _RELATED_SIGNALS_MAX = 4
 
-# Top Alerts — Ken's "risk_score >= 60" on the 0-100 frontend scale maps to
-# signal_score_total >= 15 internal (60% of 25). Sits intentionally below the
-# high threshold (internal 18, risk_score 70) so genuinely strong medium-high
-# alerts qualify.
-_TOP_ALERTS_MIN_SCORE = 15
-_TOP_ALERTS_LIMIT = 3
-# SQL fetches this many candidates; Python applies the full multi-key sort and
-# duplicate-entity suppression. Larger pool gives the dedup more room without
-# adding a noticeable query cost.
-_TOP_ALERTS_CANDIDATE_POOL = 30
 
 
 async def _related_signals(
@@ -507,82 +495,6 @@ async def _related_signals(
 # ---------------------------------------------------------------------------
 # Top Alerts ranking helpers
 # ---------------------------------------------------------------------------
-
-
-def _primary_entity_key(alert: ProcessedAlert) -> str:
-    """Pick a stable dedup key for top-alerts.
-
-    First non-empty *non-agency* entity name from entities_json, normalized
-    lowercase + stripped. Agency names (FBI, DOJ, U.S. Attorney's Office, …)
-    are skipped because they appear in nearly every fraud alert and would
-    otherwise collapse unrelated alerts together. Falls back to "alert:{id}"
-    when the alert has no usable subject entity, so it remains unique rather
-    than silently dropped.
-    """
-    for name in _flat_entities(alert.entities_json):
-        norm = name.strip().lower()
-        if norm and not _is_agency_name(name):
-            return norm
-    return f"alert:{alert.id}"
-
-
-def _signal_strength(alert: ProcessedAlert) -> int:
-    """Number of distinct independent OUTLETS in this alert's event cluster.
-
-    Higher means the alert participates in a multi-outlet event cluster, which
-    Ken counts as stronger corroboration. Slice 5: counts distinct normalized
-    source names, NOT raw event_sources rows, so repeated coverage from one
-    outlet (e.g. 5 BleepingComputer links) counts as one. Requires event_sources
-    eager-loaded.
-    """
-    outlets = {
-        normalize_entity_name(es.source_name)
-        for es in (alert.event_sources or [])
-        if es.source_name and es.source_name.strip()
-    }
-    return len(outlets)
-
-
-def _credibility_for_ranking(alert: ProcessedAlert) -> int:
-    """Source credibility (1-5) or 0 when unknown."""
-    if alert.raw_item and alert.raw_item.source:
-        return alert.raw_item.source.credibility_score or 0
-    return 0
-
-
-def _recency_for_ranking(alert: ProcessedAlert) -> float:
-    """Sortable timestamp; -inf when no date is available."""
-    dt = _published_date(alert)
-    return dt.timestamp() if dt else float("-inf")
-
-
-def _select_top_alerts(
-    candidates: list[ProcessedAlert],
-    *,
-    limit: int = _TOP_ALERTS_LIMIT,
-) -> list[ProcessedAlert]:
-    """Apply the full multi-key sort + duplicate-entity suppression."""
-    ranked = sorted(
-        candidates,
-        key=lambda a: (
-            -(a.signal_score_total or 0),
-            -_signal_strength(a),
-            -_credibility_for_ranking(a),
-            -_recency_for_ranking(a),
-            a.id,
-        ),
-    )
-    selected: list[ProcessedAlert] = []
-    seen_keys: set[str] = set()
-    for a in ranked:
-        key = _primary_entity_key(a)
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        selected.append(a)
-        if len(selected) >= limit:
-            break
-    return selected
 
 
 # ---------------------------------------------------------------------------
@@ -820,115 +732,3 @@ async def published_stats_impl(db: AsyncSession) -> PublicAlertStatsResponse:
         low_count=low,
         category_breakdown=breakdown,
     )
-
-
-@router.get("/stats", response_model=PublicAlertStatsResponse)
-async def get_public_stats(
-    db: AsyncSession = Depends(get_db),
-) -> PublicAlertStatsResponse:
-    """Return aggregate counts for published alerts only.
-
-    No authentication required.
-
-    Returns:
-    - total_alerts: total published alert count
-    - high_count / medium_count / low_count: counts by risk level
-    - category_breakdown: per-primary_category counts, ordered by count DESC
-      then category ASC. Rows with null primary_category are excluded.
-    """
-    return await published_stats_impl(db)
-
-
-async def top_alerts_impl(db: AsyncSession) -> PublicAlertsResponse:
-    """Curated top alerts for the dashboard hero panel.
-
-    Public, no auth. At most 3 published alerts with signal_score_total >= 15
-    (Ken's "risk >= 60" mapped to the 0-25 scale), ranked by:
-
-      1. signal_score_total (desc)
-      2. signal strength = len(event_sources) (desc)
-      3. source credibility (desc)
-      4. recency = source-pub > platform-pub > processed (desc)
-      5. id asc — final deterministic tiebreaker
-
-    Duplicate primary entities are suppressed: if alert A's primary entity is
-    already in the selected set, alert B claiming the same entity is skipped.
-    Alerts with no entities use a per-alert fallback key so they are never
-    silently dropped — they're just unique against each other.
-
-    Returns {"alerts": []} when no alerts qualify (200 OK, empty list).
-    """
-    stmt = (
-        select(ProcessedAlert)
-        .where(
-            ProcessedAlert.is_published.is_(True),
-            ProcessedAlert.signal_score_total >= _TOP_ALERTS_MIN_SCORE,
-        )
-        .options(
-            selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source),
-            selectinload(ProcessedAlert.event_sources),
-        )
-        .order_by(
-            ProcessedAlert.signal_score_total.desc().nullslast(),
-            ProcessedAlert.published_at.desc().nullslast(),
-            ProcessedAlert.processed_at.desc(),
-        )
-        .limit(_TOP_ALERTS_CANDIDATE_POOL)
-    )
-    result = await db.execute(stmt)
-    candidates = list(result.scalars().unique().all())
-    selected = _select_top_alerts(candidates)
-    return PublicAlertsResponse(alerts=[_to_public_read(a) for a in selected])
-
-
-@router.get("/top", response_model=PublicAlertsResponse)
-async def list_top_alerts(
-    db: AsyncSession = Depends(get_db),
-) -> PublicAlertsResponse:
-    """Public curated top alerts. See ``top_alerts_impl`` for behavior."""
-    return await top_alerts_impl(db)
-
-
-async def published_alert_detail_impl(
-    db: AsyncSession, alert_id: int
-) -> PublicAlertDetail:
-    """Shared implementation for enriched single published-alert detail.
-
-    Used by public ``GET /api/alerts/{id}`` and subscriber
-    ``GET /api/v1/subscriber/alerts/{alert_id}``. Returns 404 if the alert does
-    not exist OR is not published (the two cases are indistinguishable).
-    """
-    result = await db.execute(
-        _detail_stmt().where(ProcessedAlert.id == alert_id)
-    )
-    alert = result.scalar_one_or_none()
-    if alert is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Alert not found",
-        )
-    return await _to_public_detail(db, alert)
-
-
-@router.get(
-    "/{alert_id}",
-    response_model=PublicAlertDetail,
-    response_model_exclude_none=True,
-)
-async def get_public_alert(
-    alert_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> PublicAlertDetail:
-    """Return Ken's enriched public alert detail.
-
-    No authentication required.
-
-    - Returns 200 + enriched detail schema if the alert exists and is published.
-    - Returns 404 if the alert does not exist OR is not published.
-      (Unpublished alerts must not be distinguishable from non-existent ones.)
-
-    response_model_exclude_none=True ensures optional sections (timeline,
-    related_signals, why_it_matters, key_intelligence, affected_group, etc.)
-    are omitted from the JSON when their underlying data is empty.
-    """
-    return await published_alert_detail_impl(db, alert_id)

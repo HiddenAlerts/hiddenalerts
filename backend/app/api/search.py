@@ -35,7 +35,7 @@ import math
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import HTTPException, status
 from sqlalchemy import String, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -47,8 +47,6 @@ from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.source import Source
 from app.schemas.search import SearchAlertItem, SearchGroup, SearchResponse
-
-router = APIRouter(prefix="/api/search", tags=["public"])
 
 
 # ---------------------------------------------------------------------------
@@ -317,39 +315,3 @@ async def search_alerts_impl(
         groups=groups,
         alerts=sorted_items[:limit_eff],
     )
-
-
-@router.get(
-    "/alerts",
-    response_model=SearchResponse,
-    response_model_by_alias=True,
-)
-async def search_alerts(
-    q: str = Query(..., description="Search text (required, trimmed)."),
-    min_score: int = Query(
-        _MIN_SCORE_DEFAULT,
-        description=(
-            "Minimum normalized signal score (0–100). Default 0. Values "
-            "outside 0–100 are clamped."
-        ),
-    ),
-    limit: int = Query(
-        _LIMIT_DEFAULT,
-        ge=1,
-        description=(
-            "Cap on the full alerts list. Default 50, max 100. Values above "
-            "max are clamped; values <1 are rejected."
-        ),
-    ),
-    group_limit: int = Query(
-        _GROUP_LIMIT_DEFAULT,
-        ge=1,
-        description=(
-            "Cap on alerts inside each group. Default 20, max 50. Values "
-            "above max are clamped; values <1 are rejected."
-        ),
-    ),
-    db: AsyncSession = Depends(get_db),
-) -> SearchResponse:
-    """Search published alerts; group by extracted entities, fallback to keyword."""
-    return await search_alerts_impl(db, q, min_score, limit, group_limit)

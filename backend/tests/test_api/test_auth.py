@@ -70,77 +70,6 @@ class TestJWT:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_login_endpoint_success(client, db_session):
-    """POST /login with admin credentials sets access_token cookie and redirects."""
-    from app.models.user import User
-
-    user = User(
-        email="logintest@test.com",
-        password_hash=hash_password("testpass"),
-        is_active=True,
-        role="admin",
-    )
-    db_session.add(user)
-    await db_session.commit()
-
-    response = await client.post(
-        "/login",
-        data={"username": "logintest@test.com", "password": "testpass"},
-        follow_redirects=False,
-    )
-
-    # Should redirect to /dashboard on success
-    assert response.status_code in (302, 303)
-    assert "access_token" in response.cookies
-
-
-@pytest.mark.asyncio
-async def test_login_endpoint_wrong_password(client, db_session):
-    """POST /login with wrong password returns 401."""
-    from app.models.user import User
-
-    user = User(
-        email="wrongpass@test.com",
-        password_hash=hash_password("correct"),
-        is_active=True,
-        role="admin",
-    )
-    db_session.add(user)
-    await db_session.commit()
-
-    response = await client.post(
-        "/login",
-        data={"username": "wrongpass@test.com", "password": "wrong"},
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_dashboard_login_subscriber_blocked(client, db_session):
-    """POST /login as subscriber returns 403 — dashboard is admin-only."""
-    from app.models.user import User
-
-    user = User(
-        email="sublogin@test.com",
-        password_hash=hash_password("subpass"),
-        is_active=True,
-        role="subscriber",
-    )
-    db_session.add(user)
-    await db_session.commit()
-
-    response = await client.post(
-        "/login",
-        data={"username": "sublogin@test.com", "password": "subpass"},
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 403
-
-
 # ---------------------------------------------------------------------------
 # API alert endpoint (auth required)
 # ---------------------------------------------------------------------------
@@ -480,3 +409,69 @@ async def test_require_admin_accepts_admin(client, db_session):
 
     assert response.status_code == 200
     assert response.json()["role"] == "admin"
+
+
+# ---------------------------------------------------------------------------
+# Jinja login/logout removed (Slice 3B.2P) — the API login is untouched
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/login", "/logout", "/dashboard",
+                                  "/dashboard/events", "/dashboard/monitoring"])
+async def test_jinja_routes_are_gone(client, path):
+    assert (await client.get(path)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_jinja_login_post_is_gone(client):
+    response = await client.post(
+        "/login",
+        data={"username": "someone@test.com", "password": "whatever"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_login_still_authenticates_an_admin(client, db_session):
+    """The Internal JWT login is shared infrastructure and must be unaffected."""
+    from app.models.user import User
+
+    user = User(
+        email="apilogin@test.com",
+        password_hash=hash_password("testpass"),
+        is_active=True,
+        role="admin",
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "apilogin@test.com", "password": "testpass"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["access_token"] and body["token_type"] == "bearer"
+    assert body["user"]["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_api_login_rejects_a_wrong_password(client, db_session):
+    from app.models.user import User
+
+    user = User(
+        email="apilogin-bad@test.com",
+        password_hash=hash_password("correct"),
+        is_active=True,
+        role="admin",
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "apilogin-bad@test.com", "password": "wrong"},
+    )
+    assert response.status_code == 401

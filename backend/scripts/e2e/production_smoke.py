@@ -63,6 +63,14 @@ SUBSCRIBER_ALERTS_PATH_FILTERED = "/api/v1/subscriber/alerts"
 JINJA_DASHBOARD_PATH = "/dashboard"
 JINJA_LOGIN_PATH = "/login"
 
+#: Routes Slice 3B.2P removed. Before deployment production still serves them,
+#: so their presence is merely recorded; with --post-deploy each must be a 404.
+#: GET only — proving the removed POST routes is the route-inventory test's job,
+#: not something to demonstrate by sending a write request at production.
+REMOVED_JINJA_PATHS = ("/login", "/logout", "/dashboard",
+                       "/dashboard/events", "/dashboard/monitoring")
+REMOVED_PUBLIC_PATHS = ("/api/alerts/top", "/api/alerts/stats", "/api/search/alerts")
+
 #: A token that is well-formed enough to reach the validator and be rejected.
 MALFORMED_TOKEN = "not-a-jwt"
 
@@ -150,11 +158,8 @@ async def check_public(client: httpx.AsyncClient, results: ResultSet) -> None:
     _record_problems(results, "public alerts feed", checks.check_public_alerts(payload),
                      endpoint=PUBLIC_ALERTS_PATH, status=200, latency=latency)
 
-    top, _ = await _get(client, PUBLIC_TOP_PATH, results, "public top alerts schema")
-    if top is not None and top.status_code == 200:
-        _record_problems(results, "public top alerts schema",
-                         checks.check_public_alerts(parse_json(top, "public top")),
-                         endpoint=PUBLIC_TOP_PATH, status=200)
+    # The public Top Alerts route was removed in Slice 3B.2P; §removed-surface
+    # below asserts it is gone once the release has landed.
 
 
 async def check_admin(
@@ -388,9 +393,10 @@ async def check_subscriber(
 
 
 async def check_client_and_legacy(
-    client: httpx.AsyncClient, results: ResultSet, admin_header: dict[str, str]
+    client: httpx.AsyncClient, results: ResultSet, admin_header: dict[str, str],
+    *, post_deploy: bool,
 ) -> None:
-    """Both Client routes, plus legacy Jinja presence and protection."""
+    """Both Client routes, plus the surface Slice 3B.2P removed."""
     # --- Route 1: /api/v1/client/alerts -------------------------------------
     unauth, _ = await _get(client, CLIENT_ALERTS_PATH, results, "client list without token → 401")
     if unauth is not None:
@@ -446,23 +452,46 @@ async def check_client_and_legacy(
                                f"keys: {sorted(body)[:6] if isinstance(body, dict) else body}",
                                endpoint=CLIENT_ALERT_DETAIL_PATH, status_code=200)
 
-    # --- Legacy Jinja: presence and protection only -------------------------
-    dash, _ = await _get(client, JINJA_DASHBOARD_PATH, results,
-                         "legacy dashboard stays protected")
-    if dash is not None:
-        protected = dash.status_code in (302, 303, 307, 401, 403)
-        results.record(
-            "legacy dashboard stays protected", protected,
-            f"unauthenticated /dashboard returned {dash.status_code}; expected a "
-            f"redirect or 401/403",
-            endpoint=JINJA_DASHBOARD_PATH, status_code=dash.status_code,
-        )
+    # --- Removed surface (Slice 3B.2P) --------------------------------------
+    await check_removed_surface(client, results, post_deploy=post_deploy)
 
-    login, _ = await _get(client, JINJA_LOGIN_PATH, results, "legacy login route retained")
-    if login is not None:
-        results.record("legacy login route retained", login.status_code == 200,
-                       f"expected 200, got {login.status_code}",
-                       endpoint=JINJA_LOGIN_PATH, status_code=login.status_code)
+
+async def check_removed_surface(
+    client: httpx.AsyncClient, results: ResultSet, *, post_deploy: bool
+) -> None:
+    """The legacy Jinja dashboard and the four unused Public routes.
+
+    Before deployment production still runs the old release, so these paths are
+    expected to answer and their presence is only recorded — a pre-deploy run
+    must not go red because the removal has not shipped yet. With
+    ``--post-deploy`` every one of them must be **404**.
+    """
+    for path in (*REMOVED_JINJA_PATHS, *REMOVED_PUBLIC_PATHS):
+        name = f"removed: {path}"
+        response, latency = await _get(client, path, results, name)
+        if response is None:
+            continue
+        if post_deploy:
+            results.record(
+                name, response.status_code == 404,
+                f"expected 404 after cleanup, got {response.status_code}",
+                endpoint=path, status_code=response.status_code, latency_ms=latency,
+            )
+        else:
+            results.skip(
+                name,
+                f"still present in the deployed release (HTTP {response.status_code}) "
+                f"— removal ships with this deployment",
+            )
+
+    # The Landing feed is the one public route that must survive.
+    retained, latency = await _get(client, PUBLIC_ALERTS_PATH, results,
+                                   "retained: /api/alerts still 200")
+    if retained is not None:
+        results.record("retained: /api/alerts still 200", retained.status_code == 200,
+                       f"expected 200, got {retained.status_code}",
+                       endpoint=PUBLIC_ALERTS_PATH, status_code=retained.status_code,
+                       latency_ms=latency)
 
 
 # ---------------------------------------------------------------------------
@@ -531,7 +560,8 @@ async def run_smoke(config: E2EConfig, *, post_deploy: bool) -> ResultSet:
         if admin_header:
             await check_admin(client, results, admin_header, subscriber_header,
                               post_deploy=post_deploy)
-            await check_client_and_legacy(client, results, admin_header)
+            await check_client_and_legacy(client, results, admin_header,
+                                          post_deploy=post_deploy)
         if subscriber_header:
             await check_subscriber(client, results, subscriber_header,
                                    post_deploy=post_deploy)

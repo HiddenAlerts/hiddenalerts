@@ -12,7 +12,7 @@ Public list  (existing):
   - Optional filters (risk_level, category, source, limit/offset)
   - Backwards compatibility: protected endpoints still require auth
 
-Public detail  (NEW — GET /api/alerts/{id}):
+Public detail  (NEW — GET /api/v1/subscriber/alerts/{id}):
   - No auth required
   - Returns 200 for a published alert
   - Returns 404 for an unpublished alert
@@ -21,7 +21,7 @@ Public detail  (NEW — GET /api/alerts/{id}):
   - Field mapping is correct (incl. secondary_category, entities, processed_at)
   - Internal / moderation fields are NOT present
 
-Public stats  (NEW — GET /api/alerts/stats):
+Public stats  (NEW — GET /api/v1/subscriber/alerts/stats):
   - No auth required
   - Counts use only published alerts
   - high_count, medium_count, low_count are correct
@@ -39,6 +39,31 @@ import pytest
 from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.source import Source
+
+
+
+# ---------------------------------------------------------------------------
+# Shared-serializer coverage after Slice 3B.2P
+#
+# The public detail, stats and search routes were removed, but the helpers they
+# exercised — `_to_public_detail`, `published_stats_impl` and every enrichment
+# function — are still reached through the Subscriber API. Those assertions were
+# repointed to the subscriber endpoints rather than deleted, so serializer
+# coverage did not drop along with the routes.
+#
+# The subscription gate has its own coverage in the subscriber test modules; it
+# is overridden here so these tests keep exercising serialization, not auth.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _bypass_subscription_gate():
+    from app.auth.subscriber_access import require_active_subscription
+    from app.main import app
+
+    app.dependency_overrides[require_active_subscription] = lambda: None
+    yield
+    app.dependency_overrides.pop(require_active_subscription, None)
 
 
 # ---------------------------------------------------------------------------
@@ -340,18 +365,18 @@ async def test_public_feed_pagination(client, db_session):
 
 
 # ===========================================================================
-# Public detail — GET /api/alerts/{id}  (NEW)
+# Public detail — GET /api/v1/subscriber/alerts/{id}  (NEW)
 # ===========================================================================
 
 
 @pytest.mark.asyncio
 async def test_public_detail_requires_no_auth(client, db_session):
-    """GET /api/alerts/{id} must succeed without any auth header or cookie."""
+    """GET /api/v1/subscriber/alerts/{id} must succeed without any auth header or cookie."""
     source = await _seed_source(db_session)
     item = await _seed_raw_item(db_session, source, title="Auth Test")
     alert = await _seed_alert(db_session, item, is_published=True)
 
-    response = await client.get(f"/api/alerts/{alert.id}")
+    response = await client.get(f"/api/v1/subscriber/alerts/{alert.id}")
     assert response.status_code == 200
 
 
@@ -376,7 +401,7 @@ async def test_public_detail_published_returns_200(client, db_session):
         entities_json={"names": ["FBI", "Western Union"]},
     )
 
-    response = await client.get(f"/api/alerts/{alert.id}")
+    response = await client.get(f"/api/v1/subscriber/alerts/{alert.id}")
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == alert.id
@@ -406,88 +431,15 @@ async def test_public_detail_unpublished_returns_404(client, db_session):
     item = await _seed_raw_item(db_session, source, title="Unpublished Detail")
     alert = await _seed_alert(db_session, item, is_published=False)
 
-    response = await client.get(f"/api/alerts/{alert.id}")
+    response = await client.get(f"/api/v1/subscriber/alerts/{alert.id}")
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_public_detail_nonexistent_returns_404(client):
     """Non-existent alert ID must return 404."""
-    response = await client.get("/api/alerts/999999")
+    response = await client.get("/api/v1/subscriber/alerts/999999")
     assert response.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_public_detail_safe_fields_only(client, db_session):
-    """Detail response must NOT contain internal moderation or scoring fields."""
-    source = await _seed_source(db_session)
-    item = await _seed_raw_item(db_session, source, title="Field Safety Test")
-    # Seed every internal column we want to confirm is NOT leaked, plus a
-    # secondary_category so the backward-compat field key is present in JSON.
-    alert = await _seed_alert(
-        db_session,
-        item,
-        is_published=True,
-        secondary_category="Wire Fraud",
-        entities_json={"names": ["Acme Corp"]},
-        financial_impact_estimate="$5M",
-        victim_scale_raw="multiple",
-        matched_keywords=["fraud", "scam"],
-        score_source_credibility=4,
-        score_financial_impact=3,
-        score_victim_scale=3,
-        score_cross_source=2,
-        score_trend_acceleration=2,
-        ai_model="gpt-5-mini",
-    )
-
-    response = await client.get(f"/api/alerts/{alert.id}")
-    assert response.status_code == 200
-    data = response.json()
-
-    # Expected public-safe fields ARE present
-    for field in ("id", "title", "summary", "category", "risk_level",
-                  "signal_score", "source_name", "source_url", "published_at",
-                  "processed_at", "secondary_category", "entities",
-                  # Ken's enriched fields (always derivable from the seeded data above)
-                  "score", "confidence", "risk_assessment", "subcategory"):
-        assert field in data, f"Missing expected field: {field}"
-
-    # Internal / moderation fields must NOT be present
-    forbidden = (
-        "is_published",
-        "is_relevant",
-        "raw_item_id",
-        "entities_json",
-        "score_source_credibility",
-        "score_financial_impact",
-        "score_victim_scale",
-        "score_cross_source",
-        "score_trend_acceleration",
-        "financial_impact_estimate",
-        "victim_scale_raw",
-        "ai_model",
-        "review_status",
-        "published_by_user_id",
-        "matched_keywords",
-        "relevance_score",
-        "signal_score_total",  # list endpoint field name — public detail uses signal_score
-        # Slice 6 V1 internal fields must never appear on the public detail.
-        "risk_band",
-        "publish_decision",
-        "publish_decision_reason",
-        "pending_review_reason",
-        "excluded_reason",
-        "is_excluded",
-        "is_manual_hold",
-        "published_by_rule",
-        "publishing_policy_version",
-        "publication_state_source",
-        "publication_state_updated_at",
-        "risk_explanation",
-    )
-    for f in forbidden:
-        assert f not in data, f"Forbidden field leaked: {f}"
 
 
 @pytest.mark.asyncio
@@ -497,7 +449,7 @@ async def test_public_detail_entities_empty_when_none(client, db_session):
     item = await _seed_raw_item(db_session, source, title="No Entities")
     alert = await _seed_alert(db_session, item, is_published=True, entities_json=None)
 
-    response = await client.get(f"/api/alerts/{alert.id}")
+    response = await client.get(f"/api/v1/subscriber/alerts/{alert.id}")
     assert response.status_code == 200
     assert response.json()["entities"] == []
 
@@ -509,7 +461,7 @@ async def test_public_detail_entities_empty_dict(client, db_session):
     item = await _seed_raw_item(db_session, source, title="Empty Dict Entities")
     alert = await _seed_alert(db_session, item, is_published=True, entities_json={})
 
-    response = await client.get(f"/api/alerts/{alert.id}")
+    response = await client.get(f"/api/v1/subscriber/alerts/{alert.id}")
     assert response.status_code == 200
     assert response.json()["entities"] == []
 
@@ -543,7 +495,7 @@ async def test_public_detail_enriched_includes_kens_fields(client, db_session):
         published_at=datetime(2026, 4, 22, 10, 30, tzinfo=timezone.utc),
     )
 
-    response = await client.get(f"/api/alerts/{alert.id}")
+    response = await client.get(f"/api/v1/subscriber/alerts/{alert.id}")
     assert response.status_code == 200
     data = response.json()
 
@@ -576,7 +528,7 @@ async def test_public_detail_confidence_high(client, db_session):
     alert = await _seed_alert(
         db_session, item, is_published=True, signal_score=18, is_relevant=True,
     )
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     assert data["confidence"] == "High"
 
 
@@ -586,7 +538,7 @@ async def test_public_detail_confidence_medium_via_credibility(client, db_sessio
     source = await _seed_source(db_session, credibility_score=4)
     item = await _seed_raw_item(db_session, source)
     alert = await _seed_alert(db_session, item, is_published=True, signal_score=5)
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     assert data["confidence"] == "Medium"
 
 
@@ -596,7 +548,7 @@ async def test_public_detail_confidence_low(client, db_session):
     source = await _seed_source(db_session, credibility_score=3)
     item = await _seed_raw_item(db_session, source)
     alert = await _seed_alert(db_session, item, is_published=True, signal_score=4)
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     assert data["confidence"] == "Low"
 
 
@@ -606,7 +558,7 @@ async def test_public_detail_confidence_medium_via_score(client, db_session):
     source = await _seed_source(db_session, credibility_score=3)
     item = await _seed_raw_item(db_session, source)
     alert = await _seed_alert(db_session, item, is_published=True, signal_score=10)
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     assert data["confidence"] == "Medium"
 
 
@@ -622,7 +574,7 @@ async def test_public_detail_key_intelligence_structured(client, db_session):
         entities_json={"names": ["FBI"]},
         matched_keywords=["phishing"],
     )
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     items = data["key_intelligence"]
     assert isinstance(items, list) and items
     for it in items:
@@ -642,7 +594,7 @@ async def test_public_detail_affected_group_omitted_when_no_victim(client, db_se
     source = await _seed_source(db_session)
     item = await _seed_raw_item(db_session, source, title="No Victim Scale")
     alert = await _seed_alert(db_session, item, is_published=True, victim_scale_raw=None)
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     assert "affected_group" not in data
 
 
@@ -654,7 +606,7 @@ async def test_public_detail_affected_group_present_for_multiple(client, db_sess
     alert = await _seed_alert(
         db_session, item, is_published=True, victim_scale_raw="multiple",
     )
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     assert data["affected_group"] == "Multiple victims or organizations"
 
 
@@ -668,7 +620,7 @@ async def test_public_detail_published_date_uses_source_first(client, db_session
     item = await _seed_raw_item(db_session, source, title="Source First", published_at=src_pub)
     alert = await _seed_alert(db_session, item, is_published=True, published_at=plat_pub)
 
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     # SQLite drops tzinfo on round-trip; compare on naive UTC.
     parsed = datetime.fromisoformat(data["published_date"].replace("Z", "+00:00"))
     parsed_naive = parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
@@ -684,7 +636,7 @@ async def test_public_detail_published_date_falls_back_to_published_at(client, d
     item = await _seed_raw_item(db_session, source, title="Fallback", published_at=None)
     alert = await _seed_alert(db_session, item, is_published=True, published_at=plat_pub)
 
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     parsed = datetime.fromisoformat(data["published_date"].replace("Z", "+00:00"))
     parsed_naive = parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
     assert parsed_naive == plat_pub.replace(tzinfo=None)
@@ -696,7 +648,7 @@ async def test_public_detail_risk_level_is_title_case(client, db_session):
     source = await _seed_source(db_session)
     item = await _seed_raw_item(db_session, source, title="Title Case")
     alert = await _seed_alert(db_session, item, is_published=True, risk_level="medium")
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     assert data["risk_level"] == "Medium"
 
 
@@ -708,7 +660,7 @@ async def test_public_detail_sources_array_has_current_source(client, db_session
                                 title="Sources Test",
                                 url="https://justice.gov/article/x")
     alert = await _seed_alert(db_session, item, is_published=True)
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     assert isinstance(data["sources"], list) and data["sources"]
     assert data["sources"][0]["name"] == "DOJ Press Releases"
     assert data["sources"][0]["url"] == "https://justice.gov/article/x"
@@ -724,7 +676,7 @@ async def test_public_detail_timeline_when_data_exists(client, db_session):
     item = await _seed_raw_item(db_session, source, title="Timeline", published_at=src_pub)
     alert = await _seed_alert(db_session, item, is_published=True, published_at=plat_pub)
 
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     timeline = data["timeline"]
     assert isinstance(timeline, list) and len(timeline) == 2
     assert timeline[0]["event"] == "Source published the alert"
@@ -759,7 +711,7 @@ async def test_public_detail_related_signals_via_event(client, db_session):
     await _seed_event_link(db_session, event_id, alert_b)
     await _seed_event_link(db_session, event_id, alert_c)
 
-    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert_a.id}")).json()
     assert isinstance(data["related_signals"], list)
     ids = [r["id"] for r in data["related_signals"]]
     assert alert_b.id in ids
@@ -775,7 +727,7 @@ async def test_public_detail_related_signals_omitted_when_no_event(client, db_se
     source = await _seed_source(db_session)
     item = await _seed_raw_item(db_session, source, title="Standalone")
     alert = await _seed_alert(db_session, item, is_published=True)
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     assert "related_signals" not in data
 
 
@@ -810,7 +762,7 @@ async def test_public_detail_related_signals_excludes_unpublished(client, db_ses
     await _seed_event_link(db_session, event_id, alert_pub2)
     await _seed_event_link(db_session, event_id, alert_unpub)
 
-    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert_a.id}")).json()
     ids = {r["id"] for r in data.get("related_signals", [])}
     assert alert_pub1.id in ids
     assert alert_pub2.id in ids
@@ -835,7 +787,7 @@ async def test_public_detail_related_signals_max_four(client, db_session):
                                  entities_json=shared)
         await _seed_event_link(db_session, event_id, peer)
 
-    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert_a.id}")).json()
     assert isinstance(data["related_signals"], list)
     assert len(data["related_signals"]) <= 4
 
@@ -869,29 +821,9 @@ async def test_public_detail_risk_level_derived_from_score(client, db_session):
         db_session, item, is_published=True,
         risk_level="high", signal_score=15,  # 15 → 60/100 → medium per M3 final bands
     )
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     assert data["risk_level"] == "Medium"
     assert data["score"] == 60  # 15 internal → 60/100
-
-
-@pytest.mark.asyncio
-async def test_public_stats_counts_use_derived_risk(client, db_session):
-    """Stats counts must bucket alerts by score (M3 thresholds), not stored risk_level."""
-    baseline = (await client.get("/api/alerts/stats")).json()
-    source = await _seed_source(db_session)
-
-    # Stored 'high' but score 12 → must count as medium, not high.
-    item = await _seed_raw_item(db_session, source, title="Stale High Stats")
-    await _seed_alert(
-        db_session, item, is_published=True,
-        risk_level="high", signal_score=12,
-    )
-    after = (await client.get("/api/alerts/stats")).json()
-
-    assert after["high_count"] == baseline["high_count"]
-    assert after["medium_count"] == baseline["medium_count"] + 1
-    assert after["low_count"] == baseline["low_count"]
-    assert after["total_alerts"] == baseline["total_alerts"] + 1
 
 
 @pytest.mark.asyncio
@@ -917,7 +849,7 @@ async def test_related_signals_excludes_same_event_no_entity_overlap(client, db_
     event_id = await _seed_event_link(db_session, None, alert_a)
     await _seed_event_link(db_session, event_id, alert_b)
 
-    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert_a.id}")).json()
     # No qualifying peer → related_signals must be omitted entirely.
     assert "related_signals" not in data
 
@@ -948,7 +880,7 @@ async def test_related_signals_includes_same_event_with_entity_overlap(client, d
     await _seed_event_link(db_session, event_id, alert_b)
     await _seed_event_link(db_session, event_id, alert_c)
 
-    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert_a.id}")).json()
     ids = [r["id"] for r in data.get("related_signals", [])]
     assert alert_b.id in ids
     assert alert_c.id in ids
@@ -977,7 +909,7 @@ async def test_related_signals_overlap_is_case_insensitive(client, db_session):
     await _seed_event_link(db_session, event_id, alert_b)
     await _seed_event_link(db_session, event_id, alert_c)
 
-    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert_a.id}")).json()
     ids = [r["id"] for r in data.get("related_signals", [])]
     assert alert_b.id in ids
     assert alert_c.id in ids
@@ -999,7 +931,7 @@ async def test_related_signals_omitted_when_current_has_no_entities(client, db_s
     event_id = await _seed_event_link(db_session, None, alert_a)
     await _seed_event_link(db_session, event_id, alert_b)
 
-    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert_a.id}")).json()
     assert "related_signals" not in data
 
 
@@ -1019,7 +951,7 @@ async def test_related_signals_omitted_when_only_one_clean_peer(client, db_sessi
     event_id = await _seed_event_link(db_session, None, alert_a)
     await _seed_event_link(db_session, event_id, alert_b)
 
-    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert_a.id}")).json()
     # Only 1 qualifying peer (alert_b) — must be omitted entirely.
     assert "related_signals" not in data
 
@@ -1045,7 +977,7 @@ async def test_related_signals_included_when_two_clean_peers(client, db_session)
     await _seed_event_link(db_session, event_id, alert_b)
     await _seed_event_link(db_session, event_id, alert_c)
 
-    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert_a.id}")).json()
     assert isinstance(data["related_signals"], list)
     assert len(data["related_signals"]) == 2
     ids = {r["id"] for r in data["related_signals"]}
@@ -1071,7 +1003,7 @@ async def test_risk_assessment_high_mentions_strong_factors(client, db_session):
         score_financial_impact=2,
         score_trend_acceleration=1,
     )
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     text = data["risk_assessment"]
     assert text.startswith("High risk due to")
     # At least one of our derived factor phrases must appear.
@@ -1092,7 +1024,7 @@ async def test_risk_assessment_uses_financial_estimate_when_meaningful(client, d
         signal_score=20,
         financial_impact_estimate="$4.2M",
     )
-    text = (await client.get(f"/api/alerts/{alert.id}")).json()["risk_assessment"]
+    text = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()["risk_assessment"]
     assert "notable financial impact" in text
 
 
@@ -1102,7 +1034,7 @@ async def test_risk_assessment_medium_concise(client, db_session):
     source = await _seed_source(db_session)
     item = await _seed_raw_item(db_session, source, title="Medium Concise")
     alert = await _seed_alert(db_session, item, is_published=True, signal_score=10)
-    text = (await client.get(f"/api/alerts/{alert.id}")).json()["risk_assessment"]
+    text = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()["risk_assessment"]
     assert text.startswith("Medium risk")
     # One sentence. ≤ 250 chars is plenty for "scannable".
     assert text.count(". ") == 0
@@ -1116,7 +1048,7 @@ async def test_risk_assessment_low_concise(client, db_session):
     source = await _seed_source(db_session)
     item = await _seed_raw_item(db_session, source, title="Low Concise")
     alert = await _seed_alert(db_session, item, is_published=True, signal_score=4)
-    text = (await client.get(f"/api/alerts/{alert.id}")).json()["risk_assessment"]
+    text = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()["risk_assessment"]
     assert text.startswith("Low risk")
     assert text.count(". ") == 0
     assert text.endswith(".")
@@ -1139,7 +1071,7 @@ async def test_risk_assessment_falls_back_when_no_strong_factors(client, db_sess
         financial_impact_estimate=None,
         victim_scale_raw=None,
     )
-    text = (await client.get(f"/api/alerts/{alert.id}")).json()["risk_assessment"]
+    text = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()["risk_assessment"]
     # Generic high-risk fallback contains "based on credible source reporting"
     assert "based on credible source reporting" in text
     assert text.startswith("High risk")
@@ -1161,7 +1093,7 @@ async def test_risk_assessment_does_not_leak_raw_score_fields(client, db_session
         financial_impact_estimate="$10M",
         victim_scale_raw="nationwide",
     )
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     forbidden = (
         "score_source_credibility", "score_financial_impact",
         "score_victim_scale", "score_cross_source", "score_trend_acceleration",
@@ -1189,7 +1121,7 @@ async def test_public_detail_no_score_breakdown_leak(client, db_session):
         matched_keywords=["money laundering"],
         entities_json={"names": ["FBI"]},
     )
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     forbidden = (
         "score_source_credibility", "score_financial_impact", "score_victim_scale",
         "score_cross_source", "score_trend_acceleration",
@@ -1203,14 +1135,14 @@ async def test_public_detail_no_score_breakdown_leak(client, db_session):
 
 
 # ===========================================================================
-# Public stats — GET /api/alerts/stats  (NEW)
+# Public stats — GET /api/v1/subscriber/alerts/stats  (NEW)
 # ===========================================================================
 
 
 @pytest.mark.asyncio
 async def test_public_stats_requires_no_auth(client):
-    """GET /api/alerts/stats must succeed without any auth header or cookie."""
-    response = await client.get("/api/alerts/stats")
+    """GET /api/v1/subscriber/alerts/stats must succeed without any auth header or cookie."""
+    response = await client.get("/api/v1/subscriber/alerts/stats")
     assert response.status_code == 200
 
 
@@ -1225,7 +1157,7 @@ async def test_public_stats_empty_returns_zeros(client):
       - total_alerts >= high + medium + low (null-risk alerts are in total)
       - category_breakdown is a list
     """
-    response = await client.get("/api/alerts/stats")
+    response = await client.get("/api/v1/subscriber/alerts/stats")
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data["total_alerts"], int) and data["total_alerts"] >= 0
@@ -1236,93 +1168,6 @@ async def test_public_stats_empty_returns_zeros(client):
     # total_alerts >= bucket sum (null-risk alerts count in total but not buckets)
     bucket_sum = data["high_count"] + data["medium_count"] + data["low_count"]
     assert data["total_alerts"] >= bucket_sum
-
-
-@pytest.mark.asyncio
-async def test_public_stats_counts_published_only(client, db_session):
-    """Stats counts must exclude unpublished alerts entirely.
-
-    Uses delta-based assertions to be resilient to data seeded by prior tests.
-    """
-    # Capture baseline before seeding
-    baseline = (await client.get("/api/alerts/stats")).json()
-
-    source = await _seed_source(db_session)
-    item_pub = await _seed_raw_item(db_session, source, title="Pub High stats_only")
-    item_unpub = await _seed_raw_item(db_session, source, title="Unpub High stats_only")
-
-    # Counts are derived from signal_score_total — score=20 is the High bucket.
-    await _seed_alert(db_session, item_pub, is_published=True, signal_score=20)
-    await _seed_alert(db_session, item_unpub, is_published=False, signal_score=20)
-
-    after = (await client.get("/api/alerts/stats")).json()
-
-    # Only the published alert should increase the count
-    assert after["total_alerts"] == baseline["total_alerts"] + 1
-    assert after["high_count"] == baseline["high_count"] + 1
-    # Unpublished alert must NOT appear — medium and low unchanged
-    assert after["medium_count"] == baseline["medium_count"]
-    assert after["low_count"] == baseline["low_count"]
-
-
-@pytest.mark.asyncio
-async def test_public_stats_risk_level_counts(client, db_session):
-    """high_count, medium_count, low_count correctly partition published alerts.
-
-    Uses delta-based assertions to be resilient to data seeded by prior tests.
-    """
-    baseline = (await client.get("/api/alerts/stats")).json()
-
-    source = await _seed_source(db_session)
-
-    # Buckets derived from signal_score_total (M3 final 0–100 bands):
-    # >=18 high, 10..17 medium, <10 low.
-    for _ in range(2):
-        item = await _seed_raw_item(db_session, source, title="High rl")
-        await _seed_alert(db_session, item, is_published=True, signal_score=20)
-
-    for _ in range(3):
-        item = await _seed_raw_item(db_session, source, title="Medium rl")
-        await _seed_alert(db_session, item, is_published=True, signal_score=10)
-
-    for _ in range(1):
-        item = await _seed_raw_item(db_session, source, title="Low rl")
-        await _seed_alert(db_session, item, is_published=True, signal_score=4)
-
-    after = (await client.get("/api/alerts/stats")).json()
-
-    # Delta assertions: exactly 2 high, 3 medium, 1 low were added
-    assert after["high_count"] == baseline["high_count"] + 2
-    assert after["medium_count"] == baseline["medium_count"] + 3
-    assert after["low_count"] == baseline["low_count"] + 1
-    assert after["total_alerts"] == baseline["total_alerts"] + 6
-
-
-@pytest.mark.asyncio
-async def test_public_stats_total_is_sum_of_risk_levels(client, db_session):
-    """Seeding known-risk-level alerts increases total by the exact delta seeded.
-
-    Uses delta-based assertions. Note: total_alerts >= high+medium+low because
-    other tests may have seeded alerts with null risk_level that appear in total
-    but not in any bucket. This test seeds only well-known risk levels and verifies
-    the delta is exact.
-    """
-    baseline = (await client.get("/api/alerts/stats")).json()
-
-    source = await _seed_source(db_session)
-    # Counts are derived from signal_score_total — pick scores per bucket.
-    score_for = {"high": 20, "medium": 10, "low": 4}
-    for risk in ("high", "medium", "low", "high"):
-        item = await _seed_raw_item(db_session, source, title=f"Sum test {risk}")
-        await _seed_alert(db_session, item, is_published=True, signal_score=score_for[risk])
-
-    after = (await client.get("/api/alerts/stats")).json()
-
-    # We seeded 4 alerts with known risk levels — total must increase by exactly 4
-    assert after["total_alerts"] == baseline["total_alerts"] + 4
-    assert after["high_count"] == baseline["high_count"] + 2
-    assert after["medium_count"] == baseline["medium_count"] + 1
-    assert after["low_count"] == baseline["low_count"] + 1
 
 
 @pytest.mark.asyncio
@@ -1338,7 +1183,7 @@ async def test_public_stats_category_breakdown_correct(client, db_session):
         item = await _seed_raw_item(db_session, source, title="Cyber")
         await _seed_alert(db_session, item, is_published=True, category="Cybercrime")
 
-    response = await client.get("/api/alerts/stats")
+    response = await client.get("/api/v1/subscriber/alerts/stats")
     data = response.json()
     breakdown = {entry["category"]: entry["count"] for entry in data["category_breakdown"]}
 
@@ -1359,7 +1204,7 @@ async def test_public_stats_category_breakdown_ordered_by_count_desc(client, db_
         item = await _seed_raw_item(db_session, source, title="Cyber")
         await _seed_alert(db_session, item, is_published=True, category="Cybercrime")
 
-    response = await client.get("/api/alerts/stats")
+    response = await client.get("/api/v1/subscriber/alerts/stats")
     data = response.json()
     counts = [entry["count"] for entry in data["category_breakdown"]]
     assert counts == sorted(counts, reverse=True), "Breakdown not ordered by count descending"
@@ -1372,7 +1217,7 @@ async def test_public_stats_null_category_excluded_from_breakdown(client, db_ses
     item = await _seed_raw_item(db_session, source, title="No Category")
     await _seed_alert(db_session, item, is_published=True, category=None)
 
-    response = await client.get("/api/alerts/stats")
+    response = await client.get("/api/v1/subscriber/alerts/stats")
     data = response.json()
     categories = [entry["category"] for entry in data["category_breakdown"]]
     assert None not in categories
@@ -1390,7 +1235,7 @@ async def test_public_stats_breakdown_excludes_unpublished(client, db_session):
     await _seed_alert(db_session, item_pub, is_published=True, category="Consumer Scam")
     await _seed_alert(db_session, item_unpub, is_published=False, category="Consumer Scam")
 
-    response = await client.get("/api/alerts/stats")
+    response = await client.get("/api/v1/subscriber/alerts/stats")
     data = response.json()
     breakdown = {entry["category"]: entry["count"] for entry in data["category_breakdown"]}
 
@@ -1408,7 +1253,7 @@ async def test_public_stats_breakdown_excludes_unpublished(client, db_session):
 @pytest.mark.asyncio
 async def test_public_stats_response_shape(client):
     """Stats response must always contain all required top-level keys."""
-    response = await client.get("/api/alerts/stats")
+    response = await client.get("/api/v1/subscriber/alerts/stats")
     assert response.status_code == 200
     data = response.json()
     for key in ("total_alerts", "high_count", "medium_count", "low_count", "category_breakdown"):
@@ -1470,309 +1315,6 @@ async def clean_db(db_session):
     await db_session.execute(delete(Source))
     await db_session.commit()
     return db_session
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_no_auth_required(client):
-    """GET /api/alerts/top must succeed without any auth header or cookie."""
-    response = await client.get("/api/alerts/top")
-    assert response.status_code == 200
-    assert "alerts" in response.json()
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_returns_only_published(client, clean_db):
-    """Unpublished alerts must never appear in /top, even at high score."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    item_pub = await _seed_raw_item(clean_db, source, title="Pub", url="https://x.com/pub")
-    item_unpub = await _seed_raw_item(clean_db, source, title="Unpub", url="https://x.com/unpub")
-
-    a_pub = await _seed_alert(
-        clean_db, item_pub, is_published=True, signal_score=20,
-        entities_json={"names": ["Acme"]},
-    )
-    await _seed_alert(
-        clean_db, item_unpub, is_published=False, signal_score=20,
-        entities_json={"names": ["Beta"]},
-    )
-
-    response = await client.get("/api/alerts/top")
-    assert response.status_code == 200
-    ids = [a["id"] for a in response.json()["alerts"]]
-    assert ids == [a_pub.id]
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_max_three(client, clean_db):
-    """Even with 6 qualifying alerts, /top returns at most 3."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    now = datetime.now(timezone.utc)
-    for i in range(6):
-        item = await _seed_raw_item(
-            clean_db, source, title=f"Alert {i}", url=f"https://x.com/a{i}"
-        )
-        await _seed_alert(
-            clean_db, item, is_published=True, signal_score=20,
-            entities_json={"names": [f"Entity{i}"]},
-            published_at=now - timedelta(minutes=i),
-        )
-
-    response = await client.get("/api/alerts/top")
-    assert response.status_code == 200
-    assert len(response.json()["alerts"]) == 3
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_excludes_below_min_score(client, clean_db):
-    """Alerts at score=14 are excluded; score=15 qualifies."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    item_low = await _seed_raw_item(clean_db, source, title="Low", url="https://x.com/low")
-    item_qual = await _seed_raw_item(clean_db, source, title="Qual", url="https://x.com/qual")
-
-    await _seed_alert(
-        clean_db, item_low, is_published=True, signal_score=14,
-        entities_json={"names": ["X"]},
-    )
-    a_qual = await _seed_alert(
-        clean_db, item_qual, is_published=True, signal_score=15,
-        entities_json={"names": ["Y"]},
-    )
-
-    response = await client.get("/api/alerts/top")
-    ids = [a["id"] for a in response.json()["alerts"]]
-    assert ids == [a_qual.id]
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_ranks_by_score_desc(client, clean_db):
-    """Score is the dominant ranking key — highest score first."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    item16 = await _seed_raw_item(clean_db, source, title="S16", url="https://x.com/s16")
-    item18 = await _seed_raw_item(clean_db, source, title="S18", url="https://x.com/s18")
-    item20 = await _seed_raw_item(clean_db, source, title="S20", url="https://x.com/s20")
-
-    a16 = await _seed_alert(
-        clean_db, item16, is_published=True, signal_score=16,
-        entities_json={"names": ["A"]},
-    )
-    a18 = await _seed_alert(
-        clean_db, item18, is_published=True, signal_score=18,
-        entities_json={"names": ["B"]},
-    )
-    a20 = await _seed_alert(
-        clean_db, item20, is_published=True, signal_score=20,
-        entities_json={"names": ["C"]},
-    )
-
-    response = await client.get("/api/alerts/top")
-    ids = [a["id"] for a in response.json()["alerts"]]
-    assert ids == [a20.id, a18.id, a16.id]
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_tie_broken_by_signal_strength(client, clean_db):
-    """Same score → alert with more event_sources ranks first."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    item_strong = await _seed_raw_item(
-        clean_db, source, title="Strong", url="https://x.com/strong"
-    )
-    item_weak = await _seed_raw_item(
-        clean_db, source, title="Weak", url="https://x.com/weak"
-    )
-
-    a_strong = await _seed_alert(
-        clean_db, item_strong, is_published=True, signal_score=18,
-        entities_json={"names": ["Foo"]},
-    )
-    a_weak = await _seed_alert(
-        clean_db, item_weak, is_published=True, signal_score=18,
-        entities_json={"names": ["Bar"]},
-    )
-
-    # Give a_strong two event_sources bridges (different events)
-    await _seed_event_link(clean_db, None, a_strong)
-    await _seed_event_link(clean_db, None, a_strong)
-
-    response = await client.get("/api/alerts/top")
-    ids = [a["id"] for a in response.json()["alerts"]]
-    assert ids[0] == a_strong.id
-    assert ids[1] == a_weak.id
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_tie_broken_by_source_credibility(client, clean_db):
-    """Same score + signal strength → higher source credibility wins."""
-    src_high = await _seed_source(clean_db, name="Trusted", credibility_score=5)
-    src_low = await _seed_source(clean_db, name="Less Trusted", credibility_score=3)
-    item_high = await _seed_raw_item(
-        clean_db, src_high, title="High", url="https://x.com/high"
-    )
-    item_low = await _seed_raw_item(
-        clean_db, src_low, title="Low", url="https://x.com/low"
-    )
-
-    a_high = await _seed_alert(
-        clean_db, item_high, is_published=True, signal_score=18,
-        entities_json={"names": ["A"]},
-    )
-    a_low = await _seed_alert(
-        clean_db, item_low, is_published=True, signal_score=18,
-        entities_json={"names": ["B"]},
-    )
-
-    response = await client.get("/api/alerts/top")
-    ids = [a["id"] for a in response.json()["alerts"]]
-    assert ids[0] == a_high.id
-    assert ids[1] == a_low.id
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_tie_broken_by_recency(client, clean_db):
-    """Identical score / strength / credibility → newer source date wins."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    now = datetime.now(timezone.utc)
-    item_old = await _seed_raw_item(
-        clean_db, source, title="Old", url="https://x.com/old",
-        published_at=now - timedelta(days=2),
-    )
-    item_new = await _seed_raw_item(
-        clean_db, source, title="New", url="https://x.com/new",
-        published_at=now - timedelta(hours=1),
-    )
-
-    a_old = await _seed_alert(
-        clean_db, item_old, is_published=True, signal_score=18,
-        entities_json={"names": ["A"]},
-    )
-    a_new = await _seed_alert(
-        clean_db, item_new, is_published=True, signal_score=18,
-        entities_json={"names": ["B"]},
-    )
-
-    response = await client.get("/api/alerts/top")
-    ids = [a["id"] for a in response.json()["alerts"]]
-    assert ids[0] == a_new.id
-    assert ids[1] == a_old.id
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_dedups_primary_entity(client, clean_db):
-    """Two alerts whose primary entity is identical → only one is kept."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    item_a = await _seed_raw_item(clean_db, source, title="A", url="https://x.com/a")
-    item_b = await _seed_raw_item(clean_db, source, title="B", url="https://x.com/b")
-    item_c = await _seed_raw_item(clean_db, source, title="C", url="https://x.com/c")
-
-    now = datetime.now(timezone.utc)
-    # All three at the same score so dedup is the deciding factor.
-    a_a = await _seed_alert(
-        clean_db, item_a, is_published=True, signal_score=20,
-        entities_json={"names": ["Acme Corp"]},
-        published_at=now - timedelta(minutes=1),
-    )
-    # Same primary entity as A — must be suppressed.
-    await _seed_alert(
-        clean_db, item_b, is_published=True, signal_score=20,
-        entities_json={"names": ["Acme Corp", "FBI"]},
-        published_at=now - timedelta(minutes=2),
-    )
-    a_c = await _seed_alert(
-        clean_db, item_c, is_published=True, signal_score=20,
-        entities_json={"names": ["Beta Inc"]},
-        published_at=now - timedelta(minutes=3),
-    )
-
-    response = await client.get("/api/alerts/top")
-    ids = [a["id"] for a in response.json()["alerts"]]
-    assert a_a.id in ids
-    assert a_c.id in ids
-    # B is suppressed because its primary entity ("Acme Corp") was already claimed.
-    assert len(ids) == 2
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_alerts_without_entities_kept_unique(client, clean_db):
-    """Alerts with no entities use a per-alert fallback key — never silently dropped."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    item_a = await _seed_raw_item(clean_db, source, title="A", url="https://x.com/a")
-    item_b = await _seed_raw_item(clean_db, source, title="B", url="https://x.com/b")
-
-    a_a = await _seed_alert(
-        clean_db, item_a, is_published=True, signal_score=20,
-        entities_json=None,
-    )
-    a_b = await _seed_alert(
-        clean_db, item_b, is_published=True, signal_score=20,
-        entities_json=None,
-    )
-
-    response = await client.get("/api/alerts/top")
-    ids = [a["id"] for a in response.json()["alerts"]]
-    assert a_a.id in ids
-    assert a_b.id in ids
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_empty_when_none_qualify(client, clean_db):
-    """All alerts below threshold → 200 with {"alerts": []}."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    item = await _seed_raw_item(clean_db, source, title="Low", url="https://x.com/low")
-    await _seed_alert(
-        clean_db, item, is_published=True, signal_score=10,
-        entities_json={"names": ["X"]},
-    )
-
-    response = await client.get("/api/alerts/top")
-    assert response.status_code == 200
-    assert response.json() == {"alerts": []}
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_no_internal_field_leakage(client, clean_db):
-    """Top response items must contain only PublicAlertRead keys — no internal fields."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    item = await _seed_raw_item(clean_db, source, title="Leak Test", url="https://x.com/leak")
-    await _seed_alert(
-        clean_db, item, is_published=True, signal_score=20,
-        entities_json={"names": ["A"]},
-        secondary_category="Wire Fraud",
-        financial_impact_estimate="$5M",
-        victim_scale_raw="multiple",
-        matched_keywords=["fraud"],
-        score_source_credibility=5,
-        score_financial_impact=3,
-        score_victim_scale=3,
-        score_cross_source=3,
-        score_trend_acceleration=3,
-        ai_model="gpt-4o-mini",
-    )
-
-    response = await client.get("/api/alerts/top")
-    alerts = response.json()["alerts"]
-    assert len(alerts) == 1
-    item_resp = alerts[0]
-
-    forbidden = (
-        "score_source_credibility",
-        "score_financial_impact",
-        "score_victim_scale",
-        "score_cross_source",
-        "score_trend_acceleration",
-        "signal_score_total",
-        "entities_json",
-        "victim_scale_raw",
-        "financial_impact_estimate",
-        "is_published",
-        "is_relevant",
-        "published_by_user_id",
-        "review_status",
-        "ai_model",
-        "raw_item",
-        "raw_item_id",
-        "matched_keywords",
-    )
-    for key in forbidden:
-        assert key not in item_resp, f"Forbidden internal field leaked: {key!r}"
 
 
 # ===========================================================================
@@ -1855,127 +1397,12 @@ def _alert_with_outlets(*source_names):
     )
 
 
-def test_signal_strength_counts_distinct_outlets():
-    from app.api.public_alerts import _signal_strength
-
-    # 5 links from one outlet → strength 1 (no inflation).
-    assert _signal_strength(_alert_with_outlets(*(["BleepingComputer"] * 5))) == 1
-    # Two distinct outlets → 2.
-    assert _signal_strength(_alert_with_outlets("BleepingComputer", "KrebsOnSecurity")) == 2
-    # Three distinct outlets → 3.
-    assert (
-        _signal_strength(
-            _alert_with_outlets("BleepingComputer", "KrebsOnSecurity", "SEC Press Releases")
-        )
-        == 3
-    )
-    # Case/whitespace variants collapse; blanks ignored.
-    assert _signal_strength(_alert_with_outlets("Krebs", " krebs ", "KREBS")) == 1
-    assert _signal_strength(_alert_with_outlets(None, "", "   ")) == 0
-    assert _signal_strength(_alert_with_outlets()) == 0
-
-
-def test_primary_entity_key_skips_agencies():
-    """When an alert lists FBI first and Acme second, dedup must pick Acme."""
-    from app.api.public_alerts import _primary_entity_key
-    from app.models.processed_alert import ProcessedAlert
-
-    alert = ProcessedAlert(
-        id=1,
-        raw_item_id=1,
-        entities_json={"names": ["FBI", "Department of Justice", "Acme Corp", "John Doe"]},
-    )
-    assert _primary_entity_key(alert) == "acme corp"
-
-
-def test_primary_entity_key_falls_back_when_only_agencies():
-    """If every listed entity is an agency, fall back to the alert:{id} key."""
-    from app.api.public_alerts import _primary_entity_key
-    from app.models.processed_alert import ProcessedAlert
-
-    alert = ProcessedAlert(
-        id=42,
-        raw_item_id=1,
-        entities_json={"names": ["FBI", "DOJ", "U.S. Attorney's Office"]},
-    )
-    assert _primary_entity_key(alert) == "alert:42"
-
-
 def test_entity_set_excludes_agencies():
     """Overlap must be computed on subjects, not on shared prosecutors."""
     from app.api.public_alerts import _entity_set
 
     s = _entity_set({"names": ["FBI", "Department of Justice", "Acme Corp"]})
     assert s == {"acme corp"}
-
-
-@pytest.mark.asyncio
-async def test_top_alerts_dedup_uses_subject_not_agency(client, clean_db):
-    """Two alerts both leading with FBI but distinct subjects must BOTH appear."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    item_a = await _seed_raw_item(clean_db, source, title="A", url="https://x.com/a")
-    item_b = await _seed_raw_item(clean_db, source, title="B", url="https://x.com/b")
-
-    a_a = await _seed_alert(
-        clean_db, item_a, is_published=True, signal_score=20,
-        entities_json={"names": ["FBI", "Acme Corp"]},
-    )
-    a_b = await _seed_alert(
-        clean_db, item_b, is_published=True, signal_score=20,
-        entities_json={"names": ["FBI", "Beta Inc"]},
-    )
-
-    response = await client.get("/api/alerts/top")
-    ids = [a["id"] for a in response.json()["alerts"]]
-    assert a_a.id in ids
-    assert a_b.id in ids
-
-
-@pytest.mark.asyncio
-async def test_related_signals_requires_non_agency_overlap(client, clean_db):
-    """Two same-event alerts that share only an agency must NOT be related."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    item_a = await _seed_raw_item(clean_db, source, title="CSAM Case", url="https://x.com/a")
-    item_b = await _seed_raw_item(
-        clean_db, source, title="Securities Fraud", url="https://x.com/b"
-    )
-    item_c = await _seed_raw_item(
-        clean_db, source, title="Other Fraud", url="https://x.com/c"
-    )
-
-    # Alert A: only agency entity ("FBI") — share-only-agency overlap must
-    # NOT surface peers as related_signals (overlap set is empty after the
-    # agency stoplist strips FBI from both sides).
-    alert_a = await _seed_alert(
-        clean_db, item_a, is_published=True, signal_score=20,
-        entities_json={"names": ["FBI", "Department of Justice"]},
-    )
-    await _seed_alert(
-        clean_db, item_b, is_published=True, signal_score=20,
-        entities_json={"names": ["FBI", "Acme Corp"]},
-    )
-    await _seed_alert(
-        clean_db, item_c, is_published=True, signal_score=20,
-        entities_json={"names": ["FBI", "Beta Inc"]},
-    )
-
-    # Link all three to the same event so event_id overlap exists.
-    event_id = await _seed_event_link(clean_db, None, alert_a)
-    # We need to refresh-and-link the others too. Re-fetch them by id via the
-    # session for the link helper to work cleanly.
-    from sqlalchemy import select as _select
-    from app.models.processed_alert import ProcessedAlert as _PA
-    others = (
-        await clean_db.execute(_select(_PA).where(_PA.id != alert_a.id))
-    ).scalars().all()
-    for other in others:
-        await _seed_event_link(clean_db, event_id, other)
-
-    data = (await client.get(f"/api/alerts/{alert_a.id}")).json()
-    # related_signals must be omitted entirely — alert_a's only entities are
-    # agencies, so its non-agency entity_set is empty and the section is
-    # skipped per the existing "no current_entities → no peers" guard.
-    assert "related_signals" not in data
 
 
 # ===========================================================================
@@ -2009,7 +1436,7 @@ async def test_score_normalized_on_detail(client, db_session):
     item = await _seed_raw_item(db_session, source, title="Normalized Detail")
     alert = await _seed_alert(db_session, item, is_published=True, signal_score=20)
 
-    data = (await client.get(f"/api/alerts/{alert.id}")).json()
+    data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
     assert data["score"] == 80  # 20/25 → 80
     assert data["signal_score"] == 80
     assert data["risk_level"] == "High"
@@ -2027,7 +1454,7 @@ async def test_score_formula_kens_examples(client, db_session):
         alert = await _seed_alert(
             db_session, item, is_published=True, signal_score=score,
         )
-        data = (await client.get(f"/api/alerts/{alert.id}")).json()
+        data = (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).json()
         assert data["score"] == expected_100, f"score {score}"
         assert data["risk_level"] == expected_lvl, f"score {score}"
 
@@ -2041,8 +1468,8 @@ async def test_score_band_boundaries_low_to_medium(client, db_session):
     a9 = await _seed_alert(db_session, item9, is_published=True, signal_score=9)
     a10 = await _seed_alert(db_session, item10, is_published=True, signal_score=10)
 
-    d9 = (await client.get(f"/api/alerts/{a9.id}")).json()
-    d10 = (await client.get(f"/api/alerts/{a10.id}")).json()
+    d9 = (await client.get(f"/api/v1/subscriber/alerts/{a9.id}")).json()
+    d10 = (await client.get(f"/api/v1/subscriber/alerts/{a10.id}")).json()
     assert d9["score"] == 36
     assert d9["risk_level"] == "Low"
     assert d10["score"] == 40
@@ -2063,25 +1490,57 @@ async def test_score_band_boundaries_medium_to_high(client, db_session):
     a17 = await _seed_alert(db_session, item17, is_published=True, signal_score=17)
     a18 = await _seed_alert(db_session, item18, is_published=True, signal_score=18)
 
-    d17 = (await client.get(f"/api/alerts/{a17.id}")).json()
-    d18 = (await client.get(f"/api/alerts/{a18.id}")).json()
+    d17 = (await client.get(f"/api/v1/subscriber/alerts/{a17.id}")).json()
+    d18 = (await client.get(f"/api/v1/subscriber/alerts/{a18.id}")).json()
     assert d17["score"] == 68
     assert d17["risk_level"] == "Medium"
     assert d18["score"] == 72
     assert d18["risk_level"] == "High"
 
 
-@pytest.mark.asyncio
-async def test_top_alerts_signal_score_normalized(client, clean_db):
-    """/api/alerts/top items expose signal_score on the 0–100 scale."""
-    source = await _seed_source(clean_db, credibility_score=5)
-    item = await _seed_raw_item(clean_db, source, title="Top RS", url="https://x.com/toprs")
-    await _seed_alert(
-        clean_db, item, is_published=True, signal_score=18,
-        entities_json={"names": ["Acme"]},
-    )
 
-    body = (await client.get("/api/alerts/top")).json()
-    assert len(body["alerts"]) == 1
-    item0 = body["alerts"][0]
-    assert item0["signal_score"] == 72
+
+# ---------------------------------------------------------------------------
+# Removed public routes must be gone (Slice 3B.2P)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_public_top_alerts_route_removed(client: AsyncClient):
+    assert (await client.get("/api/alerts/top")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_public_stats_route_removed(client: AsyncClient):
+    assert (await client.get("/api/alerts/stats")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_public_search_route_removed(client: AsyncClient):
+    assert (await client.get("/api/search/alerts?q=fraud")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_public_alert_detail_route_removed_for_a_real_id(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """A *known-existing* id, so the 404 proves the route is gone.
+
+    An unknown id would 404 either way and prove nothing.
+    """
+    source = await _seed_source(db_session)
+    raw = await _seed_raw_item(db_session, source)
+    alert = await _seed_alert(db_session, raw, is_published=True)
+
+    # The alert really is served by a retained endpoint...
+    assert (await client.get(f"/api/v1/subscriber/alerts/{alert.id}")).status_code == 200
+    # ...but the public detail route no longer exists.
+    assert (await client.get(f"/api/alerts/{alert.id}")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_public_landing_feed_is_retained(client: AsyncClient):
+    """The one public route the Landing Page uses must still answer."""
+    response = await client.get("/api/alerts")
+    assert response.status_code == 200
+    assert "alerts" in response.json()

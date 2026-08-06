@@ -50,7 +50,7 @@ AI-driven fraud intelligence monitoring system. Collects raw data from trusted g
                                            │
                     ┌──────────────────────▼───────────────────────────┐
                     │            FastAPI REST API + Admin Dashboard    │
-                    │  /api/v1/alerts · /api/v1/events · /dashboard    │
+                    │  /api/v1/alerts · /api/v1/events · React Admin   │
                     └──────────────────────────────────────────────────┘
 ```
 
@@ -70,7 +70,7 @@ AI-driven fraud intelligence monitoring system. Collects raw data from trusted g
 | Config | pydantic-settings |
 | AI Processing | OpenAI GPT-4o-mini (structured outputs) |
 | Auth | python-jose (JWT) + passlib/bcrypt |
-| Dashboard | Jinja2 templates + Bootstrap 5 |
+| Admin UI | React (Next.js) frontend, served separately |
 
 ---
 
@@ -134,16 +134,10 @@ hiddenalerts/
 │   │   ├── auth.py                     # M3: JSON auth endpoints (login, me, change-password)
 │   │   ├── client_alerts.py           # M3: subscriber-safe published alert feed
 │   │   ├── public_alerts.py           # M3 Slice 4: public feed (list, detail, stats) — no auth
-│   │   └── dashboard.py               # M2: Jinja2 HTML routes (admin-only)
-│   ├── templates/                      # Jinja2 HTML templates
-│   │   ├── base.html                   # Bootstrap 5 layout + navbar
-│   │   ├── auth/login.html             # Login page
-│   │   └── dashboard/
 │   │       ├── index.html              # HIGH/MEDIUM/LOW alert panels
 │   │       ├── alert_detail.html       # Score breakdown + review form
 │   │       └── monitoring.html         # Source health + run logs
 │   └── static/
-│       └── css/dashboard.css           # Custom dashboard styles
 ├── tests/
 │   ├── conftest.py                     # pytest fixtures (SQLite, JWT secret patch)
 │   ├── test_pipeline/
@@ -227,8 +221,7 @@ uvicorn app.main:app --reload --port 8000
 
 ```
 http://localhost:8000/api/v1/health  → DB + scheduler status
-http://localhost:8000/login          → Admin dashboard login
-http://localhost:8000/docs           → Swagger UI (all endpoints)
+http://localhost:8000/docs           → OpenAPI documentation
 ```
 
 ---
@@ -545,25 +538,12 @@ The field name on the response stays `signal_score` / `signal_score_total` /
 
 ## Admin Dashboard
 
-The dashboard is a Jinja2 HTML interface for reviewing fraud alerts:
+Alert review, source monitoring and the Intelligence Brief CMS are served by the React Admin UI against the Internal-JWT Admin APIs (`/api/v1/alerts`, `/api/v1/events`,
+`/api/v1/sources*`, `/api/v1/admin/*`).
 
-| URL | Description |
-|-----|-------------|
-| `/login` | Login with admin email + password |
-| `/logout` | Clear session cookie |
-| `/dashboard` | HIGH / MEDIUM / LOW alert panels, sortable by signal score |
-| `/dashboard/alerts/{id}` | Alert detail — summary, score breakdown, entities, review form |
-| `/dashboard/monitoring` | Source health table + last 50 run logs |
+Shared Internal JWT authentication is unchanged — `POST /api/v1/auth/login`,
+`GET /api/v1/auth/me` and `POST /api/v1/auth/change-password` all remain.
 
-**Authentication:** HTTP-only JWT cookie (`access_token`), 30-day expiry. Admin-only — subscribers are redirected to `/login`.
-
-**Review workflow:** On each alert detail page, reviewers can:
-- Approve the alert as accurate
-- Mark it as a false positive
-- Edit the AI summary
-- Override the risk level
-
----
 
 ## API Endpoints
 

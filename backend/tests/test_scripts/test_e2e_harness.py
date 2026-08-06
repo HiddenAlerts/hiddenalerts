@@ -1203,8 +1203,12 @@ def _smoke_handler(missing: tuple[str, ...] = ()):
                 "user": {"id": 1, "email": "a@b.co", "role": "admin", "is_active": True}})
         if path == production_smoke.HEALTH_PATH:
             return httpx.Response(200, json={"status": "ok"})
-        if path in (production_smoke.PUBLIC_ALERTS_PATH, production_smoke.PUBLIC_TOP_PATH):
+        if path == production_smoke.PUBLIC_ALERTS_PATH:
             return httpx.Response(200, json={"alerts": []})
+        # Slice 3B.2P removed these; the mock models the cleaned-up release.
+        if path in (*production_smoke.REMOVED_JINJA_PATHS,
+                    *production_smoke.REMOVED_PUBLIC_PATHS):
+            return httpx.Response(404, json={"detail": "Not Found"})
         if path == production_smoke.ADMIN_SOURCES_PATH:
             if not _admin_authed(request):
                 return unauthenticated
@@ -1248,10 +1252,6 @@ def _smoke_handler(missing: tuple[str, ...] = ()):
             if not _admin_authed(request):
                 return unauthenticated
             return httpx.Response(200, json={"id": 7, "title": "x"})
-        if path == production_smoke.JINJA_DASHBOARD_PATH:
-            return httpx.Response(302, headers={"location": "/login"})
-        if path == production_smoke.JINJA_LOGIN_PATH:
-            return httpx.Response(200, text="<html>login</html>")
         return httpx.Response(404, json={"detail": "Not Found"})
 
     return handler
@@ -1494,3 +1494,62 @@ def test_medium_risk_allowed_pre_deploy_rejected_post_deploy():
     assert checks.check_top_alerts(medium, weekly_contract=False) == []
     assert any("neither critical nor high" in p
                for p in checks.check_top_alerts(medium, weekly_contract=True))
+
+
+# ---------------------------------------------------------------------------
+# Slice 3B.2P — removed surface expectations
+# ---------------------------------------------------------------------------
+
+
+def test_harness_no_longer_expects_the_jinja_interface():
+    """The old 'stays protected' / 'route retained' expectations are gone."""
+    import inspect
+
+    src = inspect.getsource(production_smoke)
+    assert "legacy dashboard stays protected" not in src
+    assert "legacy login route retained" not in src
+
+
+def test_removed_surface_constants_cover_the_cleanup():
+    assert set(production_smoke.REMOVED_JINJA_PATHS) >= {"/login", "/logout", "/dashboard"}
+    assert set(production_smoke.REMOVED_PUBLIC_PATHS) == {
+        "/api/alerts/top", "/api/alerts/stats", "/api/search/alerts"
+    }
+    # Only GETs — the harness must never POST at production to prove a 404.
+    assert all(p.startswith("/") for p in production_smoke.REMOVED_JINJA_PATHS)
+
+
+@pytest.mark.asyncio
+async def test_post_deploy_requires_removed_paths_to_be_404():
+    """A release that still serves a removed path must fail post-deploy."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/dashboard":
+            return httpx.Response(302, headers={"location": "/login"})  # not removed
+        return _smoke_handler()(request)
+
+    results = await _run_smoke(handler, post_deploy=True)
+    failed = {r.name for r in results.failed}
+    assert "removed: /dashboard" in failed
+
+
+@pytest.mark.asyncio
+async def test_pre_deploy_does_not_fail_on_a_still_present_removed_path():
+    """Before deployment the old release still serves them — that is not a failure."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/dashboard":
+            return httpx.Response(302, headers={"location": "/login"})
+        return _smoke_handler()(request)
+
+    results = await _run_smoke(handler, post_deploy=False)
+    assert "removed: /dashboard" not in {r.name for r in results.failed}
+    assert any(r.name == "removed: /dashboard" and r.skipped for r in results.results)
+
+
+@pytest.mark.asyncio
+async def test_retained_landing_feed_is_asserted_in_both_modes():
+    for post_deploy in (False, True):
+        results = await _run_smoke(_smoke_handler(), post_deploy=post_deploy)
+        hit = [r for r in results.results if r.name == "retained: /api/alerts still 200"]
+        assert hit and hit[0].passed, f"post_deploy={post_deploy}"

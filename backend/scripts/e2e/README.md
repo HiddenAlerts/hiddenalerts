@@ -151,9 +151,16 @@ GET /api/v1/subscriber/alerts/top
 GET /api/v1/subscriber/alerts/categories
 ```
 
-Everything else — the public landing feed, subscriber alerts/stats/search, both
-Client routes, and the retained Jinja protection checks — is mandatory in **both**
-modes.
+Everything else — the public landing feed, subscriber alerts/stats/search and
+both Client routes — is mandatory in **both** modes.
+
+**Removed surface (Slice 3B.2P).** `/login`, `/logout`, `/dashboard`,
+`/dashboard/*`, `/api/alerts/top`, `/api/alerts/stats` and `/api/search/alerts`
+were deleted. Before deployment the old release still serves them, so a
+pre-deploy run only *records* their presence; with `--post-deploy` each must
+return **404**. The harness issues GETs only — proving the removed POST routes
+is the route-inventory test's job, not something to demonstrate by sending a
+write request at production.
 
 **Two endpoints exist in both releases but behave differently**, so presence
 alone cannot tell them apart and their *assertions* are mode-gated too:
