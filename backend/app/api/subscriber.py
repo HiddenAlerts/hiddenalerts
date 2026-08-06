@@ -331,12 +331,13 @@ async def subscriber_alert_detail(
     _: ActiveSubscriberContext = Depends(require_active_subscription),
     db: AsyncSession = Depends(get_db),
 ) -> SubscriberAlertDetail:
-    """Enriched published-alert detail — mirrors GET /api/alerts/{id}, plus the
-    V1 `risk_band` and the curated `risk_explanation` (OPEN-6).
+    """Enriched published-alert detail for subscribers.
 
-    404 if the alert does not exist or is not published. Reuses the public detail
-    mapper (`_to_public_detail`) so the shared fields stay identical; the
-    subscriber-only fields are added here, never on the public endpoint.
+    Reuses the shared published-detail query and `_to_public_detail` mapper so the
+    common alert fields stay consistent, then adds the subscriber-specific V1
+    `risk_band` and curated `risk_explanation`.
+
+    Returns 404 when the alert does not exist or is not published.
     """
     result = await db.execute(
         public_alerts_api._detail_stmt().where(ProcessedAlert.id == alert_id)
