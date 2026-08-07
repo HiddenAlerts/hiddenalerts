@@ -34,7 +34,7 @@ export function dashboardTopAlertsWeekQueryKey() {
 }
 
 /**
- * Top Alerts This Week from `GET /v1/subscriber/alerts/top`.
+ * Latest Critical & High Alerts from `GET /v1/subscriber/alerts/top`.
  */
 export function useDashboardTopAlertsWeekQuery(options?: {
   enabled?: boolean;

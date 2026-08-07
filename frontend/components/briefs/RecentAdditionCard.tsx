@@ -20,7 +20,7 @@ export const RecentAdditionCard: FC<RecentAdditionCardProps> = ({
     href={brief.href}
     aria-label={`${brief.title} — risk score ${formatBriefRiskScore(brief.riskScore)}`}
     className={cn(
-      'border-border bg-surface/30 hover:border-primary-500/40 focus-visible:ring-primary-500/40 group flex items-center gap-3 rounded-lg border p-2.5 transition-colors focus-visible:ring-2 focus-visible:outline-none',
+      'border-border bg-surface/30 hover:border-primary-500/40 focus-visible:ring-primary-500/40 group flex h-full items-start gap-3 rounded-lg border p-2.5 transition-colors focus-visible:ring-2 focus-visible:outline-none',
       className,
     )}
   >
@@ -38,11 +38,11 @@ export const RecentAdditionCard: FC<RecentAdditionCardProps> = ({
         className="size-14 shrink-0 rounded-md"
       />
     )}
-    <div className="min-w-0">
-      <h4 className="text-foreground line-clamp-2 text-sm leading-snug font-semibold">
+    <div className="flex min-w-0 flex-1 flex-col">
+      <h4 className="text-foreground line-clamp-2 min-h-[2.5rem] text-sm leading-snug font-semibold">
         {brief.title}
       </h4>
-      <p className="text-muted mt-1 text-xs">
+      <p className="text-muted mt-auto pt-1 text-xs">
         <span className="text-danger font-semibold">
           Risk: {formatBriefRiskScore(brief.riskScore)}
         </span>

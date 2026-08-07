@@ -19,7 +19,7 @@ export type DashboardTopAlertsThisWeekProps = {
 export const DashboardTopAlertsThisWeek: FC<
   DashboardTopAlertsThisWeekProps
 > = ({
-  title = 'Top Alerts This Week',
+  title = 'Latest Critical & High Alerts',
   subtitle = 'Newest Critical and High-Risk threats — updated continuously.',
   alerts,
   viewAllHref,
@@ -35,7 +35,7 @@ export const DashboardTopAlertsThisWeek: FC<
       subtitle={subtitle}
       viewAllHref={viewAllHref}
       viewAllLabel={viewAllLabel}
-      headingId="dashboard-top-alerts-week-heading"
+      headingId="dashboard-latest-critical-high-alerts-heading"
       className={className}
       bodyClassName={cn('mt-5', hasRows && 'space-y-3 lg:space-y-4')}
     >
@@ -43,7 +43,7 @@ export const DashboardTopAlertsThisWeek: FC<
         bodyContent
       ) : alerts.length === 0 ? (
         <p className="text-muted border-border rounded-lg border border-dashed px-4 py-8 text-center text-sm">
-          No Critical or High-Risk alerts to display this week.
+          No Critical or High-Risk alerts to display right now.
         </p>
       ) : (
         alerts.map(alert => (

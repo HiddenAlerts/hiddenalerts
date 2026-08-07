@@ -19,7 +19,7 @@ const riskScoreTone: Record<BriefRiskLabel, string> = {
 export type BriefCardProps = {
   brief: SubscriberBrief;
   className?: string;
-  /** Override cover aspect (default `aspect-[16/10]`). */
+  /** Override cover aspect (default `aspect-[16/9]`). */
   imageClassName?: string;
 };
 
@@ -33,14 +33,14 @@ export const BriefCard: FC<BriefCardProps> = ({
     href={brief.href}
     aria-label={`${brief.title} — risk score ${formatBriefRiskScore(brief.riskScore)}, ${brief.riskLabel} risk`}
     className={cn(
-      'border-border bg-background-alt focus-visible:ring-primary-500/40 group relative flex flex-col overflow-hidden rounded-xl border transition-colors hover:border-primary-500/40 focus-visible:ring-2 focus-visible:outline-none',
+      'border-border bg-background-alt focus-visible:ring-primary-500/40 group relative flex h-full flex-col overflow-hidden rounded-xl border transition-colors hover:border-primary-500/40 focus-visible:ring-2 focus-visible:outline-none',
       className,
     )}
   >
     <div
       className={cn(
         'bg-surface-muted relative w-full overflow-hidden',
-        imageClassName ?? 'aspect-[16/10]',
+        imageClassName ?? 'aspect-[16/9]',
       )}
     >
       {brief.featuredImage ? (
@@ -63,33 +63,36 @@ export const BriefCard: FC<BriefCardProps> = ({
     <div className="flex flex-1 flex-col gap-2.5 p-3.5 sm:p-4">
       <span
         className={cn(
-          'text-xs font-semibold tracking-wide uppercase',
+          'line-clamp-1 text-xs font-semibold tracking-wide uppercase',
           riskScoreTone[brief.riskLabel],
         )}
       >
         {brief.category}
       </span>
-      <h3 className="text-foreground line-clamp-3 text-sm leading-snug font-semibold">
+      <h3 className="text-foreground line-clamp-3 min-h-[3.75rem] text-sm leading-snug font-semibold">
         {brief.title}
       </h3>
-      <div className="text-muted mt-auto flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
-        <span className="whitespace-nowrap">{formatBriefDate(brief.date)}</span>
+      <div className="mt-auto flex items-center justify-between gap-3 pt-1">
+        <div className="text-muted grid min-w-0 flex-1 grid-cols-[1fr_auto] items-center gap-x-2 text-xs">
+          <span className="truncate whitespace-nowrap">
+            {formatBriefDate(brief.date)}
+          </span>
+          <span
+            className={cn(
+              'font-semibold whitespace-nowrap tabular-nums',
+              riskScoreTone[brief.riskLabel],
+            )}
+          >
+            {formatBriefRiskScore(brief.riskScore)}
+          </span>
+        </div>
         <span
-          className={cn(
-            'font-semibold whitespace-nowrap tabular-nums',
-            riskScoreTone[brief.riskLabel],
-          )}
+          className="text-danger group-hover:text-danger-300 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+          aria-hidden
         >
-          {formatBriefRiskScore(brief.riskScore)}
+          <ArrowRight className="size-4" />
         </span>
       </div>
     </div>
-
-    <span
-      className="text-danger group-hover:text-danger-300 pointer-events-none absolute right-4 bottom-4 opacity-0 transition-opacity group-hover:opacity-100"
-      aria-hidden
-    >
-      <ArrowRight className="size-4" />
-    </span>
   </Link>
 );

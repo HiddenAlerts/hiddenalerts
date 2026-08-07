@@ -44,7 +44,7 @@ export const RecentAdditions: FC<RecentAdditionsProps> = ({
         </Link>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-4 grid auto-rows-fr items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {briefs.map(brief => (
           <RecentAdditionCard key={brief.id} brief={brief} />
         ))}

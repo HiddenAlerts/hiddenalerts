@@ -62,13 +62,9 @@ export const DashboardIntelligenceBriefs: FC<
           No intelligence briefs available right now.
         </p>
       ) : (
-        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 md:gap-4">
+        <div className="mt-5 grid auto-rows-fr grid-cols-1 items-stretch gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
           {briefs.map(brief => (
-            <BriefCard
-              key={brief.id}
-              brief={brief}
-              imageClassName="aspect-[16/9]"
-            />
+            <BriefCard key={brief.id} brief={brief} />
           ))}
         </div>
       )

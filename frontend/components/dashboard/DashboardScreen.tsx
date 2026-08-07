@@ -200,7 +200,7 @@ export const DashboardScreen: FC = () => {
       />
 
       <DashboardTopAlertsThisWeek
-        title="Top Alerts This Week"
+        title="Latest Critical & High Alerts"
         subtitle="Critical & High only — newest first."
         alerts={topAlerts}
         viewAllHref={alertsContinueHref}
