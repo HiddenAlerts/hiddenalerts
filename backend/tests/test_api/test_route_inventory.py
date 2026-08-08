@@ -133,7 +133,14 @@ def test_subscriber_top_alerts_remains_and_is_protected():
     assert ("GET", "/api/v1/subscriber/alerts/top") in ROUTES
     assert "require_active_subscription" in _auth_deps("GET", "/api/v1/subscriber/alerts/top")
     route = ROUTES[("GET", "/api/v1/subscriber/alerts/top")]
-    assert route.response_model.__name__ == "PublicAlertsResponse"
+    # Slice 3B.2Y: moved from the public schema to the subscriber one so the
+    # response carries the canonical V1 `risk_band`. Additive — the subscriber
+    # item extends the public item, so no previously promised field was lost.
+    assert route.response_model.__name__ == "SubscriberAlertsResponse"
+    from app.schemas.alert import PublicAlertRead, SubscriberAlertRead
+
+    assert issubclass(SubscriberAlertRead, PublicAlertRead)
+    assert set(PublicAlertRead.model_fields) <= set(SubscriberAlertRead.model_fields)
 
 
 @pytest.mark.parametrize("path", [

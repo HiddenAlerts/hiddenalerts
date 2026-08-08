@@ -292,11 +292,17 @@ class TestSubscriberTopAlerts:
     async def test_payload_shape_matches_public(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Same keys and types as the retained public feed item shape.
+        """Public feed item shape PLUS the V1 `risk_band`.
 
         The public Top Alerts route was removed in Slice 3B.2P, so the reference
         shape now comes from the retained Landing feed — both are rendered by the
         shared `_to_public_read` mapper, which is what this guards.
+
+        Slice 3B.2Y: Top Alerts moved from the public schema to the subscriber
+        one so the Critical badge has a canonical field to read. The change is
+        additive, and this test now pins that precisely — every public key must
+        still be present with the same type, and `risk_band` is the only
+        addition. That is the same convention the subscriber list uses above.
         """
         await _seed_published_alert(db_session, signal_score=20)
         sub_id = f"top-{uuid.uuid4()}"
@@ -313,8 +319,14 @@ class TestSubscriberTopAlerts:
         sub_alerts, public_alerts = sub.json()["alerts"], public.json()["alerts"]
         assert sub_alerts, "a freshly published Critical alert qualifies this week"
         assert public_alerts, "the landing feed provides the reference shape"
-        assert set(sub_alerts[0]) == set(public_alerts[0])
+        assert set(sub_alerts[0]) - set(public_alerts[0]) == {"risk_band"}, (
+            "risk_band is the only addition"
+        )
+        assert not set(public_alerts[0]) - set(sub_alerts[0]), "nothing was dropped"
+        assert sub_alerts[0]["risk_band"] in ("critical", "high", "medium", "below_60")
         for key, value in sub_alerts[0].items():
+            if key == "risk_band":
+                continue
             assert type(value) is type(public_alerts[0][key]) or value is None, key
 
     async def test_diverges_from_public_on_an_old_alert(
@@ -1022,17 +1034,38 @@ class TestSubscriberTopAlertsDisplayDate:
         assert "_to_public_read" in wrapper
         assert "model_copy" in wrapper
 
-    async def test_response_model_and_openapi_are_unchanged(self):
+    async def test_response_model_carries_risk_band_and_stays_backward_compatible(self):
+        """Top Alerts now answers with the subscriber schema, not the public one.
+
+        It previously returned ``PublicAlertsResponse``, which has no
+        ``risk_band``; the Dashboard fell back to the legacy ``risk_level`` and a
+        Critical alert rendered as "high". The change is purely additive —
+        ``SubscriberAlertRead`` extends ``PublicAlertRead``, so every field the
+        old contract promised is still there.
+        """
         from app.main import app
 
         spec = app.openapi()
         operation = spec["paths"]["/api/v1/subscriber/alerts/top"]["get"]
         schema_ref = operation["responses"]["200"]["content"]["application/json"]["schema"]
-        assert schema_ref["$ref"].endswith("PublicAlertsResponse")
+        assert schema_ref["$ref"].endswith("SubscriberAlertsResponse")
 
-        alert_schema = spec["components"]["schemas"]["PublicAlertRead"]["properties"]
+        schemas = spec["components"]["schemas"]
+        alert_schema = schemas["SubscriberAlertRead"]["properties"]
         assert "published_at" in alert_schema
         assert "source_published_at" in alert_schema
+        # The canonical V1 field is now part of the published contract.
+        assert "risk_band" in alert_schema
+
+        # Backward compatibility: nothing the public item promised was dropped.
+        public_fields = set(schemas["PublicAlertRead"]["properties"])
+        assert public_fields <= set(alert_schema)
+
+        # The unauthenticated public feed must NOT gain risk_band.
+        public_op = spec["paths"]["/api/alerts"]["get"]
+        public_ref = public_op["responses"]["200"]["content"]["application/json"]["schema"]
+        assert public_ref["$ref"].endswith("PublicAlertsResponse")
+        assert "risk_band" not in schemas["PublicAlertRead"]["properties"]
 
     async def test_authorization_and_empty_shape_are_unchanged(
         self, client: AsyncClient
@@ -1041,3 +1074,171 @@ class TestSubscriberTopAlertsDisplayDate:
             denied = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
         assert denied.status_code == 403
         assert (await client.get("/api/v1/subscriber/alerts/top")).status_code == 401
+
+
+
+# ---------------------------------------------------------------------------
+# Slice 3B.2Y — canonical V1 `risk_band` on the subscriber contract.
+#
+# Production alert 1312 was banded `critical` by the V1 policy while its legacy
+# `risk_level` column still said `high`. Top Alerts answered with the *public*
+# schema, which carries no `risk_band`, so the Dashboard fell back to the legacy
+# field — and that fallback deliberately never invents Critical. A Critical alert
+# therefore rendered as "high" beside a score of 80.
+#
+# Band assertions go through the mapper with an ORM-loaded alert, mirroring
+# TestSubscriberTopAlertsDisplayDate: the session-scoped database carries alerts
+# from every other test in this module and Top Alerts has only three positions,
+# so a freshly seeded row is not reliably in the API response.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestSubscriberRiskBandContract:
+    async def _loaded(self, db_session, *, score, stored_band=None, risk_level="medium"):
+        """Seed a published alert and reload it with the mapper's relationships."""
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        from app.models.processed_alert import ProcessedAlert
+        from app.models.raw_item import RawItem
+
+        alert = await _seed_published_alert(
+            db_session, signal_score=score, risk_level=risk_level
+        )
+        if stored_band is not None:
+            alert.risk_band = stored_band
+            await db_session.commit()
+
+        return (
+            await db_session.execute(
+                select(ProcessedAlert)
+                .where(ProcessedAlert.id == alert.id)
+                .options(
+                    selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source)
+                )
+            )
+        ).scalar_one()
+
+    async def _active(self, db_session) -> str:
+        sub_id = f"band-contract-{uuid.uuid4()}"
+        await _seed_profile_with_subscription(db_session, sub_id=sub_id, status="active")
+        return sub_id
+
+    # --- Top Alerts band ---------------------------------------------------
+
+    @pytest.mark.parametrize("score, expected", [(21, "critical"), (18, "high")])
+    async def test_top_alerts_exposes_the_band_for_each_publishable_score(
+        self, db_session: AsyncSession, score, expected
+    ):
+        alert = await self._loaded(db_session, score=score)
+        assert _to_top_alert_read(alert).risk_band == expected
+
+    async def test_top_alerts_keeps_the_canonical_band_when_legacy_level_disagrees(
+        self, db_session: AsyncSession
+    ):
+        """The production alert-1312 shape: stored critical, legacy level high."""
+        alert = await self._loaded(
+            db_session, score=20, stored_band="critical", risk_level="high"
+        )
+        read = _to_top_alert_read(alert)
+        assert read.risk_band == "critical", "canonical V1 band must survive"
+        assert read.risk_level == "high", "legacy field preserved, not rewritten"
+
+    async def test_stored_band_wins_over_the_score_derived_fallback(
+        self, db_session: AsyncSession
+    ):
+        """Proves the column is read, not recomputed.
+
+        Score 18 alone would compute to `high`; the stored column says
+        `critical`, and the stored value is what the contract must return.
+        """
+        alert = await self._loaded(db_session, score=18, stored_band="critical")
+        assert _to_top_alert_read(alert).risk_band == "critical"
+
+    async def test_band_falls_back_to_the_score_when_the_column_is_null(
+        self, db_session: AsyncSession
+    ):
+        alert = await self._loaded(db_session, score=21)
+        assert alert.risk_band is None, "seed leaves the column unset"
+        assert _to_top_alert_read(alert).risk_band == "critical"
+
+    async def test_top_alerts_item_keeps_every_public_field(
+        self, db_session: AsyncSession
+    ):
+        from app.schemas.alert import PublicAlertRead
+
+        alert = await self._loaded(db_session, score=19)
+        read = _to_top_alert_read(alert)
+        assert set(PublicAlertRead.model_fields) <= set(type(read).model_fields), (
+            "contract must stay additive"
+        )
+        assert read.model_dump().keys() >= set(PublicAlertRead.model_fields)
+
+    async def test_top_alerts_api_items_all_carry_a_band(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Whatever wins the three positions, each item must expose risk_band."""
+        await self._loaded(db_session, score=25)
+        sub_id = await self._active(db_session)
+
+        with _patch_validator(_claims(sub=sub_id)):
+            resp = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
+        assert resp.status_code == 200
+        alerts = resp.json()["alerts"]
+        assert alerts, "seeded a top-scoring alert, so the widget cannot be empty"
+        for item in alerts:
+            assert "risk_band" in item
+            assert item["risk_band"] in ("critical", "high", "medium", "below_60")
+
+    # --- list / detail ------------------------------------------------------
+
+    async def test_subscriber_list_exposes_the_canonical_band(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        cat = f"BandContract-{uuid.uuid4().hex[:8]}"
+        alert = await _seed_published_alert(
+            db_session, category=cat, signal_score=20, risk_level="high"
+        )
+        alert.risk_band = "critical"
+        await db_session.commit()
+        sub_id = await self._active(db_session)
+
+        with _patch_validator(_claims(sub=sub_id)):
+            resp = await client.get(
+                f"/api/v1/subscriber/alerts?category={cat}", headers=_AUTH
+            )
+        assert resp.status_code == 200
+        row = next(a for a in resp.json()["alerts"] if a["id"] == alert.id)
+        assert row["risk_band"] == "critical"
+        assert row["risk_level"].lower() == "high", "legacy field still present"
+
+    async def test_subscriber_detail_exposes_the_canonical_band(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        alert = await _seed_published_alert(
+            db_session, signal_score=20, risk_level="high"
+        )
+        alert.risk_band = "critical"
+        await db_session.commit()
+        sub_id = await self._active(db_session)
+
+        with _patch_validator(_claims(sub=sub_id)):
+            resp = await client.get(f"/api/v1/subscriber/alerts/{alert.id}", headers=_AUTH)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["risk_band"] == "critical"
+        assert body["risk_level"].lower() == "high"
+
+    # --- the public feed must not change ------------------------------------
+
+    async def test_public_feed_never_gains_the_subscriber_band(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        alert = await _seed_published_alert(db_session, signal_score=21)
+
+        resp = await client.get("/api/alerts?limit=500")
+        assert resp.status_code == 200
+        row = next((a for a in resp.json()["alerts"] if a["id"] == alert.id), None)
+        assert row is not None
+        assert "risk_band" not in row

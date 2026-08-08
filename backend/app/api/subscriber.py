@@ -37,8 +37,6 @@ from app.models.raw_item import RawItem
 from app.models.source import Source
 from app.models.subscription import Subscription
 from app.schemas.alert import (
-    PublicAlertRead,
-    PublicAlertsResponse,
     SubscriberAlertDetail,
     SubscriberAlertRead,
     SubscriberAlertsResponse,
@@ -210,8 +208,8 @@ async def subscriber_alert_stats(
     )
 
 
-def _to_top_alert_read(alert: ProcessedAlert) -> PublicAlertRead:
-    """Public mapping, with the original article date shown as ``published_at``.
+def _to_top_alert_read(alert: ProcessedAlert) -> SubscriberAlertRead:
+    """Subscriber mapping, with the original article date shown as ``published_at``.
 
     Two different dates are in play, and only one of them is the user's:
 
@@ -222,20 +220,28 @@ def _to_top_alert_read(alert: ProcessedAlert) -> PublicAlertRead:
       what the Dashboard shows, falling back to our own timestamp only when the
       source gave us no date.
 
+    Returns :class:`SubscriberAlertRead` so Top Alerts carries the canonical V1
+    ``risk_band`` like the rest of the subscriber feed. It previously returned the
+    bare public schema, which has no ``risk_band`` — the Dashboard then fell back
+    to the legacy ``risk_level`` and, because that fallback deliberately never
+    invents Critical, a ``critical`` alert rendered as "high". The band is read
+    from the stored column (with the usual computed fallback), so nothing is
+    re-derived from the score here.
+
     A copy is returned; neither the ORM instance nor the shared public mapper is
     touched, and ``source_published_at`` stays populated in its own field.
     """
     read = public_alerts_api._to_public_read(alert)
-    if read.source_published_at is None:
-        return read
-    return read.model_copy(update={"published_at": read.source_published_at})
+    if read.source_published_at is not None:
+        read = read.model_copy(update={"published_at": read.source_published_at})
+    return SubscriberAlertRead(**read.model_dump(), risk_band=risk_band_for(alert))
 
 
-@router.get("/alerts/top", response_model=PublicAlertsResponse)
+@router.get("/alerts/top", response_model=SubscriberAlertsResponse)
 async def subscriber_top_alerts(
     _: ActiveSubscriberContext = Depends(require_active_subscription),
     db: AsyncSession = Depends(get_db),
-) -> PublicAlertsResponse:
+) -> SubscriberAlertsResponse:
     """Top Alerts This Week — Critical and High published in the last seven days.
 
     Deliberately **not** the public all-time endpoint. That one ranks the
@@ -248,13 +254,17 @@ async def subscriber_top_alerts(
     us this week may therefore display an older article date.
 
     Returns at most three alerts and an empty list when nothing qualifies — there
-    is no fallback to older alerts. The response shape is unchanged, so the
-    frontend needs no integration change.
+    is no fallback to older alerts.
+
+    The response is :class:`SubscriberAlertsResponse`, matching the rest of the
+    subscriber feed: every existing field is preserved (the schema extends the
+    public one) and the canonical V1 ``risk_band`` is added, so the Critical badge
+    renders correctly. This is additive — no field was removed or redefined.
 
     Evaluated per request against the current window; nothing here is cached.
     """
     alerts = await get_top_alerts(db, now=datetime.now(timezone.utc))
-    return PublicAlertsResponse(
+    return SubscriberAlertsResponse(
         alerts=[_to_top_alert_read(alert) for alert in alerts]
     )
 
