@@ -133,14 +133,23 @@ def test_subscriber_top_alerts_remains_and_is_protected():
     assert ("GET", "/api/v1/subscriber/alerts/top") in ROUTES
     assert "require_active_subscription" in _auth_deps("GET", "/api/v1/subscriber/alerts/top")
     route = ROUTES[("GET", "/api/v1/subscriber/alerts/top")]
-    # Slice 3B.2Y: moved from the public schema to the subscriber one so the
-    # response carries the canonical V1 `risk_band`. Additive — the subscriber
-    # item extends the public item, so no previously promised field was lost.
-    assert route.response_model.__name__ == "SubscriberAlertsResponse"
-    from app.schemas.alert import PublicAlertRead, SubscriberAlertRead
+    # The widget has its own wrapper so it can report whether the historical
+    # fallback engaged; the paginated feed keeps its exact shape. The item schema
+    # still extends the public one, so no previously promised field was lost.
+    assert route.response_model.__name__ == "SubscriberTopAlertsResponse"
+    from app.schemas.alert import (
+        PublicAlertRead,
+        SubscriberAlertRead,
+        SubscriberAlertsResponse,
+        SubscriberTopAlertsResponse,
+    )
 
     assert issubclass(SubscriberAlertRead, PublicAlertRead)
     assert set(PublicAlertRead.model_fields) <= set(SubscriberAlertRead.model_fields)
+    assert set(SubscriberTopAlertsResponse.model_fields) == {
+        "alerts", "is_fallback", "message",
+    }
+    assert set(SubscriberAlertsResponse.model_fields) == {"alerts"}
 
 
 @pytest.mark.parametrize("path", [

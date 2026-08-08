@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -237,21 +237,28 @@ class TestSubscriberAlertsContent:
     async def test_shape_matches_public(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        await _seed_published_alert(db_session, signal_score=18)
+        alert = await _seed_published_alert(db_session, signal_score=18)
         sub_id = f"shape-{uuid.uuid4()}"
         await _seed_profile_with_subscription(
             db_session, sub_id=sub_id, status="active"
         )
-        public = await client.get("/api/alerts?limit=500")
         with _patch_validator(_claims(sub=sub_id)):
             sub = await client.get("/api/v1/subscriber/alerts?limit=500", headers=_AUTH)
-        assert public.status_code == 200 and sub.status_code == 200
-        # OPEN-6: subscriber list = public list PLUS a V1 `risk_band` per item
-        # (Critical badge). Every other field stays identical to public.
-        pub_alerts = public.json()["alerts"]
+        assert sub.status_code == 200
+        # The subscriber item is the shared public base PLUS the V1 `risk_band`
+        # (Critical badge). This is asserted against the schema rather than by
+        # calling /api/alerts: that route is now a deliberately narrower
+        # marketing teaser and is no longer a comparable shape.
+        from app.schemas.alert import PublicAlertRead, SubscriberAlertRead
+
+        expected_keys = set(SubscriberAlertRead.model_fields)
+        assert set(PublicAlertRead.model_fields) < expected_keys
+        assert expected_keys - set(PublicAlertRead.model_fields) == {"risk_band"}
+
         sub_alerts = sub.json()["alerts"]
-        assert len(sub_alerts) == len(pub_alerts)
-        for s, p in zip(sub_alerts, pub_alerts):
+        assert any(a["id"] == alert.id for a in sub_alerts)
+        for s in sub_alerts:
+            assert set(s) == expected_keys
             # `risk_band` is derived from `signal_score`, which is legitimately
             # None for an alert that was never scored. The session-scoped test
             # database accumulates such rows from other modules, so the band is
@@ -261,7 +268,6 @@ class TestSubscriberAlertsContent:
                 assert s["risk_band"] is None
             else:
                 assert s["risk_band"] in ("critical", "high", "medium", "below_60")
-            assert {k: v for k, v in s.items() if k != "risk_band"} == p
 
     async def test_signal_score_is_0_100_and_risk_derived(
         self, client: AsyncClient, db_session: AsyncSession
@@ -289,56 +295,46 @@ class TestSubscriberTopAlerts:
     this class no longer asserts payload equality.
     """
 
-    async def test_payload_shape_matches_public(
+    async def test_payload_shape_is_the_public_base_plus_risk_band(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Public feed item shape PLUS the V1 `risk_band`.
+        """Every public list field, plus the V1 `risk_band`.
 
-        The public Top Alerts route was removed in Slice 3B.2P, so the reference
-        shape now comes from the retained Landing feed — both are rendered by the
-        shared `_to_public_read` mapper, which is what this guards.
-
-        Slice 3B.2Y: Top Alerts moved from the public schema to the subscriber
-        one so the Critical badge has a canonical field to read. The change is
-        additive, and this test now pins that precisely — every public key must
-        still be present with the same type, and `risk_band` is the only
-        addition. That is the same convention the subscriber list uses above.
+        Asserted against the schema rather than by calling /api/alerts: that
+        route is now a deliberately narrower marketing teaser, so it is no
+        longer a comparable reference shape.
         """
+        from app.schemas.alert import PublicAlertRead, SubscriberAlertRead
+
         await _seed_published_alert(db_session, signal_score=20)
         sub_id = f"top-{uuid.uuid4()}"
         await _seed_profile_with_subscription(
             db_session, sub_id=sub_id, status="active"
         )
-        public = await client.get("/api/alerts?limit=500")
         with _patch_validator(_claims(sub=sub_id)):
             sub = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
 
-        assert public.status_code == 200 and sub.status_code == 200
-        assert set(sub.json()) == set(public.json()) == {"alerts"}
+        assert sub.status_code == 200
+        body = sub.json()
+        assert set(body) == {"alerts", "is_fallback", "message"}
 
-        sub_alerts, public_alerts = sub.json()["alerts"], public.json()["alerts"]
+        sub_alerts = body["alerts"]
         assert sub_alerts, "a freshly published Critical alert qualifies this week"
-        assert public_alerts, "the landing feed provides the reference shape"
-        assert set(sub_alerts[0]) - set(public_alerts[0]) == {"risk_band"}, (
-            "risk_band is the only addition"
-        )
-        assert not set(public_alerts[0]) - set(sub_alerts[0]), "nothing was dropped"
-        assert sub_alerts[0]["risk_band"] in ("critical", "high", "medium", "below_60")
-        for key, value in sub_alerts[0].items():
-            if key == "risk_band":
-                continue
-            assert type(value) is type(public_alerts[0][key]) or value is None, key
+        expected = set(SubscriberAlertRead.model_fields)
+        assert expected - set(PublicAlertRead.model_fields) == {"risk_band"}
+        assert set(sub_alerts[0]) == expected
 
-    async def test_diverges_from_public_on_an_old_alert(
+    async def test_an_out_of_window_alert_is_excluded_while_the_window_has_content(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """A high-scoring alert outside the seven-day window is excluded.
+        """The weekly contract, asserted without reference to the landing feed.
 
-        This used to be phrased as "public keeps it, subscriber does not". The
-        public Top Alerts route is gone, so the assertion is now made directly
-        against the weekly contract: the alert is published and visible on the
-        all-time landing feed, yet absent from this week's curated set.
+        The landing route no longer returns ids (it is a teaser), so the old
+        "public keeps it, subscriber does not" phrasing is not expressible. A
+        current alert is seeded so the window is non-empty and the historical
+        fallback cannot engage — this pins the primary rule, not the fallback.
         """
+        current = await _seed_published_alert(db_session, signal_score=20)
         old = await _seed_published_alert(
             db_session, signal_score=25,
             published_at=datetime(2026, 1, 5, tzinfo=timezone.utc),
@@ -347,31 +343,25 @@ class TestSubscriberTopAlerts:
         await _seed_profile_with_subscription(
             db_session, sub_id=sub_id, status="active"
         )
-        landing = await client.get("/api/alerts?limit=500")
         with _patch_validator(_claims(sub=sub_id)):
             sub = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
 
-        assert old.id in [a["id"] for a in landing.json()["alerts"]], (
-            "the alert is published and still served by the retained public feed"
-        )
-        assert old.id not in [a["id"] for a in sub.json()["alerts"]], (
-            "but it falls outside the rolling seven-day window"
+        assert sub.status_code == 200
+        body = sub.json()
+        assert body["is_fallback"] is False, "the window has content"
+        ids = [a["id"] for a in body["alerts"]]
+        assert old.id not in ids, "it falls outside the rolling seven-day window"
+        assert current.id in ids or len(ids) == 3, (
+            "either it made the cut or three fresher alerts filled the widget"
         )
 
-    async def test_out_of_window_alert_is_never_a_fallback(
+    async def test_response_carries_the_fallback_metadata(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """An old alert stays out even when it would fill an unused position.
-
-        The session-scoped test database carries alerts from earlier tests, so
-        this asserts on *this* alert rather than an exact empty payload — the
-        empty-list contract itself is pinned in the service tests.
-        """
-        old = await _seed_published_alert(
-            db_session, signal_score=25,
-            published_at=datetime(2025, 2, 1, tzinfo=timezone.utc),
-        )
-        sub_id = f"top-empty-{uuid.uuid4()}"
+        """Shape check for the non-fallback path; the fallback branch is pinned
+        in TestTopAlertsHistoricalFallback below."""
+        await _seed_published_alert(db_session, signal_score=25)
+        sub_id = f"top-meta-{uuid.uuid4()}"
         await _seed_profile_with_subscription(
             db_session, sub_id=sub_id, status="active"
         )
@@ -380,9 +370,11 @@ class TestSubscriberTopAlerts:
 
         assert resp.status_code == 200
         body = resp.json()
-        assert set(body) == {"alerts"} and isinstance(body["alerts"], list)
+        assert set(body) == {"alerts", "is_fallback", "message"}
+        assert isinstance(body["alerts"], list)
         assert len(body["alerts"]) <= 3
-        assert old.id not in [a["id"] for a in body["alerts"]]
+        assert body["is_fallback"] is False
+        assert body["message"] is None
 
     async def test_requires_active_subscription(self, client: AsyncClient):
         with _patch_validator(_claims(sub=f"top-nosub-{uuid.uuid4()}")):
@@ -1034,38 +1026,47 @@ class TestSubscriberTopAlertsDisplayDate:
         assert "_to_public_read" in wrapper
         assert "model_copy" in wrapper
 
-    async def test_response_model_carries_risk_band_and_stays_backward_compatible(self):
-        """Top Alerts now answers with the subscriber schema, not the public one.
+    async def test_response_model_carries_band_and_fallback_metadata(self):
+        """Top Alerts answers with its own wrapper.
 
-        It previously returned ``PublicAlertsResponse``, which has no
-        ``risk_band``; the Dashboard fell back to the legacy ``risk_level`` and a
-        Critical alert rendered as "high". The change is purely additive —
-        ``SubscriberAlertRead`` extends ``PublicAlertRead``, so every field the
-        old contract promised is still there.
+        It previously shared ``SubscriberAlertsResponse`` with the paginated
+        feed. Reporting whether the historical fallback engaged is specific to
+        this widget, so the wrapper is now its own type and the paginated feed
+        keeps its exact shape. The item schema is unchanged.
         """
         from app.main import app
 
         spec = app.openapi()
         operation = spec["paths"]["/api/v1/subscriber/alerts/top"]["get"]
         schema_ref = operation["responses"]["200"]["content"]["application/json"]["schema"]
-        assert schema_ref["$ref"].endswith("SubscriberAlertsResponse")
+        assert schema_ref["$ref"].endswith("SubscriberTopAlertsResponse")
 
         schemas = spec["components"]["schemas"]
+        wrapper = schemas["SubscriberTopAlertsResponse"]["properties"]
+        assert set(wrapper) == {"alerts", "is_fallback", "message"}
+
+        # The paginated subscriber feed must not have gained the metadata.
+        assert set(schemas["SubscriberAlertsResponse"]["properties"]) == {"alerts"}
+
         alert_schema = schemas["SubscriberAlertRead"]["properties"]
         assert "published_at" in alert_schema
         assert "source_published_at" in alert_schema
-        # The canonical V1 field is now part of the published contract.
         assert "risk_band" in alert_schema
+        # `PublicAlertRead` is no longer referenced by any route, so it is not
+        # emitted as a component; the inheritance guarantee is asserted on the
+        # models themselves, which is where it actually lives.
+        from app.schemas.alert import PublicAlertRead, SubscriberAlertRead
 
-        # Backward compatibility: nothing the public item promised was dropped.
-        public_fields = set(schemas["PublicAlertRead"]["properties"])
-        assert public_fields <= set(alert_schema)
+        assert issubclass(SubscriberAlertRead, PublicAlertRead)
+        assert set(PublicAlertRead.model_fields) <= set(alert_schema)
 
-        # The unauthenticated public feed must NOT gain risk_band.
+        # The unauthenticated route answers with the narrow teaser schema.
         public_op = spec["paths"]["/api/alerts"]["get"]
         public_ref = public_op["responses"]["200"]["content"]["application/json"]["schema"]
-        assert public_ref["$ref"].endswith("PublicAlertsResponse")
-        assert "risk_band" not in schemas["PublicAlertRead"]["properties"]
+        assert public_ref["$ref"].endswith("PublicTeaserResponse")
+        assert set(schemas["PublicTeaserAlertRead"]["properties"]) == {
+            "title", "risk_band", "category", "source_published_at", "summary",
+        }
 
     async def test_authorization_and_empty_shape_are_unchanged(
         self, client: AsyncClient
@@ -1232,13 +1233,286 @@ class TestSubscriberRiskBandContract:
 
     # --- the public feed must not change ------------------------------------
 
-    async def test_public_feed_never_gains_the_subscriber_band(
+    async def test_public_teaser_exposes_the_band_but_none_of_the_product(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        alert = await _seed_published_alert(db_session, signal_score=21)
+        """`risk_band` is the intended public presentation field.
 
-        resp = await client.get("/api/alerts?limit=500")
+        The teaser deliberately carries it — a landing visitor should see that
+        an alert is Critical. What it must never carry is the intelligence:
+        score, source attribution, credibility or analysis.
+        """
+        await _seed_published_alert(db_session, signal_score=21)
+
+        resp = await client.get("/api/alerts")
         assert resp.status_code == 200
-        row = next((a for a in resp.json()["alerts"] if a["id"] == alert.id), None)
-        assert row is not None
-        assert "risk_band" not in row
+        rows = resp.json()["alerts"]
+        assert rows, "a freshly published Critical alert qualifies for the teaser"
+        for row in rows:
+            assert set(row) == {
+                "title", "risk_band", "category", "source_published_at", "summary",
+            }
+
+
+# ---------------------------------------------------------------------------
+# Top Alerts historical fallback.
+#
+# The widget is a weekly view, so a short week is shown short: one or two
+# qualifying alerts are returned exactly as found. Only when the window is
+# completely empty — which would leave a blank widget — are the latest
+# qualifying alerts shown instead, labelled so the reader is never told older
+# intelligence is from this week.
+#
+# The empty-window cases patch the primary selector. The session-scoped database
+# accumulates published alerts from every module, so "nothing in the last seven
+# days" cannot otherwise be arranged; the window query itself is pinned
+# exhaustively in tests/test_services/test_top_alerts_service.py.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def cleanup_alerts(db_session):
+    """Delete alerts a test registers, so far-future rows do not leak.
+
+    The fallback tests publish in 2031 so their rows deterministically win the
+    three positions. Left behind, they would outrank every other module's data
+    in the session-scoped database.
+    """
+    from sqlalchemy import delete
+
+    from app.models.processed_alert import ProcessedAlert
+
+    registered: list[int] = []
+    yield registered.append
+
+    await db_session.rollback()
+    await db_session.execute(
+        delete(ProcessedAlert).where(ProcessedAlert.id.in_(registered or [-1]))
+    )
+    await db_session.commit()
+
+
+@pytest.mark.asyncio
+class TestTopAlertsHistoricalFallback:
+    async def _active(self, db_session) -> str:
+        sub_id = f"fallback-{uuid.uuid4()}"
+        await _seed_profile_with_subscription(db_session, sub_id=sub_id, status="active")
+        return sub_id
+
+    async def _get(self, client, sub_id):
+        with _patch_validator(_claims(sub=sub_id)):
+            resp = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
+        assert resp.status_code == 200
+        return resp.json()
+
+    @staticmethod
+    async def _loaded(db_session, alerts):
+        """Reload with the eager options the service applies.
+
+        The route's mapper reads ``alert.raw_item``; handing it a bare seeded
+        instance would lazy-load outside the async context.
+        """
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        from app.models.processed_alert import ProcessedAlert
+        from app.models.raw_item import RawItem
+
+        rows = (
+            await db_session.execute(
+                select(ProcessedAlert)
+                .where(ProcessedAlert.id.in_([a.id for a in alerts]))
+                .options(
+                    selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source)
+                )
+            )
+        ).scalars().all()
+        by_id = {r.id: r for r in rows}
+        return [by_id[a.id] for a in alerts]
+
+    @staticmethod
+    def _no_current_alerts():
+        """Force the rolling window to come back empty."""
+        return patch(
+            "app.api.subscriber.get_top_alerts",
+            new=AsyncMock(return_value=[]),
+        )
+
+    # --- A/B/C: a non-empty window is returned exactly as found ---------------
+
+    @pytest.mark.parametrize("count", [3, 2, 1])
+    async def test_current_alerts_are_never_padded_with_history(
+        self, client: AsyncClient, db_session: AsyncSession, count
+    ):
+        current = [
+            await _seed_published_alert(db_session, signal_score=25)
+            for _ in range(count)
+        ]
+        historical = [
+            await _seed_published_alert(
+                db_session, signal_score=25,
+                published_at=datetime(2025, 3, n + 1, tzinfo=timezone.utc),
+            )
+            for n in range(4)
+        ]
+        sub_id = await self._active(db_session)
+        loaded = await self._loaded(db_session, current)
+
+        with patch(
+            "app.api.subscriber.get_top_alerts",
+            new=AsyncMock(return_value=loaded),
+        ):
+            body = await self._get(client, sub_id)
+
+        assert len(body["alerts"]) == count
+        assert body["is_fallback"] is False
+        assert body["message"] is None
+        returned = {a["id"] for a in body["alerts"]}
+        assert returned == {a.id for a in current}
+        assert returned.isdisjoint({a.id for a in historical})
+
+    # --- D: an empty window falls back, and says so --------------------------
+
+    async def test_empty_window_returns_the_latest_published_intelligence(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        await _seed_published_alert(
+            db_session, signal_score=25,
+            published_at=datetime(2025, 4, 1, tzinfo=timezone.utc),
+        )
+        sub_id = await self._active(db_session)
+
+        with self._no_current_alerts():
+            body = await self._get(client, sub_id)
+
+        assert body["alerts"], "the fallback should have found published history"
+        assert body["is_fallback"] is True
+        assert body["message"]
+        assert "past seven days" in body["message"]
+
+    # --- E: the fallback is still capped at the newest three -----------------
+
+    async def test_fallback_returns_only_the_newest_three(
+        self, client: AsyncClient, db_session: AsyncSession, cleanup_alerts
+    ):
+        # Far-future publication times guarantee these outrank every other row.
+        made = [
+            await _seed_published_alert(
+                db_session, signal_score=25,
+                published_at=datetime(2031, 1, 10 - n, tzinfo=timezone.utc),
+            )
+            for n in range(5)
+        ]
+        for a in made:
+            cleanup_alerts(a.id)
+        newest_three = [a.id for a in made[:3]]
+        sub_id = await self._active(db_session)
+
+        with self._no_current_alerts():
+            body = await self._get(client, sub_id)
+
+        assert [a["id"] for a in body["alerts"]] == newest_three
+        assert body["is_fallback"] is True
+
+    # --- F/G: the fallback widens the dates and nothing else -----------------
+
+    async def test_fallback_never_returns_a_false_positive_or_unpublished_alert(
+        self, client: AsyncClient, db_session: AsyncSession, cleanup_alerts
+    ):
+        false_positive = await _seed_published_alert(
+            db_session, signal_score=25,
+            published_at=datetime(2031, 6, 1, tzinfo=timezone.utc),
+        )
+        false_positive.is_published = False
+        false_positive.is_excluded = True
+        false_positive.publish_decision_reason = "manual_false_positive"
+
+        held = await _seed_published_alert(
+            db_session, signal_score=25,
+            published_at=datetime(2031, 6, 2, tzinfo=timezone.utc),
+        )
+        held.is_published = False
+        held.is_manual_hold = True
+        await db_session.commit()
+        cleanup_alerts(false_positive.id)
+        cleanup_alerts(held.id)
+
+        sub_id = await self._active(db_session)
+        with self._no_current_alerts():
+            body = await self._get(client, sub_id)
+
+        ids = [a["id"] for a in body["alerts"]]
+        assert false_positive.id not in ids
+        assert held.id not in ids
+
+    @pytest.mark.parametrize(
+        "decision_source", ["candidate_backfill", "system_migration"]
+    )
+    async def test_fallback_still_excludes_historical_bulk_publications(
+        self, client: AsyncClient, db_session: AsyncSession, cleanup_alerts, decision_source
+    ):
+        bulk = await _seed_published_alert(
+            db_session, signal_score=25,
+            published_at=datetime(2031, 7, 1, tzinfo=timezone.utc),
+        )
+        bulk.publication_state_source = decision_source
+        await db_session.commit()
+        cleanup_alerts(bulk.id)
+
+        sub_id = await self._active(db_session)
+        with self._no_current_alerts():
+            body = await self._get(client, sub_id)
+
+        assert bulk.id not in [a["id"] for a in body["alerts"]]
+
+    async def test_fallback_excludes_medium_and_below(
+        self, client: AsyncClient, db_session: AsyncSession, cleanup_alerts
+    ):
+        medium = await _seed_published_alert(
+            db_session, signal_score=16,
+            published_at=datetime(2031, 8, 1, tzinfo=timezone.utc),
+        )
+        cleanup_alerts(medium.id)
+        sub_id = await self._active(db_session)
+
+        with self._no_current_alerts():
+            body = await self._get(client, sub_id)
+
+        assert medium.id not in [a["id"] for a in body["alerts"]]
+
+    # --- H: the canonical band survives the fallback path --------------------
+
+    async def test_fallback_items_carry_the_canonical_band(
+        self, client: AsyncClient, db_session: AsyncSession, cleanup_alerts
+    ):
+        alert = await _seed_published_alert(
+            db_session, signal_score=21, risk_level="high",
+            published_at=datetime(2031, 9, 1, tzinfo=timezone.utc),
+        )
+        alert.risk_band = "critical"
+        await db_session.commit()
+        cleanup_alerts(alert.id)
+        sub_id = await self._active(db_session)
+
+        with self._no_current_alerts():
+            body = await self._get(client, sub_id)
+
+        row = next(a for a in body["alerts"] if a["id"] == alert.id)
+        assert row["risk_band"] == "critical"
+        assert row["risk_level"] == "high", "legacy field preserved"
+
+    async def test_no_qualifying_history_reports_no_fallback(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """An empty widget must not claim intelligence is shown below."""
+        sub_id = await self._active(db_session)
+
+        with self._no_current_alerts(), patch(
+            "app.api.subscriber.get_latest_qualifying_alerts",
+            new=AsyncMock(return_value=[]),
+        ):
+            body = await self._get(client, sub_id)
+
+        assert body["alerts"] == []
+        assert body["is_fallback"] is False
+        assert body["message"] is None

@@ -33,9 +33,13 @@ Public stats  (NEW — GET /api/v1/subscriber/alerts/stats):
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import itertools
+import uuid
 
 import pytest
+from sqlalchemy import delete
 
+from app.api.public_alerts import PUBLIC_SUMMARY_MAX_CHARS, summary_preview
 from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.source import Source
@@ -210,158 +214,18 @@ async def test_public_feed_empty_returns_wrapper(client):
     assert isinstance(body["alerts"], list)
 
 
-@pytest.mark.asyncio
-async def test_public_feed_only_returns_published(client, db_session):
-    """Unpublished alerts must never appear in the public feed."""
-    source = await _seed_source(db_session)
-    item_pub = await _seed_raw_item(db_session, source, title="Published Alert")
-    item_unpub = await _seed_raw_item(db_session, source, title="Unpublished Alert")
-
-    await _seed_alert(db_session, item_pub, is_published=True)
-    await _seed_alert(db_session, item_unpub, is_published=False)
-
-    response = await client.get("/api/alerts")
-    assert response.status_code == 200
-    titles = [a["title"] for a in response.json()["alerts"]]
-    assert "Published Alert" in titles
-    assert "Unpublished Alert" not in titles
 
 
-@pytest.mark.asyncio
-async def test_public_feed_response_shape(client, db_session):
-    """Response must be wrapped in {"alerts": [...]} and each alert has required fields."""
-    source = await _seed_source(db_session)
-    item = await _seed_raw_item(db_session, source, title="Shape Test")
-    await _seed_alert(db_session, item, is_published=True, summary="Shape summary")
-
-    response = await client.get("/api/alerts")
-    assert response.status_code == 200
-    body = response.json()
-    assert "alerts" in body
-
-    alert = next((a for a in body["alerts"] if a["title"] == "Shape Test"), None)
-    assert alert is not None
-
-    # All expected public fields present
-    for field in ("id", "title", "summary", "category", "risk_level",
-                  "signal_score", "source_name", "source_url", "published_at"):
-        assert field in alert, f"Missing field: {field}"
-
-    # Internal fields must NOT be present (incl. all Slice 6 V1 internal fields)
-    for internal_field in ("is_published", "is_relevant", "raw_item_id",
-                           "score_source_credibility", "score_financial_impact",
-                           "entities_json", "review_status", "published_by_user_id",
-                           "risk_band", "publish_decision", "publish_decision_reason",
-                           "pending_review_reason", "excluded_reason", "is_excluded",
-                           "is_manual_hold", "published_by_rule", "publishing_policy_version",
-                           "publication_state_source", "publication_state_updated_at",
-                           "risk_explanation"):
-        assert internal_field not in alert, f"Internal field leaked: {internal_field}"
 
 
-@pytest.mark.asyncio
-async def test_public_feed_field_mapping(client, db_session):
-    """Fields must map correctly from DB columns to the public schema."""
-    source = await _seed_source(db_session)
-    item = await _seed_raw_item(db_session, source, title="Mapping Test")
-    alert = await _seed_alert(
-        db_session, item,
-        is_published=True,
-        risk_level="high",
-        category="Investment Fraud",
-        signal_score=19,
-        summary="Mapped summary",
-    )
-
-    response = await client.get("/api/alerts")
-    body = response.json()
-    match = next((a for a in body["alerts"] if a["id"] == alert.id), None)
-    assert match is not None
-    assert match["title"] == "Mapping Test"
-    assert match["summary"] == "Mapped summary"
-    assert match["category"] == "Investment Fraud"
-    assert match["risk_level"] == "high"
-    # signal_score is normalized to 0-100 (Ken's M3 final spec): 19/25 → 76.
-    assert match["signal_score"] == 76
-    assert match["source_name"] == "Test Source"
-    assert match["source_url"] == "https://example.com/article"
-    assert match["published_at"] is not None
 
 
-@pytest.mark.asyncio
-async def test_public_feed_ordering_newest_first(client, db_session):
-    """Alerts must be ordered by published_at descending (newest first)."""
-    source = await _seed_source(db_session)
-    item_old = await _seed_raw_item(db_session, source, title="Old Alert")
-    item_new = await _seed_raw_item(db_session, source, title="New Alert")
-
-    now = datetime.now(timezone.utc)
-    await _seed_alert(db_session, item_old, is_published=True,
-                      published_at=now - timedelta(days=2))
-    await _seed_alert(db_session, item_new, is_published=True,
-                      published_at=now - timedelta(hours=1))
-
-    response = await client.get("/api/alerts")
-    alerts = response.json()["alerts"]
-    titles = [a["title"] for a in alerts]
-    assert titles.index("New Alert") < titles.index("Old Alert")
 
 
-@pytest.mark.asyncio
-async def test_public_feed_filter_risk_level(client, db_session):
-    """risk_level filter narrows by derived score bucket; never exposes unpublished alerts."""
-    source = await _seed_source(db_session)
-    item_high = await _seed_raw_item(db_session, source, title="High Risk")
-    item_medium = await _seed_raw_item(db_session, source, title="Medium Risk")
-    item_unpub = await _seed_raw_item(db_session, source, title="Unpublished High")
-
-    # Filter is derived from signal_score_total (M3 final 0–100 bands): >=18 high.
-    await _seed_alert(db_session, item_high, is_published=True, signal_score=20)
-    await _seed_alert(db_session, item_medium, is_published=True, signal_score=10)
-    await _seed_alert(db_session, item_unpub, is_published=False, signal_score=20)
-
-    response = await client.get("/api/alerts?risk_level=high")
-    assert response.status_code == 200
-    titles = [a["title"] for a in response.json()["alerts"]]
-    assert "High Risk" in titles
-    assert "Medium Risk" not in titles
-    assert "Unpublished High" not in titles
 
 
-@pytest.mark.asyncio
-async def test_public_feed_filter_category(client, db_session):
-    """category filter works and never exposes unpublished alerts."""
-    source = await _seed_source(db_session)
-    item_cyber = await _seed_raw_item(db_session, source, title="Cyber Alert")
-    item_invest = await _seed_raw_item(db_session, source, title="Investment Alert")
-
-    await _seed_alert(db_session, item_cyber, is_published=True, category="Cybercrime")
-    await _seed_alert(db_session, item_invest, is_published=True, category="Investment Fraud")
-
-    response = await client.get("/api/alerts?category=Cybercrime")
-    assert response.status_code == 200
-    titles = [a["title"] for a in response.json()["alerts"]]
-    assert "Cyber Alert" in titles
-    assert "Investment Alert" not in titles
 
 
-@pytest.mark.asyncio
-async def test_public_feed_pagination(client, db_session):
-    """limit and offset params work correctly."""
-    source = await _seed_source(db_session)
-    for i in range(5):
-        item = await _seed_raw_item(db_session, source, title=f"Alert {i}")
-        await _seed_alert(db_session, item, is_published=True)
-
-    r1 = await client.get("/api/alerts?limit=2&offset=0")
-    r2 = await client.get("/api/alerts?limit=2&offset=2")
-    assert r1.status_code == 200
-    assert r2.status_code == 200
-    assert len(r1.json()["alerts"]) == 2
-    assert len(r2.json()["alerts"]) == 2
-    ids1 = {a["id"] for a in r1.json()["alerts"]}
-    ids2 = {a["id"] for a in r2.json()["alerts"]}
-    assert ids1.isdisjoint(ids2), "Pages must not overlap"
 
 
 # ===========================================================================
@@ -792,24 +656,6 @@ async def test_public_detail_related_signals_max_four(client, db_session):
     assert len(data["related_signals"]) <= 4
 
 
-@pytest.mark.asyncio
-async def test_public_list_risk_level_derived_from_score(client, db_session):
-    """List endpoint risk_level is derived from signal_score_total, not stored column.
-
-    Stale stored value 'high' on a score-12 alert must show as 'medium' in the
-    public response.
-    """
-    source = await _seed_source(db_session)
-    item = await _seed_raw_item(db_session, source, title="Stale High List")
-    # Mismatch on purpose: score 12 is medium per M3, but stored risk_level says high.
-    await _seed_alert(
-        db_session, item, is_published=True,
-        risk_level="high", signal_score=12,
-    )
-    body = (await client.get("/api/alerts")).json()
-    match = next((a for a in body["alerts"] if a["title"] == "Stale High List"), None)
-    assert match is not None
-    assert match["risk_level"] == "medium"  # lowercase on list, derived
 
 
 @pytest.mark.asyncio
@@ -1414,19 +1260,6 @@ def test_entity_set_excludes_agencies():
 # frontend-facing value directly. Bands: >=70 high, 40-69 medium, <40 low.
 
 
-@pytest.mark.asyncio
-async def test_signal_score_normalized_on_list(client, db_session):
-    """Every list item's signal_score must be the 0–100 normalized value."""
-    source = await _seed_source(db_session)
-    item = await _seed_raw_item(db_session, source, title="Normalized List")
-    await _seed_alert(db_session, item, is_published=True, signal_score=18)
-
-    body = (await client.get("/api/alerts")).json()
-    match = next((a for a in body["alerts"] if a["title"] == "Normalized List"), None)
-    assert match is not None
-    assert isinstance(match["signal_score"], int)
-    assert 0 <= match["signal_score"] <= 100
-    assert match["signal_score"] == 72  # 18/25 → 72
 
 
 @pytest.mark.asyncio
@@ -1544,3 +1377,434 @@ async def test_public_landing_feed_is_retained(client: AsyncClient):
     response = await client.get("/api/alerts")
     assert response.status_code == 200
     assert "alerts" in response.json()
+
+
+# ===========================================================================
+# GET /api/alerts — landing-page teaser
+#
+# This route used to be a paginated public feed exposing scores, source
+# attribution and unbounded result counts. It is now a marketing teaser: at most
+# three of the most recent Critical/High publications, carrying only enough to
+# show that HiddenAlerts is publishing current, serious intelligence. The tests
+# it replaced asserted the old contract (pagination, signal_score, source_url,
+# derived risk_level) and no longer describe the product.
+#
+# Determinism note: the session-scoped database accumulates published alerts from
+# every module, and the teaser has only three positions. Tests that need their
+# own rows to occupy those positions publish them far in the future so they sort
+# first regardless of what else is present.
+# ===========================================================================
+
+TEASER_KEYS = {"title", "risk_band", "category", "source_published_at", "summary"}
+
+#: Each test takes its own strictly-later publication epoch, so its rows occupy
+#: the three positions regardless of what earlier tests left in the database.
+_EPOCH_BASE = datetime(2030, 1, 1, tzinfo=timezone.utc)
+_epoch_counter = itertools.count()
+
+
+def _epoch() -> datetime:
+    """A fresh far-future instant, later than every previously issued one."""
+    return _EPOCH_BASE + timedelta(days=30 * next(_epoch_counter))
+
+
+@pytest.fixture
+async def teaser_seed(db_session):
+    """Seed teaser alerts and remove them afterwards.
+
+    These rows publish far in the future so they occupy the three positions
+    deterministically. That would otherwise outrank every other module's data in
+    the session-scoped database, so the fixture deletes what it created.
+    """
+    created_alerts: list[int] = []
+    created_items: list[int] = []
+    created_sources: list[int] = []
+
+    async def _make(*, title, published_at, score=20, is_published=True, **kw):
+        source = await _seed_source(db_session, name=f"Teaser Src {uuid.uuid4()}")
+        created_sources.append(source.id)
+        item = await _seed_raw_item(
+            db_session, source, title=title, url=f"https://x/{uuid.uuid4()}"
+        )
+        created_items.append(item.id)
+        alert = await _seed_alert(
+            db_session, item, is_published=is_published, signal_score=score,
+            published_at=published_at, **kw,
+        )
+        created_alerts.append(alert.id)
+        return alert
+
+    yield _make
+
+    await db_session.rollback()
+    await db_session.execute(
+        delete(ProcessedAlert).where(ProcessedAlert.id.in_(created_alerts or [-1]))
+    )
+    await db_session.execute(
+        delete(RawItem).where(RawItem.id.in_(created_items or [-1]))
+    )
+    await db_session.execute(
+        delete(Source).where(Source.id.in_(created_sources or [-1]))
+    )
+    await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_teaser_returns_at_most_three(client, db_session, teaser_seed):
+    base = _epoch()
+    for n in range(6):
+        await teaser_seed(
+            title=f"Teaser cap {n}", published_at=base - timedelta(hours=n)
+        )
+
+    body = (await client.get("/api/alerts")).json()
+    assert len(body["alerts"]) <= 3
+
+
+@pytest.mark.asyncio
+async def test_teaser_ignores_a_larger_requested_limit(client, db_session, teaser_seed):
+    base = _epoch()
+    for n in range(6):
+        await teaser_seed(
+            title=f"Teaser limit {n}", published_at=base - timedelta(hours=n)
+        )
+
+    for requested in (10, 100, 500):
+        resp = await client.get(f"/api/alerts?limit={requested}")
+        assert resp.status_code == 200
+        assert len(resp.json()["alerts"]) <= 3, f"limit={requested} was not capped"
+
+
+@pytest.mark.asyncio
+async def test_teaser_limit_can_still_narrow_the_result(client, db_session, teaser_seed):
+    base = _epoch()
+    for n in range(4):
+        await teaser_seed(
+            title=f"Teaser narrow {n}", published_at=base - timedelta(hours=n)
+        )
+
+    assert len((await client.get("/api/alerts?limit=1")).json()["alerts"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_teaser_item_exposes_only_the_approved_fields(client, db_session, teaser_seed):
+    await teaser_seed(
+        title="Teaser shape", published_at=_epoch(), summary="A stored summary."
+    )
+
+    alerts = (await client.get("/api/alerts")).json()["alerts"]
+    item = next(a for a in alerts if a["title"] == "Teaser shape")
+    assert set(item) == TEASER_KEYS
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "withheld",
+    [
+        "id", "signal_score", "source_url", "source_name", "published_at",
+        "risk_level", "risk_explanation", "entities", "entities_json",
+        "score_source_credibility", "score_financial_impact", "credibility",
+        "confidence", "key_intelligence", "why_it_matters", "risk_assessment",
+        "timeline", "sources", "related_signals", "is_published", "is_relevant",
+        "raw_item_id", "review_status", "publish_decision", "publication_state_source",
+    ],
+)
+async def test_teaser_withholds_internal_and_product_fields(
+    client, db_session, teaser_seed, withheld
+):
+    await teaser_seed(
+        title="Teaser withhold", published_at=_epoch(), summary="Summary."
+    )
+
+    alerts = (await client.get("/api/alerts")).json()["alerts"]
+    item = next(a for a in alerts if a["title"] == "Teaser withhold")
+    assert withheld not in item, f"{withheld} must stay behind subscriber auth"
+
+
+@pytest.mark.asyncio
+async def test_teaser_only_includes_published_alerts(client, db_session, teaser_seed):
+    await teaser_seed(
+        title="Teaser unpublished", published_at=_epoch(), score=25, is_published=False
+    )
+
+    titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
+    assert "Teaser unpublished" not in titles
+
+
+@pytest.mark.asyncio
+async def test_teaser_only_includes_critical_and_high(client, db_session, teaser_seed):
+    base = _epoch()
+    await teaser_seed(
+        title="Teaser medium", published_at=base, score=16
+    )
+    await teaser_seed(
+        title="Teaser low", published_at=base, score=9
+    )
+    await teaser_seed(
+        title="Teaser high", published_at=base - timedelta(hours=1), score=18
+    )
+
+    titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
+    assert "Teaser high" in titles
+    assert "Teaser medium" not in titles
+    assert "Teaser low" not in titles
+
+
+@pytest.mark.asyncio
+async def test_teaser_excludes_a_false_positive(client, db_session, teaser_seed):
+    """An alert an admin marked false positive is unpublished, so it cannot appear."""
+    alert = await teaser_seed(
+        title="Teaser false positive", published_at=_epoch()
+    )
+    alert.is_published = False
+    alert.is_excluded = True
+    alert.publish_decision_reason = "manual_false_positive"
+    await db_session.commit()
+
+    titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
+    assert "Teaser false positive" not in titles
+
+
+@pytest.mark.asyncio
+async def test_teaser_orders_newest_publication_first(client, db_session, teaser_seed):
+    base = _epoch()
+    await teaser_seed(
+        title="Teaser older", published_at=base - timedelta(days=2)
+    )
+    await teaser_seed(
+        title="Teaser newest", published_at=base
+    )
+    await teaser_seed(
+        title="Teaser middle", published_at=base - timedelta(days=1)
+    )
+
+    titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
+    assert titles[:3] == ["Teaser newest", "Teaser middle", "Teaser older"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("score, band", [(21, "critical"), (18, "high")])
+async def test_teaser_returns_the_canonical_band(
+    client, db_session, teaser_seed, score, band
+):
+    await teaser_seed(
+        title=f"Teaser band {band}", published_at=_epoch(), score=score
+    )
+
+    alerts = (await client.get("/api/alerts")).json()["alerts"]
+    item = next(a for a in alerts if a["title"] == f"Teaser band {band}")
+    assert item["risk_band"] == band
+
+
+@pytest.mark.asyncio
+async def test_teaser_summary_is_capped_and_leaves_the_stored_row_alone(
+    client, db_session, teaser_seed
+):
+    long_summary = " ".join(f"Sentence number {n} about the incident." for n in range(40))
+    alert = await teaser_seed(
+        title="Teaser summary", published_at=_epoch(), summary=long_summary
+    )
+
+    alerts = (await client.get("/api/alerts")).json()["alerts"]
+    item = next(a for a in alerts if a["title"] == "Teaser summary")
+
+    assert len(item["summary"]) <= PUBLIC_SUMMARY_MAX_CHARS  # ellipsis included
+    assert item["summary"] != long_summary
+    assert item["summary"].endswith("…")
+
+    await db_session.refresh(alert)
+    assert alert.summary == long_summary, "the stored summary must never be rewritten"
+
+
+@pytest.mark.asyncio
+async def test_teaser_summary_keeps_at_most_two_sentences(client, db_session, teaser_seed):
+    await teaser_seed(
+        title="Teaser sentences", published_at=_epoch(),
+        summary="First sentence here. Second sentence here. Third must be dropped.",
+    )
+
+    alerts = (await client.get("/api/alerts")).json()["alerts"]
+    item = next(a for a in alerts if a["title"] == "Teaser sentences")
+    # The third sentence was removed, so the ellipsis is correct here.
+    assert item["summary"] == "First sentence here. Second sentence here.…"
+    assert "Third" not in item["summary"]
+
+
+# --- summary_preview unit behaviour ----------------------------------------
+
+
+def test_summary_preview_returns_none_without_a_summary():
+    assert summary_preview(None) is None
+    assert summary_preview("") is None
+    assert summary_preview("   ") is None
+
+
+def test_summary_preview_normalizes_whitespace():
+    assert summary_preview("  A   summary\nwith\tgaps.  ") == "A summary with gaps."
+
+
+def test_summary_preview_keeps_short_text_untouched_without_an_ellipsis():
+    assert summary_preview("Short and complete.") == "Short and complete."
+
+
+def test_summary_preview_marks_truncation_only_when_text_was_removed():
+    two = "One sentence. Two sentences."
+    assert summary_preview(two) == two
+    assert not summary_preview(two).endswith("…")
+
+    three = "One sentence. Two sentences. Three sentences."
+    assert summary_preview(three).endswith("…")
+
+
+def test_summary_preview_caps_a_single_long_sentence():
+    text = "word " * 400
+    out = summary_preview(text)
+    assert len(out) <= PUBLIC_SUMMARY_MAX_CHARS
+    assert out.endswith("…")
+
+
+def test_summary_preview_never_empties_a_present_summary():
+    """A very long unbroken token must still yield text, not an empty string."""
+    out = summary_preview("x" * 5000)
+    assert out
+    assert len(out) <= PUBLIC_SUMMARY_MAX_CHARS
+
+
+# --- teaser display-date semantics -----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_teaser_shows_the_original_article_date_not_ours(
+    client, db_session, teaser_seed
+):
+    """The card date is the source's, matching the subscriber feed convention."""
+    source_date = datetime(2029, 3, 4, 9, 0, tzinfo=timezone.utc)
+    ours = _epoch()
+    source = await _seed_source(db_session, name=f"Teaser Src {uuid.uuid4()}")
+    item = await _seed_raw_item(
+        db_session, source, title="Teaser source date",
+        url=f"https://x/{uuid.uuid4()}", published_at=source_date,
+    )
+    alert = await _seed_alert(
+        db_session, item, is_published=True, signal_score=20, published_at=ours
+    )
+    # Capture as plain ints: the rollback below expires the ORM objects, and
+    # reading .id afterwards would be sync IO.
+    alert_id, item_id, source_id = alert.id, item.id, source.id
+
+    try:
+        alerts = (await client.get("/api/alerts")).json()["alerts"]
+        row = next(a for a in alerts if a["title"] == "Teaser source date")
+        assert row["source_published_at"].startswith("2029-03-04")
+        assert "published_at" not in row, "our timestamp is never exposed"
+    finally:
+        await db_session.rollback()
+        await db_session.execute(delete(ProcessedAlert).where(ProcessedAlert.id == alert_id))
+        await db_session.execute(delete(RawItem).where(RawItem.id == item_id))
+        await db_session.execute(delete(Source).where(Source.id == source_id))
+        await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_teaser_falls_back_to_our_time_when_the_source_gave_no_date(
+    client, db_session, teaser_seed
+):
+    """The established fallback: never leave the card without a date."""
+    ours = _epoch()
+    # _seed_raw_item leaves published_at null by default.
+    await teaser_seed(title="Teaser no source date", published_at=ours)
+
+    alerts = (await client.get("/api/alerts")).json()["alerts"]
+    row = next(a for a in alerts if a["title"] == "Teaser no source date")
+    assert row["source_published_at"] is not None
+    assert row["source_published_at"].startswith(ours.strftime("%Y-%m-%d"))
+
+
+@pytest.mark.asyncio
+async def test_teaser_still_orders_by_our_publication_time(
+    client, db_session, teaser_seed
+):
+    """Selection and order follow our publication time even when the source
+    dates disagree — the teaser is "what HiddenAlerts published latest"."""
+    base = _epoch()
+    created = []
+    for label, ours, src in [
+        ("Teaser order newest", base, datetime(2020, 1, 1, tzinfo=timezone.utc)),
+        ("Teaser order oldest", base - timedelta(days=2),
+         datetime(2029, 12, 31, tzinfo=timezone.utc)),
+    ]:
+        source = await _seed_source(db_session, name=f"Teaser Src {uuid.uuid4()}")
+        item = await _seed_raw_item(
+            db_session, source, title=label, url=f"https://x/{uuid.uuid4()}",
+            published_at=src,
+        )
+        alert = await _seed_alert(
+            db_session, item, is_published=True, signal_score=20, published_at=ours
+        )
+        created.append((alert.id, item.id, source.id))
+
+    try:
+        titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
+        # Newest by OUR time first, despite carrying the older source date.
+        assert titles.index("Teaser order newest") < titles.index("Teaser order oldest")
+    finally:
+        await db_session.rollback()
+        for a_id, i_id, s_id in created:
+            await db_session.execute(delete(ProcessedAlert).where(ProcessedAlert.id == a_id))
+            await db_session.execute(delete(RawItem).where(RawItem.id == i_id))
+            await db_session.execute(delete(Source).where(Source.id == s_id))
+        await db_session.commit()
+
+
+# --- summary cap boundaries -------------------------------------------------
+
+
+def test_summary_preview_returns_exactly_max_chars_without_truncating():
+    text = "y" * PUBLIC_SUMMARY_MAX_CHARS
+    out = summary_preview(text)
+    assert len(out) == PUBLIC_SUMMARY_MAX_CHARS
+    assert not out.endswith("…"), "nothing was removed, so no ellipsis"
+
+
+def test_summary_preview_never_exceeds_the_cap_including_the_ellipsis():
+    """One character over the budget must still come back within the cap."""
+    text = "z" * (PUBLIC_SUMMARY_MAX_CHARS + 1)
+    out = summary_preview(text)
+    assert out.endswith("…")
+    assert len(out) <= PUBLIC_SUMMARY_MAX_CHARS
+
+
+@pytest.mark.parametrize(
+    "length",
+    [
+        PUBLIC_SUMMARY_MAX_CHARS - 2,
+        PUBLIC_SUMMARY_MAX_CHARS - 1,
+        PUBLIC_SUMMARY_MAX_CHARS,
+        PUBLIC_SUMMARY_MAX_CHARS + 1,
+        PUBLIC_SUMMARY_MAX_CHARS + 50,
+        PUBLIC_SUMMARY_MAX_CHARS * 4,
+    ],
+)
+def test_summary_preview_length_is_bounded_at_every_boundary(length):
+    for filler in ("q", "qq "):
+        text = (filler * length)[:length]
+        out = summary_preview(text)
+        assert out is None or len(out) <= PUBLIC_SUMMARY_MAX_CHARS, (
+            f"{length=} {filler=} produced {len(out)} chars"
+        )
+
+
+def test_summary_preview_two_sentence_truncation_stays_within_the_cap():
+    first = "A " + "a" * (PUBLIC_SUMMARY_MAX_CHARS - 4) + "."
+    text = f"{first} Second sentence. Third sentence."
+    out = summary_preview(text)
+    assert out.endswith("…")
+    assert len(out) <= PUBLIC_SUMMARY_MAX_CHARS
+    assert "Third" not in out
+
+
+def test_summary_preview_long_unbroken_token_stays_within_the_cap():
+    out = summary_preview("t" * (PUBLIC_SUMMARY_MAX_CHARS * 3))
+    assert out
+    assert len(out) <= PUBLIC_SUMMARY_MAX_CHARS
+    assert out.endswith("…")

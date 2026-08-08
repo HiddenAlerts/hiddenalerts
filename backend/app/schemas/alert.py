@@ -354,11 +354,64 @@ class SubscriberAlertsResponse(BaseModel):
     alerts: list[SubscriberAlertRead]
 
 
+class SubscriberTopAlertsResponse(BaseModel):
+    """Top Alerts wrapper, carrying whether the historical fallback was used.
+
+    Separate from :class:`SubscriberAlertsResponse` so the paginated alerts feed
+    keeps its exact shape — only this widget has a fallback state to report.
+    Both fields default to the non-fallback values, so a client that ignores them
+    sees the same payload it always did.
+    """
+
+    alerts: list[SubscriberAlertRead]
+    #: True when `alerts` came from outside the rolling window.
+    is_fallback: bool = False
+    #: Human-readable explanation, present only when `is_fallback` is True.
+    message: str | None = None
+
+
 class SubscriberAlertDetail(PublicAlertDetail):
     """Public enriched detail + V1 `risk_band` + the curated risk explanation."""
 
     risk_band: str | None = None
     risk_explanation: SubscriberRiskExplanation | None = None
+
+
+# ---------------------------------------------------------------------------
+# Unauthenticated landing-page teaser.
+#
+# Deliberately the narrowest schema in the codebase. The landing feed exists to
+# show that HiddenAlerts is publishing current, serious intelligence — not to
+# deliver any of it. Everything that constitutes the product (scores, source
+# attribution, credibility, entities, evidence, analysis, review state) is
+# withheld and remains behind subscriber authentication.
+#
+# It does not extend PublicAlertRead: inheriting would mean a field added there
+# later silently appears on an unauthenticated endpoint.
+# ---------------------------------------------------------------------------
+
+
+class PublicTeaserAlertRead(BaseModel):
+    """One landing-page teaser item."""
+
+    title: str | None = None
+    #: Canonical V1 band — the public presentation field. Legacy `risk_level`
+    #: is intentionally not exposed here.
+    risk_band: str | None = None
+    category: str | None = None
+    #: The original article / press-release date — the reader-facing card date,
+    #: matching the convention the subscriber feed already follows. Our own
+    #: publication time selects and orders the teaser but is not displayed, and
+    #: is not exposed here.
+    source_published_at: datetime | None = None
+    #: Short preview of the stored summary; never the full text.
+    summary: str | None = None
+
+
+class PublicTeaserResponse(BaseModel):
+    """Wrapper for the landing teaser; at most three items."""
+
+    alerts: list[PublicTeaserAlertRead]
 
 
 class PublicCategoryBreakdown(BaseModel):

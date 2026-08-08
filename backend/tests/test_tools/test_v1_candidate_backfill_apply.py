@@ -258,10 +258,16 @@ async def test_successful_apply_states_and_audit(db_session, client, tmp_path):
     assert statuses[r.id] == "false_positive"
     assert statuses[k.id] == "manual_hold"
 
-    # 15. public API does not return rejected/held/the rows
+    # 15. rejected/held rows are not publicly visible. The landing route is now a
+    # marketing teaser and no longer exposes alert ids, so absence is asserted by
+    # title; the substantive guarantee — that both rows are unpublished and
+    # excluded/held — is pinned on the ORM state above.
+    # Titles follow the seed helper's `T{idx}` pattern (base=200), read without
+    # touching the ORM: the rows are expired here and a lazy load would be sync IO.
+    r_title, k_title = "T202", "T203"
     pub = await client.get("/api/alerts")
-    pub_ids = {x["id"] for x in pub.json()["alerts"]}
-    assert r.id not in pub_ids and k.id not in pub_ids
+    pub_titles = {x["title"] for x in pub.json()["alerts"]}
+    assert r_title not in pub_titles and k_title not in pub_titles
 
 
 # --- 13. Transaction rollback -------------------------------------------------

@@ -34,6 +34,7 @@ route-ordering constraint between them no longer applies.
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -41,6 +42,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api._alert_enrichment import risk_band_for
 from app.api._risk import risk_level_from_score, risk_score_100
 from app.database import get_db
 from app.models.event import EventSource
@@ -54,6 +56,8 @@ from app.schemas.alert import (
     PublicAlertsResponse,
     PublicAlertStatsResponse,
     PublicCategoryBreakdown,
+    PublicTeaserAlertRead,
+    PublicTeaserResponse,
 )
 from app.services.alert_category_service import published_alert_filter
 
@@ -657,23 +661,133 @@ async def list_published_alerts_impl(
     return PublicAlertsResponse(alerts=alerts)
 
 
-@router.get("", response_model=PublicAlertsResponse)
-async def list_public_alerts(
-    risk_level: str | None = Query(None, description="Filter: low, medium, high"),
-    category: str | None = Query(None, description="Filter by category (exact match)"),
-    source: str | None = Query(None, description="Partial source name search"),
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
-) -> PublicAlertsResponse:
-    """Return published alerts for the public frontend feed.
+# --------------------------------------------------------------------------
+# Landing-page teaser
+# --------------------------------------------------------------------------
 
-    No authentication required. Only published alerts are ever returned.
-    Sorted newest-published first; unpublished-but-published_at=null rows
-    fall safely to the end via nullslast ordering.
+#: Hard server-side cap. Not a default a caller can raise.
+PUBLIC_TEASER_LIMIT = 3
+
+#: Preview budget for the stored summary.
+PUBLIC_SUMMARY_MAX_SENTENCES = 2
+PUBLIC_SUMMARY_MAX_CHARS = 320
+
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def summary_preview(
+    summary: str | None,
+    *,
+    max_sentences: int = PUBLIC_SUMMARY_MAX_SENTENCES,
+    max_chars: int = PUBLIC_SUMMARY_MAX_CHARS,
+) -> str | None:
+    """Shorten a stored summary for unauthenticated display.
+
+    Takes at most ``max_sentences`` sentences, then applies ``max_chars`` as a
+    hard cap. The cap is applied last and on its own, so a single long sentence
+    is still bounded.
+
+    ``max_chars`` bounds the **returned string**, ellipsis included — when one
+    will be appended, the content budget is one character smaller. So
+    ``len(result) <= max_chars`` always holds.
+
+    Truncation prefers the last whole word before the limit, but only when that
+    leaves most of the budget used — otherwise a long unbroken token would
+    collapse the preview to almost nothing, and a hard cut is the better answer.
+    The ellipsis is appended only when text was actually removed.
+
+    The stored summary is never modified; this is display-only.
     """
-    return await list_published_alerts_impl(
-        db, risk_level, category, source, limit, offset
+    if not summary:
+        return None
+
+    text = " ".join(summary.split())
+    if not text:
+        return None
+
+    sentences = _SENTENCE_END.split(text)
+    clipped = " ".join(sentences[:max_sentences]).strip()
+    truncated = len(clipped) < len(text)
+
+    # An ellipsis costs a character, so reserve one whenever it will be appended.
+    budget = max_chars - 1 if truncated else max_chars
+    if len(clipped) > budget:
+        truncated = True
+        budget = max_chars - 1  # the ellipsis is now certain
+        window = clipped[:budget]
+        cut = window.rfind(" ")
+        clipped = (window[:cut] if cut > budget * 0.6 else window).rstrip()
+
+    if not clipped:
+        return None
+    return f"{clipped}…" if truncated else clipped
+
+
+def _to_teaser_read(alert: ProcessedAlert) -> PublicTeaserAlertRead:
+    """Map an alert to the narrow teaser item.
+
+    Reads only the stored fields the teaser exposes; nothing about the source,
+    score or analysis is touched, so no internal value can leak by accident.
+
+    The displayed date is the original article date, matching the convention the
+    subscriber feed already follows: ``ProcessedAlert.published_at`` is when
+    *HiddenAlerts* published, which selects and orders the teaser but is not what
+    a reader should see on a card. Our timestamp is used only as the fallback
+    when the source gave us no date, so the field is never null for a published
+    alert.
+    """
+    source_published_at = alert.raw_item.published_at if alert.raw_item else None
+    return PublicTeaserAlertRead(
+        title=alert.raw_item.title if alert.raw_item else None,
+        risk_band=risk_band_for(alert),
+        category=alert.primary_category,
+        source_published_at=source_published_at or alert.published_at,
+        summary=summary_preview(alert.summary),
+    )
+
+
+@router.get("", response_model=PublicTeaserResponse)
+async def list_public_alerts(
+    limit: int = Query(
+        PUBLIC_TEASER_LIMIT,
+        ge=1,
+        description="Accepted for compatibility; the response is capped at 3.",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> PublicTeaserResponse:
+    """Marketing teaser for the landing page — **not** a public intelligence API.
+
+    Returns at most three of the most recently published Critical/High alerts,
+    with only the fields needed to show that HiddenAlerts is publishing current,
+    serious intelligence: headline, band, category, date and a short preview.
+
+    Everything that constitutes the product — scores, source attribution,
+    credibility, entities, evidence, analysis and review state — is withheld and
+    stays behind subscriber authentication.
+
+    ``limit`` is still parsed so existing callers do not break, but it can only
+    lower the count: the cap is enforced server-side and a request for 100 still
+    returns at most three.
+    """
+    effective_limit = min(limit, PUBLIC_TEASER_LIMIT)
+
+    stmt = (
+        select(ProcessedAlert)
+        .where(
+            published_alert_filter(),
+            ProcessedAlert.signal_score_total >= _RISK_HIGH_THRESHOLD,
+            ProcessedAlert.published_at.is_not(None),
+        )
+        .options(selectinload(ProcessedAlert.raw_item))
+        .order_by(
+            ProcessedAlert.published_at.desc(),
+            ProcessedAlert.id.desc(),
+        )
+        .limit(effective_limit)
+    )
+    result = await db.execute(stmt)
+    return PublicTeaserResponse(
+        alerts=[_to_teaser_read(a) for a in result.scalars().unique().all()]
     )
 
 

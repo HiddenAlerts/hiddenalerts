@@ -13,10 +13,14 @@
 > | `GET /api/search/alerts` | `GET /api/v1/subscriber/search/alerts` |
 > | Server-rendered dashboard at `/dashboard`, `/login`, `/logout` | React Admin UI over the Internal-JWT Admin APIs |
 >
-> **`GET /api/alerts` is retained** and unchanged — it is the Landing Page feed.
-> Admin, Subscriber, Client, Billing, category-metadata, Source Health and
-> Intelligence Brief APIs are all retained. Shared Internal JWT authentication is
-> unchanged. Client APIs were **not** removed.
+> **`GET /api/alerts` is retained** as the Landing Page feed, but its contract
+> changed on 08 August 2026 — it is now a **marketing teaser**, not a public
+> intelligence API. See §0.1 below. Admin, Subscriber, Client, Billing,
+> category-metadata, Source Health and Intelligence Brief APIs are all retained.
+> Shared Internal JWT authentication is unchanged. Client APIs were **not** removed.
+>
+> **`GET /api/v1/subscriber/alerts/top`** gained a transparent historical
+> fallback and two response fields on the same date. See §0.2 below.
 >
 > For the current surface see `README.md` and the live OpenAPI at
 > `https://api.hiddenalerts.com/docs`.
@@ -47,7 +51,8 @@ what changes is which endpoints accept it.
 ## Table of Contents
 
 0. [**Public Feed — Current Frontend MVP Endpoints**](#0-public-feed--current-frontend-mvp-endpoints)
-    - [GET /api/alerts](#01-get-apialerts--published-alert-list)
+    - [GET /api/alerts *(marketing teaser)*](#01-get-apialerts--public-marketing-teaser)
+    - [GET /api/v1/subscriber/alerts/top *(primary + fallback)*](#02-get-apiv1subscriberalertstop--top-alerts-this-week)
     - [GET /api/alerts/{id} *(retired)*](#02-get-apialertsid--published-alert-detail-new)
     - [GET /api/alerts/top *(retired)*](#03-get-apialertstop--curated-top-alerts-new)
     - [GET /api/alerts/stats *(retired)*](#04-get-apialertsstats--published-alert-stats-new)
@@ -113,22 +118,28 @@ category. Low-band alerts (score < 40) stay in admin-manual review.
 
 ---
 
-### 0.1 GET /api/alerts — Published Alert List
+### 0.1 GET /api/alerts — Public Marketing Teaser
+
+> **Changed 08 August 2026.** This route is a **marketing teaser for the Landing
+> Page, not a public intelligence API.** It returns at most **3** alerts and only
+> teaser-level fields. Complete alert intelligence — scores, source attribution,
+> credibility, entities, evidence, analysis and review state — remains
+> **subscriber-authenticated** under `/api/v1/subscriber/*`.
+
+**Selection and ordering** use `ProcessedAlert.published_at` (HiddenAlerts
+publication time) descending, then id — the teaser represents the latest
+intelligence *we* published. **Display** uses the original article date, the same
+distinction the subscriber feed makes. Maximum 3, enforced server-side.
 
 ```json
 {
   "alerts": [
     {
-      "id": 42,
       "title": "SEC Charges Investment Firm with $4.2M Fraud",
-      "summary": "The SEC charged a New York-based firm...",
+      "risk_band": "critical",
       "category": "Investment Fraud",
-      "risk_level": "high",
-      "signal_score": 76,
-      "source_name": "SEC Press Releases",
-      "source_url": "https://sec.gov/news/press-release/...",
       "source_published_at": "2026-04-22T08:00:00Z",
-      "published_at": "2026-04-22T10:30:01Z"
+      "summary": "The SEC charged a New York-based firm with defrauding investors. The complaint alleges losses exceeding $4.2 million across 300 accounts.…"
     }
   ]
 }
@@ -136,41 +147,96 @@ category. Low-band alerts (score < 40) stay in admin-manual review.
 
 ### Field Reference
 
-| Field                 | Type             | Description                                                                                                                           |
-|-----------------------|------------------|---------------------------------------------------------------------------------------------------------------------------------------|
-| `id`                  | `int`            | Unique alert ID                                                                                                                       |
-| `title`               | `string\|null`   | Article/press release title                                                                                                           |
-| `summary`             | `string\|null`   | AI-generated summary                                                                                                                  |
-| `category`            | `string\|null`   | Fraud category (see list below)                                                                                                       |
-| `risk_level`          | `string\|null`   | `"low"`, `"medium"`, or `"high"` — derived from `signal_score` (M3 final bands: ≥70 high, 40–69 medium, 1–39 low)                     |
-| `signal_score`        | `int\|null`      | **Risk score on a 0–100 scale.** Use this for the score badge / progress bar.                                                         |
-| `source_name`         | `string\|null`   | Name of the originating source                                                                                                        |
-| `source_url`          | `string\|null`   | Direct link to the original article                                                                                                   |
-| `source_published_at` | `datetime\|null` | ISO 8601 UTC — original article / press-release publication date. **Use this for the date shown on list cards and Top Alerts cards.** |
-| `published_at`        | `datetime\|null` | ISO 8601 UTC — HiddenAlerts platform publish time. **Internal sort key only — do not render this as the article date.**               |
+| Field          | Type             | Description                                                                                     |
+|----------------|------------------|-------------------------------------------------------------------------------------------------|
+| `title`        | `string\|null`   | Article / press-release title                                                                    |
+| `risk_band`    | `string\|null`   | Canonical V1 band — `"critical"` or `"high"`. This is the public presentation field.             |
+| `category`             | `string\|null`   | Fraud category                                                                                   |
+| `source_published_at`  | `datetime\|null` | ISO 8601 UTC — **original article / press-release date. This is the card date.** Falls back to HiddenAlerts publication time when the source gave no date, so it is never null for a published alert. |
+| `summary`              | `string\|null`   | Preview of the stored summary: at most 2 sentences and **at most 320 characters including the `…`**, appended only when text was removed |
+
+### Deliberately withheld
+
+`id`, `signal_score`, `risk_level` (legacy), `source_name`, `source_url`,
+`published_at` (our platform publication time — it selects and orders the teaser
+but is not displayed), credibility, entities, evidence, risk explanation, full
+analysis, review state and every publication internal. These are available to
+authenticated subscribers only.
 
 ### Optional Query Parameters
 
-| Param        | Type   | Example                | Description                       |
-|--------------|--------|------------------------|-----------------------------------|
-| `risk_level` | string | `?risk_level=high`     | Filter by risk level              |
-| `category`   | string | `?category=Cybercrime` | Filter by category (exact)        |
-| `source`     | string | `?source=FBI`          | Partial source name search        |
-| `limit`      | int    | `?limit=20`            | Max results (default 50, max 500) |
-| `offset`     | int    | `?offset=20`           | Pagination offset                 |
+| Param   | Type | Example       | Description                                                                     |
+|---------|------|---------------|---------------------------------------------------------------------------------|
+| `limit` | int  | `?limit=2`    | Accepted for compatibility. Can only **lower** the count — a request for 10, 100 or 500 still returns at most 3. |
+
+`risk_level`, `category`, `source` and `offset` are no longer meaningful for a
+3-item teaser and are not part of the contract.
 
 ### Quick Test
 
 ```bash
-# Fetch all published alerts
+# Landing teaser — at most 3 Critical/High alerts
 curl http://localhost:8000/api/alerts
 
-# Filter high-risk only
-curl "http://localhost:8000/api/alerts?risk_level=high"
-
-# Paginate
-curl "http://localhost:8000/api/alerts?limit=10&offset=0"
+# The cap is server-side: this still returns at most 3
+curl "http://localhost:8000/api/alerts?limit=100"
 ```
+
+---
+
+### 0.2 GET /api/v1/subscriber/alerts/top — Top Alerts This Week
+
+Requires an active subscription. Returns at most **3** alerts.
+
+**Primary rule (unchanged):** published Critical/High alerts whose HiddenAlerts
+`published_at` falls in the rolling last **7 days**, ordered Critical before
+High, then score descending, then `published_at` descending, then id. Historical
+bulk publications (`candidate_backfill`, `system_migration`) are excluded.
+
+**Fallback (added 08 August 2026):** engages **only when the primary rule returns
+zero alerts**. One or two current alerts are returned exactly as found — the
+widget is never padded, because presenting an older alert alongside this week's
+would misrepresent it as equally current. When the window is completely empty the
+latest qualifying Critical/High alerts are returned instead, ordered by
+`published_at` descending, with `is_fallback: true` and an explanatory `message`.
+
+All other eligibility rules are identical in both paths; the fallback widens only
+the date range.
+
+**Current-data response:**
+
+```json
+{
+  "alerts": [ { "id": 1312, "title": "…", "risk_band": "critical", "risk_level": "high", "signal_score": 80, "category": "Investment Fraud", "source_name": "FBI National Press Releases", "source_url": "https://www.fbi.gov/…", "source_published_at": "2026-04-06T11:33:00Z", "published_at": "2026-04-06T11:33:00Z", "summary": "…" } ],
+  "is_fallback": false,
+  "message": null
+}
+```
+
+**Historical-fallback response:**
+
+```json
+{
+  "alerts": [ { "id": 1084, "title": "…", "risk_band": "high", "…": "…" } ],
+  "is_fallback": true,
+  "message": "No new Critical or High alerts have been published during the past seven days. The latest published intelligence is shown below."
+}
+```
+
+| Field         | Type            | Description                                                                     |
+|---------------|-----------------|---------------------------------------------------------------------------------|
+| `alerts`      | `array`         | Subscriber alert items — the public list shape plus the canonical `risk_band`   |
+| `is_fallback` | `bool`          | `true` when the items came from outside the rolling 7-day window                 |
+| `message`     | `string\|null`  | Explanatory text to display; `null` unless `is_fallback` is `true`               |
+
+Both metadata fields are **additive** and default to the non-fallback values, so a
+client that ignores them sees the payload it always did. If no qualifying alert
+exists at all, `alerts` is empty and `is_fallback` is `false` — an empty widget
+never claims intelligence is shown.
+
+**Frontend requirement:** when `is_fallback` is `true`, display `message` above
+the list. Otherwise show no notice. Alert rendering is otherwise unchanged.
+
 
 ### Notes for Hasnain
 

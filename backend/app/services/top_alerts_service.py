@@ -10,9 +10,18 @@ This service answers a different, narrower question: **what did HiddenAlerts
 publish in the last seven days that a paying subscriber should see first?**
 
 Every decision is made in SQL and is fully deterministic — no candidate pool, no
-Python reranking, no entity suppression. Three positions, filled by the rules
-below or left empty; there is deliberately **no fallback to older alerts**,
-because a widget titled "this week" showing last year's alert is the bug.
+Python reranking, no entity suppression.
+
+Three positions, filled by the rolling-window rules below. A window that fills
+only one or two positions is left partially filled: padding with older alerts
+would present them as equally current, which is the bug this service was written
+to fix.
+
+When the window yields **nothing at all**, the widget would otherwise be blank,
+so :func:`get_latest_qualifying_alerts` supplies the most recently published
+qualifying alerts instead. That is a different question, answered by a different
+query and ordering, and the caller labels it explicitly so the reader is never
+told last month's intelligence is from this week.
 """
 import logging
 from datetime import datetime, timedelta, timezone
@@ -69,6 +78,24 @@ def window_start(now: datetime) -> datetime:
     return _as_utc(now) - timedelta(days=WINDOW_DAYS)
 
 
+def eligibility_predicates() -> list:
+    """Everything an alert must satisfy to be shown, except the time window.
+
+    Shared by the rolling-window selection and the historical fallback so the two
+    can never disagree about what "qualifying" means — the fallback widens *only*
+    the date range, never the publication, band or exclusion rules.
+    """
+    return [
+        ProcessedAlert.is_published.is_(True),
+        ProcessedAlert.signal_score_total >= HIGH_MIN_SCORE,
+        ProcessedAlert.published_at.is_not(None),
+        or_(
+            ProcessedAlert.publication_state_source.is_(None),
+            ProcessedAlert.publication_state_source.not_in(EXCLUDED_DECISION_SOURCES),
+        ),
+    ]
+
+
 async def get_top_alerts(
     session: AsyncSession,
     *,
@@ -98,16 +125,7 @@ async def get_top_alerts(
 
     statement = (
         select(ProcessedAlert)
-        .where(
-            ProcessedAlert.is_published.is_(True),
-            ProcessedAlert.signal_score_total >= HIGH_MIN_SCORE,
-            ProcessedAlert.published_at.is_not(None),
-            ProcessedAlert.published_at >= cutoff,
-            or_(
-                ProcessedAlert.publication_state_source.is_(None),
-                ProcessedAlert.publication_state_source.not_in(EXCLUDED_DECISION_SOURCES),
-            ),
-        )
+        .where(*eligibility_predicates(), ProcessedAlert.published_at >= cutoff)
         .options(selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source))
         .order_by(
             band_rank,
@@ -123,4 +141,37 @@ async def get_top_alerts(
     log.debug(
         "Top alerts: %d selected from the window opening %s", len(alerts), cutoff
     )
+    return alerts
+
+
+async def get_latest_qualifying_alerts(
+    session: AsyncSession,
+    *,
+    limit: int = DEFAULT_LIMIT,
+) -> list[ProcessedAlert]:
+    """The most recently published qualifying alerts, with no time window.
+
+    Used **only** when the rolling window returns nothing at all. A partially
+    filled window is left partially filled: padding two current alerts with a
+    third from months ago would misrepresent them as equally current, which is
+    the failure the window exists to prevent.
+
+    Ordering is publication time first — not band or score — so the result is
+    genuinely "the latest published intelligence" rather than an all-time
+    leaderboard. Ties break on id descending for determinism.
+    """
+    statement = (
+        select(ProcessedAlert)
+        .where(*eligibility_predicates())
+        .options(selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source))
+        .order_by(
+            ProcessedAlert.published_at.desc(),
+            ProcessedAlert.id.desc(),
+        )
+        .limit(limit)
+    )
+
+    result = await session.execute(statement)
+    alerts = list(result.scalars().unique().all())
+    log.debug("Top alerts fallback: %d selected with no window", len(alerts))
     return alerts

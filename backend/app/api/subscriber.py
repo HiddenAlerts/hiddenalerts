@@ -41,6 +41,7 @@ from app.schemas.alert import (
     SubscriberAlertRead,
     SubscriberAlertsResponse,
     SubscriberAlertStatsResponse,
+    SubscriberTopAlertsResponse,
 )
 from app.schemas.alert_category import AlertCategoriesResponse
 from app.schemas.search import SearchResponse
@@ -50,7 +51,10 @@ from app.schemas.subscriber import (
     SubscriptionMeRead,
 )
 from app.services import alert_category_service
-from app.services.top_alerts_service import get_top_alerts
+from app.services.top_alerts_service import (
+    get_latest_qualifying_alerts,
+    get_top_alerts,
+)
 from app.services.subscription_service import has_active_subscription_access
 
 log = logging.getLogger(__name__)
@@ -237,14 +241,21 @@ def _to_top_alert_read(alert: ProcessedAlert) -> SubscriberAlertRead:
     return SubscriberAlertRead(**read.model_dump(), risk_band=risk_band_for(alert))
 
 
-@router.get("/alerts/top", response_model=SubscriberAlertsResponse)
+#: Shown when the widget is filled from outside the rolling window.
+TOP_ALERTS_FALLBACK_MESSAGE = (
+    "No new Critical or High alerts have been published during the past seven "
+    "days. The latest published intelligence is shown below."
+)
+
+
+@router.get("/alerts/top", response_model=SubscriberTopAlertsResponse)
 async def subscriber_top_alerts(
     _: ActiveSubscriberContext = Depends(require_active_subscription),
     db: AsyncSession = Depends(get_db),
-) -> SubscriberAlertsResponse:
+) -> SubscriberTopAlertsResponse:
     """Top Alerts This Week — Critical and High published in the last seven days.
 
-    Deliberately **not** the public all-time endpoint. That one ranks the
+    Deliberately **not** the legacy all-time endpoint. That one ranks the
     highest-scored published alerts with no time window, which is why the
     Dashboard widget was showing January 2026 and 2025 alerts. See
     :mod:`app.services.top_alerts_service` for the eligibility and ordering rules.
@@ -253,19 +264,28 @@ async def subscriber_top_alerts(
     original article date — see :func:`_to_top_alert_read`. An alert published by
     us this week may therefore display an older article date.
 
-    Returns at most three alerts and an empty list when nothing qualifies — there
-    is no fallback to older alerts.
-
-    The response is :class:`SubscriberAlertsResponse`, matching the rest of the
-    subscriber feed: every existing field is preserved (the schema extends the
-    public one) and the canonical V1 ``risk_band`` is added, so the Critical badge
-    renders correctly. This is additive — no field was removed or redefined.
+    **Fallback applies only to an empty result.** One or two qualifying alerts are
+    returned exactly as found — padding a short week with older alerts would
+    present them as equally current. When the window yields nothing the widget
+    would otherwise be blank, so the latest qualifying alerts are returned
+    instead with ``is_fallback`` set and a message the client can display; the
+    reader is never told older intelligence is from this week.
 
     Evaluated per request against the current window; nothing here is cached.
     """
     alerts = await get_top_alerts(db, now=datetime.now(timezone.utc))
-    return SubscriberAlertsResponse(
-        alerts=[_to_top_alert_read(alert) for alert in alerts]
+    is_fallback = False
+    if not alerts:
+        alerts = await get_latest_qualifying_alerts(db)
+        # Only claim a fallback when one actually produced something. With no
+        # qualifying alerts at all the widget is simply empty, and a message
+        # promising intelligence "below" would be wrong.
+        is_fallback = bool(alerts)
+
+    return SubscriberTopAlertsResponse(
+        alerts=[_to_top_alert_read(alert) for alert in alerts],
+        is_fallback=is_fallback,
+        message=TOP_ALERTS_FALLBACK_MESSAGE if is_fallback else None,
     )
 
 

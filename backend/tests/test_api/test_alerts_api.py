@@ -966,8 +966,11 @@ async def test_7a_false_positive_on_published_unpublishes(client, db_session):
     assert alert.published_by_user_id is None  # stale publisher cleared
 
     # Not returned by the public feed/detail.
+    # The landing route is a marketing teaser and no longer exposes ids, so
+    # absence is asserted by title; the unpublish itself is pinned on the ORM
+    # state above.
     pub_list = await client.get("/api/alerts")
-    assert all(a["id"] != alert.id for a in pub_list.json()["alerts"])
+    assert all(a["title"] != "Test Article 7a_fppub" for a in pub_list.json()["alerts"])
     pub_detail = await client.get(f"/api/alerts/{alert.id}")
     assert pub_detail.status_code == 404
 

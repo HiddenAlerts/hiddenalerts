@@ -355,3 +355,102 @@ async def test_raw_item_and_source_are_eager_loaded(db_session, seed):
     read = _to_public_read(loaded)
     assert read.source_name == "Top Alerts Source"
     assert read.title
+
+
+# ===========================================================================
+# Historical fallback — get_latest_qualifying_alerts
+#
+# Reached only when the rolling window is empty. It answers a different question
+# ("what did we publish most recently?") with a different ordering, so it gets
+# its own tests rather than sharing the window suite's expectations.
+# ===========================================================================
+
+
+async def _fallback_ids(db_session, seed, limit=_WIDE):
+    """Ids this module seeded, in the fallback's order, ignoring foreign rows."""
+    alerts = await service.get_latest_qualifying_alerts(db_session, limit=limit)
+    mine = set(seed.ids)
+    return [a.id for a in alerts if a.id in mine]
+
+
+@pytest.mark.asyncio
+async def test_fallback_ignores_the_rolling_window(db_session, seed):
+    old = await seed(score=25, published_at=NOW - timedelta(days=400))
+    assert await _top_ids(db_session, seed) == [], "window excludes it"
+    assert await _fallback_ids(db_session, seed) == [old.id], "fallback does not"
+
+
+@pytest.mark.asyncio
+async def test_fallback_orders_by_publication_time_not_score(db_session, seed):
+    """Latest published wins even when an older alert scores higher."""
+    lower_but_newer = await seed(score=18, published_at=NOW - timedelta(days=30))
+    higher_but_older = await seed(score=25, published_at=NOW - timedelta(days=300))
+
+    assert await _fallback_ids(db_session, seed) == [
+        lower_but_newer.id,
+        higher_but_older.id,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fallback_orders_this_modules_rows_newest_first(db_session, seed):
+    made = [
+        await seed(score=20, published_at=NOW - timedelta(days=10 * n))
+        for n in range(1, 7)
+    ]
+
+    # A wide limit, then filtered to this module's rows: the fallback has no
+    # window, so alerts other modules published more recently would otherwise
+    # occupy all three positions.
+    assert await _fallback_ids(db_session, seed) == [a.id for a in made]
+
+
+@pytest.mark.asyncio
+async def test_fallback_honours_the_three_position_limit(db_session, seed):
+    for n in range(1, 7):
+        await seed(score=20, published_at=NOW - timedelta(days=10 * n))
+
+    selected = await service.get_latest_qualifying_alerts(
+        db_session, limit=service.DEFAULT_LIMIT
+    )
+    assert len(selected) == service.DEFAULT_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_fallback_excludes_unpublished_alerts(db_session, seed):
+    await seed(score=25, published_at=NOW - timedelta(days=100), is_published=False)
+    assert await _fallback_ids(db_session, seed) == []
+
+
+@pytest.mark.asyncio
+async def test_fallback_excludes_below_high(db_session, seed):
+    await seed(score=service.HIGH_MIN_SCORE - 1, published_at=NOW - timedelta(days=100))
+    assert await _fallback_ids(db_session, seed) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision_source", list(service.EXCLUDED_DECISION_SOURCES))
+async def test_fallback_still_excludes_historical_bulk_publications(
+    db_session, seed, decision_source
+):
+    """A backfill's published_at is when the backfill ran, not an editorial act."""
+    await seed(
+        score=25,
+        published_at=NOW - timedelta(days=100),
+        decision_source=decision_source,
+    )
+    assert await _fallback_ids(db_session, seed) == []
+
+
+@pytest.mark.asyncio
+async def test_fallback_and_window_agree_on_what_qualifies(db_session, seed):
+    """Widening the date range must not widen anything else."""
+    eligible = await seed(score=20, published_at=NOW - timedelta(days=200))
+    await seed(score=20, published_at=NOW - timedelta(days=200), is_published=False)
+    await seed(score=10, published_at=NOW - timedelta(days=200))
+    await seed(
+        score=25, published_at=NOW - timedelta(days=200),
+        decision_source=DecisionSource.CANDIDATE_BACKFILL.value,
+    )
+
+    assert await _fallback_ids(db_session, seed) == [eligible.id]
