@@ -28,6 +28,35 @@ env/
 !.env.example
 !.env.production.example
 
+# E2E harness credentials. `.env.*` above does NOT match these — that pattern
+# only covers names *starting* with ".env.", so a file called `e2e.env` (or
+# `hiddenalerts-e2e.env`) was previously copied into the image. One such file
+# was found baked into an Aug-2026 build layer. The harness env file belongs
+# outside the repository entirely; these rules are the backstop for when it
+# is not. Covered by tests/test_scripts/test_docker_build_context.py.
+e2e.env
+*e2e.env
+**/e2e.env
+**/*e2e.env
+
+# Key material and credential bundles — none are needed to build the image.
+# Each pattern needs a `**/` twin: `*` does not cross `/`, so a bare `*.key`
+# would only protect the context root and miss `tls/private.key`.
+*.pem
+**/*.pem
+*.key
+**/*.key
+*.p12
+**/*.p12
+*.pfx
+**/*.pfx
+credentials*.json
+**/credentials*.json
+service-account*.json
+**/service-account*.json
+*service_role*
+**/*service_role*
+
 # Runtime / generated / private data (never bake into the image)
 data/review_inputs/
 reports/
