@@ -1395,7 +1395,7 @@ async def test_public_landing_feed_is_retained(client: AsyncClient):
 # first regardless of what else is present.
 # ===========================================================================
 
-TEASER_KEYS = {"title", "risk_band", "category", "source_published_at", "summary"}
+TEASER_KEYS = {"title", "risk_band", "category", "published_at", "summary"}
 
 #: Each test takes its own strictly-later publication epoch, so its rows occupy
 #: the three positions regardless of what earlier tests left in the database.
@@ -1501,7 +1501,7 @@ async def test_teaser_item_exposes_only_the_approved_fields(client, db_session, 
 @pytest.mark.parametrize(
     "withheld",
     [
-        "id", "signal_score", "source_url", "source_name", "published_at",
+        "id", "signal_score", "source_url", "source_name", "source_published_at",
         "risk_level", "risk_explanation", "entities", "entities_json",
         "score_source_credibility", "score_financial_impact", "credibility",
         "confidence", "key_intelligence", "why_it_matters", "risk_assessment",
@@ -1671,32 +1671,37 @@ def test_summary_preview_never_empties_a_present_summary():
 
 
 # --- teaser display-date semantics -----------------------------------------
+#
+# The landing teaser shows HiddenAlerts publication time, not the original
+# article date (client-confirmed). The subscriber feed keeps the two-date
+# distinction; the public card is a freshness signal about what we published.
 
 
 @pytest.mark.asyncio
-async def test_teaser_shows_the_original_article_date_not_ours(
+async def test_teaser_shows_our_publication_date_not_the_source_date(
     client, db_session, teaser_seed
 ):
-    """The card date is the source's, matching the subscriber feed convention."""
     source_date = datetime(2029, 3, 4, 9, 0, tzinfo=timezone.utc)
     ours = _epoch()
     source = await _seed_source(db_session, name=f"Teaser Src {uuid.uuid4()}")
     item = await _seed_raw_item(
-        db_session, source, title="Teaser source date",
+        db_session, source, title="Teaser our date",
         url=f"https://x/{uuid.uuid4()}", published_at=source_date,
     )
     alert = await _seed_alert(
         db_session, item, is_published=True, signal_score=20, published_at=ours
     )
-    # Capture as plain ints: the rollback below expires the ORM objects, and
-    # reading .id afterwards would be sync IO.
+    # Capture as plain ints: the rollback below expires the ORM objects.
     alert_id, item_id, source_id = alert.id, item.id, source.id
 
     try:
         alerts = (await client.get("/api/alerts")).json()["alerts"]
-        row = next(a for a in alerts if a["title"] == "Teaser source date")
-        assert row["source_published_at"].startswith("2029-03-04")
-        assert "published_at" not in row, "our timestamp is never exposed"
+        row = next(a for a in alerts if a["title"] == "Teaser our date")
+        assert row["published_at"].startswith(ours.strftime("%Y-%m-%d"))
+        assert not row["published_at"].startswith("2029-03-04"), (
+            "the original article date is not what the landing card shows"
+        )
+        assert "source_published_at" not in row
     finally:
         await db_session.rollback()
         await db_session.execute(delete(ProcessedAlert).where(ProcessedAlert.id == alert_id))
@@ -1706,26 +1711,25 @@ async def test_teaser_shows_the_original_article_date_not_ours(
 
 
 @pytest.mark.asyncio
-async def test_teaser_falls_back_to_our_time_when_the_source_gave_no_date(
+async def test_teaser_date_is_present_even_without_a_source_date(
     client, db_session, teaser_seed
 ):
-    """The established fallback: never leave the card without a date."""
+    """Our timestamp is always set on a published alert, so the card has a date."""
     ours = _epoch()
-    # _seed_raw_item leaves published_at null by default.
+    # _seed_raw_item leaves the source date null by default.
     await teaser_seed(title="Teaser no source date", published_at=ours)
 
     alerts = (await client.get("/api/alerts")).json()["alerts"]
     row = next(a for a in alerts if a["title"] == "Teaser no source date")
-    assert row["source_published_at"] is not None
-    assert row["source_published_at"].startswith(ours.strftime("%Y-%m-%d"))
+    assert row["published_at"] is not None
+    assert row["published_at"].startswith(ours.strftime("%Y-%m-%d"))
 
 
 @pytest.mark.asyncio
-async def test_teaser_still_orders_by_our_publication_time(
+async def test_teaser_display_date_matches_the_ordering_key(
     client, db_session, teaser_seed
 ):
-    """Selection and order follow our publication time even when the source
-    dates disagree — the teaser is "what HiddenAlerts published latest"."""
+    """Card date and ranking are the same value, so they cannot disagree."""
     base = _epoch()
     created = []
     for label, ours, src in [
@@ -1744,9 +1748,13 @@ async def test_teaser_still_orders_by_our_publication_time(
         created.append((alert.id, item.id, source.id))
 
     try:
-        titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
-        # Newest by OUR time first, despite carrying the older source date.
+        rows = (await client.get("/api/alerts")).json()["alerts"]
+        titles = [a["title"] for a in rows]
+        # Newest by our publication time first, despite the older source date.
         assert titles.index("Teaser order newest") < titles.index("Teaser order oldest")
+        # And the dates shown descend in the same order they are ranked.
+        shown = [a["published_at"] for a in rows]
+        assert shown == sorted(shown, reverse=True)
     finally:
         await db_session.rollback()
         for a_id, i_id, s_id in created:

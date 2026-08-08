@@ -1065,7 +1065,7 @@ class TestSubscriberTopAlertsDisplayDate:
         public_ref = public_op["responses"]["200"]["content"]["application/json"]["schema"]
         assert public_ref["$ref"].endswith("PublicTeaserResponse")
         assert set(schemas["PublicTeaserAlertRead"]["properties"]) == {
-            "title", "risk_band", "category", "source_published_at", "summary",
+            "title", "risk_band", "category", "published_at", "summary",
         }
 
     async def test_authorization_and_empty_shape_are_unchanged(
@@ -1250,7 +1250,7 @@ class TestSubscriberRiskBandContract:
         assert rows, "a freshly published Critical alert qualifies for the teaser"
         for row in rows:
             assert set(row) == {
-                "title", "risk_band", "category", "source_published_at", "summary",
+                "title", "risk_band", "category", "published_at", "summary",
             }
 
 

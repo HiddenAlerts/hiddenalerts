@@ -399,11 +399,11 @@ class PublicTeaserAlertRead(BaseModel):
     #: is intentionally not exposed here.
     risk_band: str | None = None
     category: str | None = None
-    #: The original article / press-release date — the reader-facing card date,
-    #: matching the convention the subscriber feed already follows. Our own
-    #: publication time selects and orders the teaser but is not displayed, and
-    #: is not exposed here.
-    source_published_at: datetime | None = None
+    #: HiddenAlerts publication time — the client-confirmed card date for the
+    #: landing teaser, and also what selects and orders it. The original article
+    #: date is intentionally not exposed here; the subscriber feed keeps the
+    #: two-date distinction.
+    published_at: datetime | None = None
     #: Short preview of the stored summary; never the full text.
     summary: str | None = None
 

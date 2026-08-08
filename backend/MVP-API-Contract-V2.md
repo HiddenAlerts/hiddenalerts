@@ -126,10 +126,11 @@ category. Low-band alerts (score < 40) stay in admin-manual review.
 > credibility, entities, evidence, analysis and review state — remains
 > **subscriber-authenticated** under `/api/v1/subscriber/*`.
 
-**Selection and ordering** use `ProcessedAlert.published_at` (HiddenAlerts
-publication time) descending, then id — the teaser represents the latest
-intelligence *we* published. **Display** uses the original article date, the same
-distinction the subscriber feed makes. Maximum 3, enforced server-side.
+**Selection, ordering and display** all use `ProcessedAlert.published_at`
+(HiddenAlerts publication time) descending, then id — the teaser is a freshness
+signal about what *we* published, so the card date and the ranking are the same
+value and cannot disagree. The original article date is not exposed here; the
+subscriber feed keeps that distinction. Maximum 3, enforced server-side.
 
 ```json
 {
@@ -138,7 +139,7 @@ distinction the subscriber feed makes. Maximum 3, enforced server-side.
       "title": "SEC Charges Investment Firm with $4.2M Fraud",
       "risk_band": "critical",
       "category": "Investment Fraud",
-      "source_published_at": "2026-04-22T08:00:00Z",
+      "published_at": "2026-04-22T10:30:01Z",
       "summary": "The SEC charged a New York-based firm with defrauding investors. The complaint alleges losses exceeding $4.2 million across 300 accounts.…"
     }
   ]
@@ -152,14 +153,14 @@ distinction the subscriber feed makes. Maximum 3, enforced server-side.
 | `title`        | `string\|null`   | Article / press-release title                                                                    |
 | `risk_band`    | `string\|null`   | Canonical V1 band — `"critical"` or `"high"`. This is the public presentation field.             |
 | `category`             | `string\|null`   | Fraud category                                                                                   |
-| `source_published_at`  | `datetime\|null` | ISO 8601 UTC — **original article / press-release date. This is the card date.** Falls back to HiddenAlerts publication time when the source gave no date, so it is never null for a published alert. |
+| `published_at`         | `datetime\|null` | ISO 8601 UTC — **HiddenAlerts publication time. This is the card date**, and the same value used to select and order the teaser. Never null for a published alert. |
 | `summary`              | `string\|null`   | Preview of the stored summary: at most 2 sentences and **at most 320 characters including the `…`**, appended only when text was removed |
 
 ### Deliberately withheld
 
 `id`, `signal_score`, `risk_level` (legacy), `source_name`, `source_url`,
-`published_at` (our platform publication time — it selects and orders the teaser
-but is not displayed), credibility, entities, evidence, risk explanation, full
+`source_published_at` (the original article date — shown on subscriber surfaces,
+not on the public card), credibility, entities, evidence, risk explanation, full
 analysis, review state and every publication internal. These are available to
 authenticated subscribers only.
 

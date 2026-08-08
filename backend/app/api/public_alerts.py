@@ -729,19 +729,18 @@ def _to_teaser_read(alert: ProcessedAlert) -> PublicTeaserAlertRead:
     Reads only the stored fields the teaser exposes; nothing about the source,
     score or analysis is touched, so no internal value can leak by accident.
 
-    The displayed date is the original article date, matching the convention the
-    subscriber feed already follows: ``ProcessedAlert.published_at`` is when
-    *HiddenAlerts* published, which selects and orders the teaser but is not what
-    a reader should see on a card. Our timestamp is used only as the fallback
-    when the source gave us no date, so the field is never null for a published
-    alert.
+    The date is ``ProcessedAlert.published_at`` — when *HiddenAlerts* published
+    the alert. The landing page is a freshness signal, so it shows when we
+    published rather than when the original article appeared; the two can differ
+    by months for recovered material. The same value selects and orders the
+    teaser, so the card date and the ranking never disagree. The original article
+    date is not exposed here — the subscriber feed keeps that distinction.
     """
-    source_published_at = alert.raw_item.published_at if alert.raw_item else None
     return PublicTeaserAlertRead(
         title=alert.raw_item.title if alert.raw_item else None,
         risk_band=risk_band_for(alert),
         category=alert.primary_category,
-        source_published_at=source_published_at or alert.published_at,
+        published_at=alert.published_at,
         summary=summary_preview(alert.summary),
     )
 
