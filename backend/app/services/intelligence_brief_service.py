@@ -300,6 +300,7 @@ async def update_brief(
         "risk_level",
         "primary_entities",
         "tags",
+        "key_signals",
         "time_horizon",
         "confidence_level",
         "brief_type",

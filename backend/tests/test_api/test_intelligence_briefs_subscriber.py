@@ -13,7 +13,10 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.intelligence_brief import IntelligenceBrief
-from app.schemas.intelligence_brief import IntelligenceBriefCreate
+from app.schemas.intelligence_brief import (
+    IntelligenceBriefCreate,
+    IntelligenceBriefUpdate,
+)
 from app.services import intelligence_brief_service as briefs
 from tests.test_api.test_subscriber_api import _claims, _patch_validator
 from tests.test_api.test_subscriber_content import (
@@ -325,3 +328,92 @@ async def test_library_search_never_returns_hidden(client: AsyncClient, db_sessi
     body = resp.json()
     assert body["total"] == 1
     assert body["items"][0]["id"] == visible.id
+
+
+# ===========================================================================
+# Publish integrity, subscriber side.
+#
+# The production report was that Key Signals rendered as "No content provided"
+# and the thumbnail was missing after publishing. These pin what a subscriber
+# actually receives once a brief carrying both is published.
+# ===========================================================================
+
+
+_SIGNALS = ["subscriber signal one", "subscriber signal two", "subscriber signal three"]
+_IMAGE_URL = "/uploads/intelligence-briefs/deadbeef.jpg"
+
+
+@pytest.mark.asyncio
+async def test_subscriber_detail_returns_key_signals(client, db_session):
+    brief = await _publish(db_session, key_signals=_SIGNALS)
+    sub_id = await _active_subscriber(db_session)
+
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(f"{BASE}/{brief.slug}", headers=_AUTH)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["key_signals"] == _SIGNALS
+
+
+@pytest.mark.asyncio
+async def test_subscriber_detail_returns_the_featured_image(client, db_session):
+    brief = await _publish(db_session)
+    brief.featured_image_url = _IMAGE_URL
+    await db_session.commit()
+    sub_id = await _active_subscriber(db_session)
+
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(f"{BASE}/{brief.slug}", headers=_AUTH)
+
+    assert resp.json()["featured_image_url"] == _IMAGE_URL
+
+
+@pytest.mark.asyncio
+async def test_subscriber_library_returns_the_featured_image(client, db_session):
+    brief = await _publish(db_session)
+    brief.featured_image_url = _IMAGE_URL
+    await db_session.commit()
+    sub_id = await _active_subscriber(db_session)
+
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(BASE, headers=_AUTH)
+
+    assert resp.status_code == 200, resp.text
+    row = next(b for b in resp.json()["items"] if b["id"] == brief.id)
+    assert row["featured_image_url"] == _IMAGE_URL
+
+
+@pytest.mark.asyncio
+async def test_featured_brief_returns_key_signals_and_image(client, db_session):
+    brief = await _publish(db_session, key_signals=_SIGNALS)
+    brief.featured_image_url = _IMAGE_URL
+    await db_session.commit()
+    await briefs.feature_brief(db_session, brief.id, user_id=None)
+    await db_session.commit()
+    sub_id = await _active_subscriber(db_session)
+
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(f"{BASE}/featured", headers=_AUTH)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == brief.id
+    assert body["key_signals"] == _SIGNALS
+    assert body["featured_image_url"] == _IMAGE_URL
+
+
+@pytest.mark.asyncio
+async def test_edited_key_signals_reach_the_subscriber(client, db_session):
+    """End to end: edit after creation, publish, and read as a subscriber."""
+    brief = await _publish(db_session, key_signals=["original"])
+    edited = ["edited alpha", "edited bravo"]
+    await briefs.update_brief(
+        db_session, brief.id, IntelligenceBriefUpdate(key_signals=edited), user_id=None
+    )
+    await db_session.commit()
+    sub_id = await _active_subscriber(db_session)
+
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(f"{BASE}/{brief.slug}", headers=_AUTH)
+
+    assert resp.json()["key_signals"] == edited

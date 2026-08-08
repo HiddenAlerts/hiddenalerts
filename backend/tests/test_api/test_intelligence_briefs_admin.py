@@ -674,3 +674,256 @@ async def test_admin_list_invalid_paging_returns_422(client, db_session, params)
     admin = await _make_user(db_session)
     resp = await client.get(BASE, params=params, headers=_auth(admin))
     assert resp.status_code == 422
+
+
+# ===========================================================================
+# Publish integrity.
+#
+# Reported from production: after publishing, a brief's Key Signals rendered as
+# "No content provided" and its thumbnail was missing. Publishing turned out to
+# be innocent — it only moves lifecycle fields. The real defect was in the update
+# path, which accepted `key_signals`, answered 200, and echoed the previously
+# stored value back, so the editor could not tell the change had been dropped.
+#
+# These tests pin both halves: that an edit to any single content field is
+# actually persisted, and that publishing never alters content.
+# ===========================================================================
+
+
+_FULL_CONTENT = {
+    "category": "Cybercrime",
+    "risk_score": 90,
+    "risk_level": "critical",
+    "time_horizon": "immediate",
+    "confidence_level": "high",
+    "primary_entities": ["Acme Corp"],
+    "tags": ["fraud", "phishing"],
+    "key_signals": ["signal one", "signal two", "signal three"],
+    "executive_summary": "<p>Executive summary</p>",
+    "why_this_matters": "<p>Why this matters</p>",
+    "risk_assessment": "<p>Risk assessment</p>",
+    "what_others_miss": "<p>What others miss</p>",
+    "implications": "<p>Implications</p>",
+    "main_intelligence_brief": "<p>Full brief body</p>",
+    "analyst_notes": "<p>Analyst notes</p>",
+}
+
+#: Publishing is allowed to move exactly these.
+_LIFECYCLE_FIELDS = {"status", "published_at", "updated_at", "updated_by_user_id"}
+
+
+async def _create_full(client, admin, **overrides) -> int:
+    payload = {"title": f"Integrity {uuid.uuid4().hex[:8]}", **_FULL_CONTENT, **overrides}
+    resp = await client.post(BASE, json=payload, headers=_auth(admin))
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_editing_key_signals_is_actually_persisted(client, db_session):
+    """The reported defect: the edit was accepted but never stored."""
+    admin = await _make_user(db_session)
+    brief_id = await _create_full(client, admin)
+    edited = ["edited one", "edited two", "edited three", "edited four"]
+
+    resp = await client.put(
+        f"{BASE}/{brief_id}", json={"key_signals": edited}, headers=_auth(admin)
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["key_signals"] == edited, "the PUT response must not echo stale data"
+
+    fetched = await client.get(f"{BASE}/{brief_id}", headers=_auth(admin))
+    assert fetched.json()["key_signals"] == edited
+
+
+@pytest.mark.asyncio
+async def test_key_signals_ordering_and_content_are_preserved(client, db_session):
+    admin = await _make_user(db_session)
+    brief_id = await _create_full(client, admin)
+    ordered = ["zulu", "alpha", "mike", "bravo"]
+
+    await client.put(
+        f"{BASE}/{brief_id}", json={"key_signals": ordered}, headers=_auth(admin)
+    )
+    resp = await client.post(f"{BASE}/{brief_id}/publish", headers=_auth(admin))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["key_signals"] == ordered, "order must survive verbatim"
+
+
+@pytest.mark.asyncio
+async def test_key_signals_survive_publish(client, db_session):
+    admin = await _make_user(db_session)
+    brief_id = await _create_full(client, admin)
+
+    before = (await client.get(f"{BASE}/{brief_id}", headers=_auth(admin))).json()
+    await client.post(f"{BASE}/{brief_id}/publish", headers=_auth(admin))
+    after = (await client.get(f"{BASE}/{brief_id}", headers=_auth(admin))).json()
+
+    assert after["key_signals"] == before["key_signals"] == _FULL_CONTENT["key_signals"]
+
+
+@pytest.mark.asyncio
+async def test_featured_image_survives_publish(client, db_session, upload_root):
+    admin = await _make_user(db_session)
+    brief_id = await _create_full(client, admin)
+    uploaded = await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image("photo.jpg", "image/jpeg"),
+        headers=_auth(admin),
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    image_url = uploaded.json()["featured_image_url"]
+    assert image_url
+
+    published = await client.post(f"{BASE}/{brief_id}/publish", headers=_auth(admin))
+    assert published.json()["featured_image_url"] == image_url
+
+    after = await client.get(f"{BASE}/{brief_id}", headers=_auth(admin))
+    assert after.json()["featured_image_url"] == image_url
+
+
+@pytest.mark.asyncio
+async def test_publish_changes_only_lifecycle_fields(client, db_session, upload_root):
+    """Every content field must come back value-identical after publishing."""
+    admin = await _make_user(db_session)
+    brief_id = await _create_full(client, admin)
+    await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image("photo.jpg", "image/jpeg"),
+        headers=_auth(admin),
+    )
+
+    before = (await client.get(f"{BASE}/{brief_id}", headers=_auth(admin))).json()
+    assert before["status"] == "draft"
+    assert before["published_at"] is None
+
+    await client.post(f"{BASE}/{brief_id}/publish", headers=_auth(admin))
+    after = (await client.get(f"{BASE}/{brief_id}", headers=_auth(admin))).json()
+
+    changed = {k for k in before if before[k] != after[k]}
+    assert changed <= _LIFECYCLE_FIELDS, f"publish altered content fields: {changed - _LIFECYCLE_FIELDS}"
+    assert after["status"] == "published"
+    assert after["published_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_publish_response_carries_the_content(client, db_session, upload_root):
+    admin = await _make_user(db_session)
+    brief_id = await _create_full(client, admin)
+    await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image("photo.jpg", "image/jpeg"),
+        headers=_auth(admin),
+    )
+
+    body = (await client.post(f"{BASE}/{brief_id}/publish", headers=_auth(admin))).json()
+    assert body["key_signals"] == _FULL_CONTENT["key_signals"]
+    assert body["featured_image_url"]
+    for field, value in _FULL_CONTENT.items():
+        if field in body and field not in {"key_signals"}:
+            assert body[field] == value, field
+
+
+# --- partial-update protection ---------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field, new_value",
+    [
+        ("title", "Retitled only"),
+        ("category", "Investment Fraud"),
+        ("risk_score", 55),
+        ("executive_summary", "<p>Only this changed</p>"),
+    ],
+)
+async def test_partial_update_never_erases_key_signals(
+    client, db_session, field, new_value
+):
+    admin = await _make_user(db_session)
+    brief_id = await _create_full(client, admin)
+
+    resp = await client.put(
+        f"{BASE}/{brief_id}", json={field: new_value}, headers=_auth(admin)
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["key_signals"] == _FULL_CONTENT["key_signals"], (
+        f"updating {field} must not disturb key_signals"
+    )
+
+
+@pytest.mark.asyncio
+async def test_partial_update_never_erases_the_featured_image(
+    client, db_session, upload_root
+):
+    admin = await _make_user(db_session)
+    brief_id = await _create_full(client, admin)
+    uploaded = await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image("photo.jpg", "image/jpeg"),
+        headers=_auth(admin),
+    )
+    image_url = uploaded.json()["featured_image_url"]
+
+    resp = await client.put(
+        f"{BASE}/{brief_id}", json={"title": "Retitled"}, headers=_auth(admin)
+    )
+    assert resp.json()["featured_image_url"] == image_url
+
+
+@pytest.mark.asyncio
+async def test_a_single_field_edit_leaves_every_other_field_untouched(
+    client, db_session, upload_root
+):
+    """The general form of the defect: one changed field, nothing else moves."""
+    admin = await _make_user(db_session)
+    brief_id = await _create_full(client, admin)
+    await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image("photo.jpg", "image/jpeg"),
+        headers=_auth(admin),
+    )
+
+    before = (await client.get(f"{BASE}/{brief_id}", headers=_auth(admin))).json()
+    await client.put(
+        f"{BASE}/{brief_id}", json={"risk_score": 42}, headers=_auth(admin)
+    )
+    after = (await client.get(f"{BASE}/{brief_id}", headers=_auth(admin))).json()
+
+    changed = {k for k in before if before[k] != after[k]}
+    assert changed <= {"risk_score", "updated_at", "updated_by_user_id"}, changed
+
+
+@pytest.mark.asyncio
+async def test_key_signals_can_still_be_cleared_explicitly(client, db_session):
+    """Explicit clearing remains possible — the fix must not make the field sticky."""
+    admin = await _make_user(db_session)
+    brief_id = await _create_full(client, admin)
+
+    resp = await client.put(
+        f"{BASE}/{brief_id}", json={"key_signals": []}, headers=_auth(admin)
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["key_signals"] == []
+
+
+@pytest.mark.asyncio
+async def test_archive_then_republish_keeps_content(client, db_session, upload_root):
+    admin = await _make_user(db_session)
+    brief_id = await _create_full(client, admin)
+    await client.post(
+        f"{BASE}/{brief_id}/featured-image",
+        files=_image("photo.jpg", "image/jpeg"),
+        headers=_auth(admin),
+    )
+    await client.post(f"{BASE}/{brief_id}/publish", headers=_auth(admin))
+    before = (await client.get(f"{BASE}/{brief_id}", headers=_auth(admin))).json()
+
+    await client.post(f"{BASE}/{brief_id}/archive", headers=_auth(admin))
+    republished = await client.post(f"{BASE}/{brief_id}/publish", headers=_auth(admin))
+    assert republished.status_code == 200, republished.text
+    after = republished.json()
+
+    assert after["key_signals"] == before["key_signals"]
+    assert after["featured_image_url"] == before["featured_image_url"]
+    assert after["published_at"] == before["published_at"], "original date preserved"
