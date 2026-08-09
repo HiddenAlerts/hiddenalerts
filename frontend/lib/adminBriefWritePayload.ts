@@ -19,9 +19,11 @@ export function richTextOrOmit(html: string | undefined): string | undefined {
 /**
  * Build the shared write shape. Callers decide create vs update semantics.
  *
- * Update rule (critical): omit empty wipe-sensitive fields so a partial PUT
- * with `exclude_unset=True` cannot clear Key Signals, entities, tags, or
- * rich text when the editor looks empty or conversion yields [].
+ * Update notes:
+ * - Always send `key_signals` (including `[]`) so an intentionally empty editor
+ *   clears stored signals. Omitting the field means "leave unchanged" on the API.
+ * - Still omit empty entities/tags/rich text so accidental empty editor state
+ *   cannot wipe those fields on a partial save.
  */
 export function buildAdminBriefWritePayload(
   brief: AdminBrief,
@@ -46,12 +48,13 @@ export function buildAdminBriefWritePayload(
     brief_type: 'intelligence_brief',
     is_premium: brief.isPremium,
     supporting_alerts: supportingAlerts,
+    // Always include — [] clears; non-empty replaces (backend partial-update contract).
+    key_signals: keySignals,
   };
 
   if (mode === 'create') {
     payload.primary_entities = brief.primaryEntities;
     payload.tags = brief.tags;
-    payload.key_signals = keySignals;
     payload.executive_summary = richTextOrOmit(brief.executiveSummary);
     payload.why_this_matters = richTextOrOmit(brief.whyThisMatters);
     payload.risk_assessment = richTextOrOmit(brief.riskAssessment);
@@ -62,15 +65,12 @@ export function buildAdminBriefWritePayload(
     return payload;
   }
 
-  // --- update: never send empty wipe-sensitive fields ---
+  // --- update: omit empty entities/tags/rich text (key_signals always sent above) ---
   if (brief.primaryEntities.length > 0) {
     payload.primary_entities = brief.primaryEntities;
   }
   if (brief.tags.length > 0) {
     payload.tags = brief.tags;
-  }
-  if (keySignals.length > 0) {
-    payload.key_signals = keySignals;
   }
 
   const executiveSummary = richTextOrOmit(brief.executiveSummary);
