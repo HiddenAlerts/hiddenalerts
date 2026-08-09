@@ -18,7 +18,8 @@ import { apiGet, type HttpRequestError } from './client';
  */
 const SUBSCRIBER_BRIEFS_BASE = '/v1/subscriber/intelligence-briefs';
 
-export const SUBSCRIBER_BRIEFS_PAGE_SIZE = 8;
+/** Multiple of 3 so each page fills the library’s 3-column grid. */
+export const SUBSCRIBER_BRIEFS_PAGE_SIZE = 9;
 
 /** Max the backend allows per page — used for the bulk facets/stats fetch. */
 export const SUBSCRIBER_BRIEFS_OVERVIEW_LIMIT = 100;

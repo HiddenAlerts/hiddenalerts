@@ -39,7 +39,7 @@ export const BriefCard: FC<BriefCardProps> = ({
   >
     <div
       className={cn(
-        'bg-surface-muted relative w-full overflow-hidden',
+        'bg-surface-muted relative w-full shrink-0 overflow-hidden',
         imageClassName ?? 'aspect-[16/9]',
       )}
     >
@@ -60,19 +60,20 @@ export const BriefCard: FC<BriefCardProps> = ({
       </div>
     </div>
 
-    <div className="flex flex-1 flex-col gap-2.5 p-3.5 sm:p-4">
+    {/* Fixed category + title slots keep meta/footer aligned across the grid. */}
+    <div className="flex min-h-0 flex-1 flex-col p-3.5 sm:p-4">
       <span
         className={cn(
-          'line-clamp-1 text-xs font-semibold tracking-wide uppercase',
+          'mb-2.5 block h-4 truncate text-xs leading-4 font-semibold tracking-wide uppercase',
           riskScoreTone[brief.riskLabel],
         )}
       >
-        {brief.category}
+        {brief.category || '\u00a0'}
       </span>
-      <h3 className="text-foreground line-clamp-3 min-h-[3.75rem] text-sm leading-snug font-semibold">
+      <h3 className="text-foreground line-clamp-3 h-[3.75rem] shrink-0 text-sm leading-5 font-semibold">
         {brief.title}
       </h3>
-      <div className="mt-auto flex items-center justify-between gap-3 pt-1">
+      <div className="mt-auto flex shrink-0 items-center justify-between gap-3 pt-2.5">
         <div className="text-muted grid min-w-0 flex-1 grid-cols-[1fr_auto] items-center gap-x-2 text-xs">
           <span className="truncate whitespace-nowrap">
             {formatBriefDate(brief.date)}
