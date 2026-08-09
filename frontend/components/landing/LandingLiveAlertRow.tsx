@@ -6,60 +6,15 @@ export type LandingLiveAlertRowProps = {
   className?: string;
 };
 
-const levelTone: Record<LiveAlert['level'], string> = {
-  CRITICAL: 'text-primary-500',
-  HIGH: 'text-primary-500',
-  MEDIUM: 'text-warning',
-  LOW: 'text-success',
+/** Solid risk pills — same tokens as BriefRiskTag / app alerts. */
+const levelBadge: Record<LiveAlert['level'], string> = {
+  CRITICAL: 'bg-danger text-white',
+  HIGH: 'bg-warning text-secondary-900',
+  MEDIUM: 'bg-warning/80 text-secondary-900',
+  LOW: 'bg-success text-secondary-900',
 };
 
-function ScoreCircle({ score, level }: { score: number; level: LiveAlert['level'] }) {
-  const circumference = 2 * Math.PI * 18;
-  const offset = circumference - (Math.min(score, 100) / 100) * circumference;
-
-  return (
-    <div className="flex shrink-0 flex-col items-center gap-0.5">
-      <div className="relative size-11 sm:size-12">
-        <svg viewBox="0 0 44 44" className="size-full -rotate-90" aria-hidden>
-          <circle
-            cx="22"
-            cy="22"
-            r="18"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="3"
-            className="text-border"
-          />
-          <circle
-            cx="22"
-            cy="22"
-            r="18"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={offset}
-            className="text-primary-500"
-          />
-        </svg>
-        <span className="text-foreground absolute inset-0 flex items-center justify-center text-[0.7rem] font-bold tabular-nums">
-          {score}
-        </span>
-      </div>
-      <span
-        className={cn(
-          'text-[0.55rem] font-bold tracking-wide uppercase',
-          levelTone[level],
-        )}
-      >
-        {level}
-      </span>
-    </div>
-  );
-}
-
-/** Non-interactive preview row — score ring + title + date • category. */
+/** Non-interactive teaser row — risk_band badge + title + date • category. */
 export function LandingLiveAlertRow({
   alert,
   className,
@@ -69,13 +24,22 @@ export function LandingLiveAlertRow({
   return (
     <article
       className={cn(
-        'border-border/50 flex items-start gap-3 border-b py-3.5 last:border-b-0 sm:gap-3.5',
+        'border-border/50 flex flex-col gap-2 border-b py-3.5 last:border-b-0',
         className,
       )}
     >
-      <ScoreCircle score={alert.score} level={alert.level} />
+      <span
+        className={cn(
+          'inline-flex w-fit items-center rounded-sm px-2 py-0.5 text-[0.65rem] font-bold tracking-wide uppercase',
+          levelBadge[alert.level],
+        )}
+      >
+        {alert.level === 'CRITICAL' || alert.level === 'HIGH'
+          ? `${alert.level === 'CRITICAL' ? 'Critical' : 'High'} Risk`
+          : alert.level}
+      </span>
 
-      <div className="min-w-0 flex-1 pt-0.5">
+      <div className="min-w-0">
         <h3 className="text-foreground text-sm leading-snug font-semibold">
           {alert.title}
         </h3>

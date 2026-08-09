@@ -5,6 +5,7 @@ import {
   fetchPublicAlerts,
   type PublicAlertListItem,
 } from '@/lib/api/publicAlerts';
+import { resolveAlertRiskBand } from '@/lib/alertDisplay';
 import {
   LIVE_ALERTS_PANEL,
   type LiveAlert,
@@ -16,12 +17,14 @@ import { LandingLiveAlertRow } from './LandingLiveAlertRow';
 
 type PanelMode = 'loading' | 'live' | 'empty';
 
-/** Display the classification returned by the public alerts API. */
-function mapRiskLevel(raw: string): RiskLevel {
-  const level = raw.toLowerCase();
-  if (level === 'critical') return 'CRITICAL';
-  if (level === 'high') return 'HIGH';
-  if (level === 'low') return 'LOW';
+function mapRiskBandToLevel(
+  riskBand: string | null | undefined,
+  riskLevel: string | null | undefined,
+): RiskLevel {
+  const band = resolveAlertRiskBand(riskBand, riskLevel);
+  if (band === 'critical') return 'CRITICAL';
+  if (band === 'high') return 'HIGH';
+  if (band === 'low' || band === 'below_60') return 'LOW';
   return 'MEDIUM';
 }
 
@@ -57,11 +60,8 @@ function formatTimestamp(iso: string | null | undefined): string {
 }
 
 function mapPublicAlert(item: PublicAlertListItem): LiveAlert {
-  const score = Math.round(Number(item.signal_score) || 0);
   return {
-    score,
-    // Prefer risk_band when present; otherwise display risk_level as-is.
-    level: mapRiskLevel(item.risk_band || item.risk_level),
+    level: mapRiskBandToLevel(item.risk_band, item.risk_level),
     title: item.title,
     category: item.category,
     categoryTone: categoryTone(item.category),
@@ -70,7 +70,7 @@ function mapPublicAlert(item: PublicAlertListItem): LiveAlert {
 }
 
 /**
- * Left column — three most recent high-risk alerts (approved final mockup).
+ * Left column — three most recent Critical/High alerts (landing teaser API).
  * API-only: never pads with hardcoded sample alerts.
  */
 export function LandingAlertsPanel() {
@@ -82,16 +82,10 @@ export function LandingAlertsPanel() {
 
     async function load() {
       try {
-        let response = await fetchPublicAlerts({
+        const response = await fetchPublicAlerts({
           limit: LANDING_ALERTS_LIMIT,
-          riskLevel: 'high',
         });
-        let rows = (response.alerts ?? []).slice(0, LANDING_ALERTS_LIMIT);
-
-        if (rows.length === 0) {
-          response = await fetchPublicAlerts({ limit: LANDING_ALERTS_LIMIT });
-          rows = (response.alerts ?? []).slice(0, LANDING_ALERTS_LIMIT);
-        }
+        const rows = (response.alerts ?? []).slice(0, LANDING_ALERTS_LIMIT);
 
         if (cancelled) return;
 
@@ -138,17 +132,19 @@ export function LandingAlertsPanel() {
 
       <div className="mt-2 flex flex-1 flex-col">
         {showSkeleton ? (
-          <div className="space-y-3 py-2" aria-busy="true" aria-label="Loading alerts">
+          <div
+            className="space-y-3 py-2"
+            aria-busy="true"
+            aria-label="Loading alerts"
+          >
             {Array.from({ length: LANDING_ALERTS_LIMIT }).map((_, i) => (
               <div
                 key={i}
-                className="border-border/50 flex items-start gap-3 border-b py-3.5 last:border-b-0"
+                className="border-border/50 space-y-2 border-b py-3.5 last:border-b-0"
               >
-                <div className="bg-surface-muted size-11 shrink-0 animate-pulse rounded-full sm:size-12" />
-                <div className="min-w-0 flex-1 space-y-2 pt-0.5">
-                  <div className="bg-surface-muted h-3 w-[80%] animate-pulse rounded" />
-                  <div className="bg-surface-muted h-2.5 w-1/2 animate-pulse rounded" />
-                </div>
+                <div className="bg-surface-muted h-4 w-20 animate-pulse rounded-sm" />
+                <div className="bg-surface-muted h-3 w-[80%] animate-pulse rounded" />
+                <div className="bg-surface-muted h-2.5 w-1/2 animate-pulse rounded" />
               </div>
             ))}
           </div>

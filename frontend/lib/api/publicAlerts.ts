@@ -1,17 +1,20 @@
 import { apiGet } from '@/lib/api/client';
 
-/** Fields used by the landing alerts card from `GET /alerts`. */
+/**
+ * Marketing teaser from `GET /alerts` (at most 3 Critical/High alerts).
+ * Score, id, and legacy risk_level were removed from the public payload.
+ */
 export type PublicAlertListItem = {
-  id: number;
   title: string;
-  category: string;
-  /** Backend classification (`high` / `medium` / `low`; may include `critical`). */
-  risk_level: string;
-  /** More specific band when the public API provides it. */
   risk_band?: string | null;
-  signal_score: number;
-  source_published_at?: string | null;
+  category: string;
   published_at?: string | null;
+  summary?: string | null;
+  /** Legacy fields — ignored when absent. */
+  risk_level?: string | null;
+  source_published_at?: string | null;
+  id?: number;
+  signal_score?: number;
 };
 
 export type PublicAlertsListResponse = {
@@ -22,20 +25,13 @@ export type PublicAlertsListResponse = {
 export const LANDING_ALERTS_LIMIT = 3;
 
 /**
- * Published alerts for the anonymous landing feed.
- * No auth. Uses `limit` so we only pull what the UI shows.
+ * Published teaser alerts for the anonymous landing feed.
+ * No auth. Uses `limit` so we only pull what the UI shows (API caps at 3).
  */
-export function fetchPublicAlerts(options?: {
-  limit?: number;
-  riskLevel?: 'low' | 'medium' | 'high';
-}) {
+export function fetchPublicAlerts(options?: { limit?: number }) {
   const limit = options?.limit ?? LANDING_ALERTS_LIMIT;
   const params = new URLSearchParams({
     limit: String(limit),
-    offset: '0',
   });
-  if (options?.riskLevel) {
-    params.set('risk_level', options.riskLevel);
-  }
   return apiGet<PublicAlertsListResponse>(`/alerts?${params.toString()}`);
 }
