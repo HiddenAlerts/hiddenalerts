@@ -91,7 +91,10 @@ export const DashboardScreen: FC = () => {
 
   const topAlerts = isSearchActive
     ? topAlertsFromSearch
-    : (topAlertsWeekData ?? []);
+    : (topAlertsWeekData?.alerts ?? []);
+  const topAlertsFallbackMessage = isSearchActive
+    ? null
+    : (topAlertsWeekData?.fallbackMessage ?? null);
 
   const alertsContinueHref = useMemo(() => {
     const q = isSearchActive ? searchTerm : undefined;
@@ -203,6 +206,7 @@ export const DashboardScreen: FC = () => {
         title="Latest Critical & High Alerts"
         subtitle="Critical & High only — newest first."
         alerts={topAlerts}
+        fallbackMessage={topAlertsFallbackMessage}
         viewAllHref={alertsContinueHref}
         viewAllLabel="View all alerts"
         bodyContent={

@@ -48,6 +48,7 @@ export {
   DASHBOARD_TOP_ALERTS_WEEK_LIMIT,
   dashboardTopAlertsWeekQueryKey,
   useDashboardTopAlertsWeekQuery,
+  type DashboardTopAlertsWeekResult,
 } from './useDashboardTopAlertsWeekQuery';
 export { useDebouncedValue } from './useDebouncedValue';
 export {

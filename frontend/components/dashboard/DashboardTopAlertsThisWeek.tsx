@@ -9,6 +9,8 @@ export type DashboardTopAlertsThisWeekProps = {
   title?: string;
   subtitle?: string;
   alerts: DashboardTopAlertWeeklyItem[];
+  /** API fallback notice (7-day window empty); omit or null when not in fallback. */
+  fallbackMessage?: string | null;
   viewAllHref?: string;
   viewAllLabel?: string;
   /** Optional replacement for the rows (loading/error/empty states). */
@@ -22,11 +24,13 @@ export const DashboardTopAlertsThisWeek: FC<
   title = 'Latest Critical & High Alerts',
   subtitle = 'Newest Critical and High-Risk threats — updated continuously.',
   alerts,
+  fallbackMessage,
   viewAllHref,
   viewAllLabel,
   bodyContent,
   className,
 }) => {
+  const notice = fallbackMessage?.trim() || null;
   const hasRows = !bodyContent && alerts.length > 0;
 
   return (
@@ -46,9 +50,16 @@ export const DashboardTopAlertsThisWeek: FC<
           No Critical or High-Risk alerts to display right now.
         </p>
       ) : (
-        alerts.map(alert => (
-          <DashboardTopAlertRow key={alert.id} alert={alert} />
-        ))
+        <>
+          {notice ? (
+            <p role="status" className="text-muted text-sm leading-relaxed">
+              {notice}
+            </p>
+          ) : null}
+          {alerts.map(alert => (
+            <DashboardTopAlertRow key={alert.id} alert={alert} />
+          ))}
+        </>
       )}
     </DashboardSectionCard>
   );

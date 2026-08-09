@@ -9,6 +9,12 @@ import { useQuery } from '@tanstack/react-query';
 /** Display cap; `/alerts/top` currently returns at most 3 curated alerts. */
 export const DASHBOARD_TOP_ALERTS_WEEK_LIMIT = 5;
 
+export type DashboardTopAlertsWeekResult = {
+  alerts: DashboardTopAlertWeeklyItem[];
+  /** Shown above the list only when the API is in 7-day fallback mode. */
+  fallbackMessage: string | null;
+};
+
 function dedupeTopAlertsByIdAndTitle<T extends { id: number | string; title: string }>(
   alerts: T[],
 ): T[] {
@@ -29,12 +35,22 @@ function dedupeTopAlertsByIdAndTitle<T extends { id: number | string; title: str
   return out;
 }
 
+function resolveFallbackMessage(data: {
+  is_fallback?: boolean;
+  message?: string | null;
+}): string | null {
+  if (data.is_fallback !== true) return null;
+  const message = data.message?.trim();
+  return message || null;
+}
+
 export function dashboardTopAlertsWeekQueryKey() {
   return ['alerts', 'dashboard', 'top', DASHBOARD_TOP_ALERTS_WEEK_LIMIT] as const;
 }
 
 /**
  * Latest Critical & High Alerts from `GET /v1/subscriber/alerts/top`.
+ * Severity badges use `risk_band` via the weekly mapper.
  */
 export function useDashboardTopAlertsWeekQuery(options?: {
   enabled?: boolean;
@@ -46,14 +62,14 @@ export function useDashboardTopAlertsWeekQuery(options?: {
   return useQuery({
     queryKey: dashboardTopAlertsWeekQueryKey(),
     queryFn: () => fetchTopAlerts(token!),
-    select: data => {
+    select: (data): DashboardTopAlertsWeekResult => {
       const now = Date.now();
-      return dedupeTopAlertsByIdAndTitle(data.alerts ?? [])
-        .slice(0, DASHBOARD_TOP_ALERTS_WEEK_LIMIT)
-        .map(
-          (item): DashboardTopAlertWeeklyItem =>
-            mapApiAlertToDashboardTopAlertWeeklyItem(item, now),
-        );
+      return {
+        alerts: dedupeTopAlertsByIdAndTitle(data.alerts ?? [])
+          .slice(0, DASHBOARD_TOP_ALERTS_WEEK_LIMIT)
+          .map(item => mapApiAlertToDashboardTopAlertWeeklyItem(item, now)),
+        fallbackMessage: resolveFallbackMessage(data),
+      };
     },
     staleTime: 60_000,
     enabled,

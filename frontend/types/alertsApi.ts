@@ -80,6 +80,15 @@ export type AlertsListResponse = {
   total_count?: number;
 };
 
+/**
+ * `GET /v1/subscriber/alerts/top` — additive fallback fields when no Critical/High
+ * alerts were published in the rolling 7-day window.
+ */
+export type TopAlertsResponse = AlertsListResponse & {
+  is_fallback?: boolean;
+  message?: string | null;
+};
+
 export type AlertsSearchGroup = {
   entity: string;
   group_type: string;

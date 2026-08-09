@@ -11,6 +11,7 @@ import type {
   AlertsListResponse,
   AlertsSearchResponse,
   AlertsStatsResponse,
+  TopAlertsResponse,
 } from '@/types/alertsApi';
 
 import { apiGet } from './client';
@@ -114,8 +115,8 @@ export function buildTopAlertsPath() {
 
 export async function fetchTopAlerts(
   token: string,
-): Promise<AlertsListResponse> {
-  return apiGet<AlertsListResponse>(buildTopAlertsPath(), { token });
+): Promise<TopAlertsResponse> {
+  return apiGet<TopAlertsResponse>(buildTopAlertsPath(), { token });
 }
 
 export type FetchAlertsStatsParams = {
