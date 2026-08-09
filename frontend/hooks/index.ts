@@ -9,6 +9,7 @@ export {
   useSaveAdminBriefMutation,
   useSetAdminBriefFeaturedMutation,
   usePublishAdminBriefMutation,
+  type SaveAdminBriefResult,
 } from './useAdminBriefMutations';
 export {
   adminAlertDetailQueryKey,

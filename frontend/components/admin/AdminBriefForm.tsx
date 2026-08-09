@@ -25,6 +25,7 @@ import {
   usePublishAdminBriefMutation,
   useSaveAdminBriefMutation,
   useSetAdminBriefFeaturedMutation,
+  type SaveAdminBriefResult,
 } from '@/hooks';
 import { getApiErrorMessage } from '@/lib/api/queryError';
 import { adminBriefToDetail } from '@/lib/briefDetail';
@@ -314,8 +315,8 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
     }
   }
 
-  /** Create-or-update, then upload/remove the image if it changed. Returns the saved brief on success. */
-  async function persist(): Promise<AdminBrief | undefined> {
+  /** Create-or-update, then upload/remove the image if it changed. */
+  async function persist(): Promise<SaveAdminBriefResult | undefined> {
     const previousPreview = imagePreview;
     const hadPendingImage = Boolean(imageFile);
     const wasRemovingImage = removeImage;
@@ -348,7 +349,7 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
         setRemoveImage(false);
       }
 
-      return saved;
+      return result;
     } catch (err) {
       // Keep in-memory form values — never clear the form on API failure.
       toast.error(getApiErrorMessage(err, 'Could not save the brief.'));
@@ -365,10 +366,11 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
     }
 
     setPendingAction('draft');
-    const saved = await persist();
+    const result = await persist();
     setPendingAction(null);
-    if (!saved) return;
+    if (!result) return;
 
+    const saved = result.brief;
     toast.success(
       saved.status === 'published' ? 'Changes saved.' : 'Draft saved.',
     );
@@ -387,18 +389,32 @@ export const AdminBriefForm: FC<AdminBriefFormProps> = ({
 
     setFieldErrors({});
     setPendingAction('publish');
-    const saved = await persist();
-    if (saved) {
-      // Persist succeeded — move to edit URL before publish so a refresh
-      // cannot wipe content if publish fails next.
-      stayOnSavedBrief(saved);
-      try {
-        await publishMutation.mutateAsync(saved.id);
-        toast.success('Brief published.');
-        router.push(`/admin/briefs/${encodeURIComponent(saved.slug)}`);
-      } catch (err) {
-        toast.error(getApiErrorMessage(err, 'Could not publish the brief.'));
-      }
+    const result = await persist();
+    if (!result) {
+      setPendingAction(null);
+      return;
+    }
+
+    // Guide: image is local until featured-image succeeds — do not publish
+    // if that step failed after content save.
+    if (result.imageWarning) {
+      toast.error(
+        'Thumbnail did not save. Fix the image upload, then publish again.',
+      );
+      setPendingAction(null);
+      return;
+    }
+
+    const saved = result.brief;
+    // Persist succeeded — move to edit URL before publish so a refresh
+    // cannot wipe content if publish fails next.
+    stayOnSavedBrief(saved);
+    try {
+      await publishMutation.mutateAsync(saved.id);
+      toast.success('Brief published.');
+      router.push(`/admin/briefs/${encodeURIComponent(saved.slug)}`);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Could not publish the brief.'));
     }
     setPendingAction(null);
   }
