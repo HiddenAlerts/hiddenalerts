@@ -6,11 +6,26 @@
 
 const SIGNAL_BLOCK_SELECTOR = 'li, p, h1, h2, h3, h4, h5, h6';
 
-/** Rich-text HTML -> one string per list item/paragraph, in document order. */
+/**
+ * True when this node sits inside another signal block (e.g. `<p>` inside `<li>`).
+ * Those nested matches must be skipped — `textContent` on the parent already
+ * includes the same text, and counting both doubles entries on every save.
+ */
+function isNestedSignalBlock(el: Element): boolean {
+  let parent = el.parentElement;
+  while (parent) {
+    if (parent.matches(SIGNAL_BLOCK_SELECTOR)) return true;
+    parent = parent.parentElement;
+  }
+  return false;
+}
+
+/** Rich-text HTML -> one string per top-level list item/paragraph, in document order. */
 export function keySignalsHtmlToArray(html: string): string[] {
   if (!html.trim()) return [];
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const fromBlocks = Array.from(doc.body.querySelectorAll(SIGNAL_BLOCK_SELECTOR))
+    .filter(el => !isNestedSignalBlock(el))
     .map(el => el.textContent?.trim() ?? '')
     .filter(Boolean);
   if (fromBlocks.length > 0) return fromBlocks;
