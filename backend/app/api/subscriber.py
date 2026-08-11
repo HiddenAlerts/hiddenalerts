@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import public_alerts as public_alerts_api
 from app.api import search as search_api
+from app.api._responses import FORBIDDEN_SUBSCRIPTION
 from app.api._alert_enrichment import (
     band_from_score100,
     build_risk_explanation,
@@ -174,7 +175,11 @@ def _subscriber_risk_band_filter(risk_level: str):
     return score < _BAND_MEDIUM_MIN
 
 
-@router.get("/alerts/stats", response_model=SubscriberAlertStatsResponse)
+@router.get(
+    "/alerts/stats",
+    response_model=SubscriberAlertStatsResponse,
+    responses=FORBIDDEN_SUBSCRIPTION,
+)
 async def subscriber_alert_stats(
     _: ActiveSubscriberContext = Depends(require_active_subscription),
     db: AsyncSession = Depends(get_db),
@@ -248,7 +253,11 @@ TOP_ALERTS_FALLBACK_MESSAGE = (
 )
 
 
-@router.get("/alerts/top", response_model=SubscriberTopAlertsResponse)
+@router.get(
+    "/alerts/top",
+    response_model=SubscriberTopAlertsResponse,
+    responses=FORBIDDEN_SUBSCRIPTION,
+)
 async def subscriber_top_alerts(
     _: ActiveSubscriberContext = Depends(require_active_subscription),
     db: AsyncSession = Depends(get_db),
@@ -289,7 +298,11 @@ async def subscriber_top_alerts(
     )
 
 
-@router.get("/alerts/categories", response_model=AlertCategoriesResponse)
+@router.get(
+    "/alerts/categories",
+    response_model=AlertCategoriesResponse,
+    responses=FORBIDDEN_SUBSCRIPTION,
+)
 async def subscriber_alert_categories(
     _: ActiveSubscriberContext = Depends(require_active_subscription),
     db: AsyncSession = Depends(get_db),
@@ -303,7 +316,11 @@ async def subscriber_alert_categories(
     return await alert_category_service.get_category_metadata(db, published_only=True)
 
 
-@router.get("/alerts", response_model=SubscriberAlertsResponse)
+@router.get(
+    "/alerts",
+    response_model=SubscriberAlertsResponse,
+    responses=FORBIDDEN_SUBSCRIPTION,
+)
 async def subscriber_alerts(
     risk_level: str | None = Query(None, description="Filter by V1 band: critical, high, medium, low"),
     category: str | None = Query(None, description="Filter by category (exact match)"),
@@ -355,6 +372,7 @@ async def subscriber_alerts(
     "/alerts/{alert_id}",
     response_model=SubscriberAlertDetail,
     response_model_exclude_none=True,
+    responses=FORBIDDEN_SUBSCRIPTION,
 )
 async def subscriber_alert_detail(
     alert_id: int,
@@ -389,6 +407,7 @@ async def subscriber_alert_detail(
     "/search/alerts",
     response_model=SearchResponse,
     response_model_by_alias=True,
+    responses=FORBIDDEN_SUBSCRIPTION,
 )
 async def subscriber_search_alerts(
     q: str = Query(..., description="Search text (required, trimmed)."),

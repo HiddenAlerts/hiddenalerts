@@ -14,7 +14,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import select
@@ -30,6 +31,27 @@ log = logging.getLogger(__name__)
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 COOKIE_NAME = "access_token"
+
+#: Documentation-only security scheme for the internal HiddenAlerts JWT.
+#:
+#: This exists so OpenAPI advertises ``AdminBearer`` (and Swagger UI renders an
+#: Authorize box) on every operation that already depends on
+#: :func:`get_current_user`. It is **not** a second authorization implementation:
+#: ``auto_error=False`` means a missing or malformed header returns ``None``
+#: instead of raising, so the token is still read, decoded and checked by the
+#: existing body below and the existing 401 semantics are preserved exactly.
+#: Cookie-based sessions keep working for the same reason — the scheme never
+#: rejects a request on its own.
+admin_bearer_scheme = HTTPBearer(
+    scheme_name="AdminBearer",
+    bearerFormat="JWT",
+    auto_error=False,
+    description=(
+        "Internal HiddenAlerts JWT from `POST /api/v1/auth/login`. Used by the "
+        "Admin frontend for Admin Alerts, Admin Intelligence Briefs, Admin "
+        "Monitoring and the `/api/v1/auth` profile routes."
+    ),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -92,12 +114,20 @@ def decode_access_token(token: str) -> dict | None:
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
+    _scheme: HTTPAuthorizationCredentials | None = Security(admin_bearer_scheme),
 ) -> User:
     """FastAPI dependency: resolve JWT from cookie (primary) or Bearer header (fallback).
 
     Cookie takes priority. If no cookie, checks Authorization: Bearer <token>.
     Used by both API routes and dashboard routes. Dashboard routes catch the
     HTTPException and redirect to /login.
+
+    ``_scheme`` is declared purely so FastAPI emits ``AdminBearer`` security
+    metadata for every operation reached through this dependency — the OpenAPI
+    document then follows exactly the same boundary as runtime auth, with no
+    second hand-maintained route list. Its value is intentionally unused:
+    ``auto_error=False`` makes it ``None`` for cookie sessions and for missing
+    headers, and the resolution below is unchanged.
 
     Raises:
         HTTPException 401 if token is missing, invalid, or user not found/inactive.

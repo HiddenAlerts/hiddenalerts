@@ -433,12 +433,41 @@ def test_every_route_in_internal_router_requires_admin(router):
     assert not unprotected, f"routes missing require_admin: {unprotected}"
 
 
+def _registered_operations() -> set[tuple[str, str]]:
+    """Every (METHOD, path) the app serves, documented or not.
+
+    Slice 3B.2AJ hid the operational routes from Swagger with
+    ``include_in_schema=False``. They still resolve and still require admin, so
+    registration has to be read from the router tree — ``app.openapi()`` now
+    answers "is it documented?", which is a different question.
+    """
+    found: set[tuple[str, str]] = set()
+
+    def walk(router, prefix=""):
+        for route in getattr(router, "routes", []) or []:
+            if type(route).__name__ == "_IncludedRouter":
+                ctx = getattr(route, "include_context", None)
+                walk(
+                    getattr(route, "original_router", None),
+                    prefix + (getattr(ctx, "prefix", "") or ""),
+                )
+            elif isinstance(route, APIRoute):
+                for method in route.methods - {"HEAD", "OPTIONS"}:
+                    found.add((method, prefix + route.path))
+            elif getattr(route, "routes", None):
+                walk(route, prefix + (getattr(route, "path", "") or ""))
+
+    walk(app)
+    return found
+
+
 def test_all_expected_routes_are_still_registered():
     """The secured paths keep their public URLs — no path or method drift."""
-    paths = app.openapi()["paths"]
+    registered = _registered_operations()
     for method, path in sorted(PROTECTED_PATH_TEMPLATES):
-        assert path in paths, f"{path} disappeared from the API surface"
-        assert method.lower() in paths[path], f"{method} {path} is no longer registered"
+        assert (method.upper(), path) in registered, (
+            f"{method} {path} disappeared from the API surface"
+        )
 
 
 @pytest.mark.asyncio
@@ -489,9 +518,13 @@ def test_openapi_documents_the_new_counter():
 
 
 def test_source_runs_endpoint_still_requires_admin():
-    """The new field changes the payload, not the authorization."""
-    paths = app.openapi()["paths"]
-    assert "/api/v1/sources/{source_id}/runs" in paths
+    """The new field changes the payload, not the authorization.
+
+    Registration is checked against the router tree rather than OpenAPI: the
+    route is hidden from Swagger (Slice 3B.2AJ) but fully served and still
+    admin-guarded.
+    """
+    assert ("GET", "/api/v1/sources/{source_id}/runs") in _registered_operations()
     assert ("GET", "/api/v1/sources/1/runs") in PROTECTED_ROUTES
 
 

@@ -22,7 +22,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -319,9 +320,30 @@ async def _upsert_subscriber_profile(
     return profile
 
 
+#: Documentation-only security scheme for the Supabase subscriber JWT.
+#:
+#: Mirrors ``admin_bearer_scheme`` in :mod:`app.auth`: ``auto_error=False`` so it
+#: never rejects a request itself. Every check below — extraction, signature
+#: validation, profile upsert — is unchanged, and so are the 401 responses. It
+#: exists so OpenAPI advertises ``SubscriberBearer`` on the operations that
+#: already depend on this function.
+subscriber_bearer_scheme = HTTPBearer(
+    scheme_name="SubscriberBearer",
+    bearerFormat="JWT",
+    auto_error=False,
+    description=(
+        "Supabase access token for the signed-in subscriber. Used by the "
+        "Subscriber frontend for the alerts feed, search, Intelligence Briefs "
+        "and Billing. Distinct from the internal Admin JWT — the two are not "
+        "interchangeable."
+    ),
+)
+
+
 async def get_current_subscriber(
     request: Request,
     db: AsyncSession = Depends(get_db),
+    _scheme: HTTPAuthorizationCredentials | None = Security(subscriber_bearer_scheme),
 ) -> SubscriberContext:
     """FastAPI dependency: validate the Supabase Bearer token and load the subscriber.
 
@@ -329,6 +351,9 @@ async def get_current_subscriber(
       - Creates a ``SubscriberProfile`` on first sight of a new ``supabase_user_id``.
       - Updates ``email`` if the token claims a different (non-empty) email.
       - Refreshes ``last_seen_at`` on every request.
+
+    ``_scheme`` is documentation-only — see :data:`subscriber_bearer_scheme`. The
+    token is still read from the header by ``_extract_bearer_token`` below.
 
     Raises HTTPException 401 on any auth failure.
     """

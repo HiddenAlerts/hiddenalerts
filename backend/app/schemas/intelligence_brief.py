@@ -68,7 +68,10 @@ class IntelligenceBriefCreate(BaseModel):
 
     executive_summary: str | None = None
     why_this_matters: str | None = None
-    key_signals: list[str] | None = None
+    key_signals: list[str] | None = Field(
+        default=None,
+        description="Key Signals as a list of strings.",
+    )
     risk_assessment: str | None = None
     what_others_miss: str | None = None
     implications: str | None = None
@@ -107,7 +110,16 @@ class IntelligenceBriefUpdate(BaseModel):
 
     executive_summary: str | None = None
     why_this_matters: str | None = None
-    key_signals: list[str] | None = None
+    key_signals: list[str] | None = Field(
+        default=None,
+        description=(
+            "Key Signals as a list of strings. Replacement semantics:\n"
+            "- omit the field entirely — existing Key Signals are preserved\n"
+            "- `[]` — explicitly clears all Key Signals\n"
+            "- `[\"A\", \"B\"]` — replaces the stored list with exactly these "
+            "entries (never appended to)"
+        ),
+    )
     risk_assessment: str | None = None
     what_others_miss: str | None = None
     implications: str | None = None

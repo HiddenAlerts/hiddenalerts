@@ -448,7 +448,14 @@ async def get_alert(
     return _alert_to_detail(alert, event=event, review_status=review_status)
 
 
-@router.post("/alerts/process", status_code=status.HTTP_202_ACCEPTED)
+# Hidden from Swagger (Slice 3B.2AJ): manual AI-processing trigger, an
+# operational route with no frontend consumer. Still registered and still
+# admin-authenticated at runtime.
+@router.post(
+    "/alerts/process",
+    status_code=status.HTTP_202_ACCEPTED,
+    include_in_schema=False,
+)
 async def trigger_processing(
     background_tasks: BackgroundTasks,
     _user: User = Depends(get_current_user),
@@ -545,7 +552,10 @@ async def submit_review(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/events", response_model=list[EventRead])
+# Hidden from Swagger (Slice 3B.2AJ): event grouping is populated by the
+# pipeline but no frontend, external or internal consumer reads these two
+# routes. Retained in the backend pending a product decision.
+@router.get("/events", response_model=list[EventRead], include_in_schema=False)
 async def list_events(
     category: str | None = Query(None),
     risk_level: str | None = Query(None),
@@ -585,7 +595,9 @@ async def list_events(
     ]
 
 
-@router.get("/events/{event_id}", response_model=EventDetail)
+@router.get(
+    "/events/{event_id}", response_model=EventDetail, include_in_schema=False
+)
 async def get_event(
     event_id: int,
     db: AsyncSession = Depends(get_db),

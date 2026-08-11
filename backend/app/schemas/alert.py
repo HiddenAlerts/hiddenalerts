@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ProcessedAlertRead(BaseModel):
@@ -103,16 +104,71 @@ class ProcessedAlertDetail(ProcessedAlertRead):
     risk_explanation: RiskExplanation | None = None
 
 
+#: The three review decisions ``POST /alerts/{id}/review`` accepts. Identical to
+#: the ``valid_statuses`` set the endpoint has always enforced at runtime, so
+#: this is a documentation tightening, not a narrowing: every request that was
+#: previously accepted is still accepted, and every request that was previously
+#: rejected with 422 is still rejected with 422.
+#:
+#: Deliberately NOT applied to :class:`AlertReviewRead`. ``alert_reviews`` holds
+#: five further values written by backfill tooling rather than this endpoint
+#: (``historical_review``, ``manual_hold``, ``historical_exclude``,
+#: ``analyst_observation``, ``duplicate``), and the response model must keep
+#: serialising them.
+ReviewStatus = Literal["approved", "false_positive", "edited"]
+
+#: Risk levels a reviewer may assign. This field had no runtime validation at
+#: all — the value was written straight into ``ProcessedAlert.risk_level`` — so
+#: the enum is drawn from that column's actual domain rather than invented:
+#: ``low``/``medium``/``high``/``critical``. It covers every value present in
+#: production reviews (``low``, ``high``, ``critical``) and every option the
+#: Admin UI offers (``high``, ``medium``, ``low``).
+AdjustedRiskLevel = Literal["low", "medium", "high", "critical"]
+
+
 class AlertReviewCreate(BaseModel):
     """Request body for submitting a review action."""
 
-    review_status: str  # "approved" | "false_positive" | "edited"
-    edited_summary: str | None = None
-    adjusted_risk_level: str | None = None
+    review_status: ReviewStatus = Field(
+        description=(
+            "Review decision. `approved` publishes a relevant alert, "
+            "`false_positive` excludes and unpublishes it, and `edited` applies "
+            "content changes without touching publication state."
+        ),
+    )
+    edited_summary: str | None = Field(
+        default=None,
+        description="Replacement summary. Applied for any decision when present.",
+    )
+    adjusted_risk_level: AdjustedRiskLevel | None = Field(
+        default=None,
+        description=(
+            "Overrides the alert's `risk_level` when present. Case-insensitive; "
+            "stored lower-cased."
+        ),
+    )
+
+    @field_validator("adjusted_risk_level", mode="before")
+    @classmethod
+    def _normalise_risk_level(cls, value: object) -> object:
+        """Lower-case the input before enum validation.
+
+        The endpoint has always written ``adjusted_risk_level.lower()`` into
+        ``ProcessedAlert.risk_level``, so a caller sending ``"High"`` worked.
+        Normalising here keeps that working now the field is an enum, instead of
+        turning a previously valid request into a 422.
+        """
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
 
 
 class AlertReviewRead(BaseModel):
-    """Response after creating a review."""
+    """Response after creating a review.
+
+    ``review_status`` stays a plain string here on purpose — see
+    :data:`ReviewStatus`.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 

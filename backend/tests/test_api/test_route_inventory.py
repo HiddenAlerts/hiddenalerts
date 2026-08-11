@@ -70,6 +70,15 @@ def _mounted_routes() -> dict[tuple[str, str], APIRoute]:
 
 
 ROUTES = _mounted_routes()
+
+#: FastAPI's own documentation routes. They are part of ``ROUTES`` (the
+#: ``infrastructure`` area below classifies them) but were never in the OpenAPI
+#: document, so the baseline diffs must exclude them to compare like with like.
+DOC_ROUTE_PATHS = frozenset({"/docs", "/docs/oauth2-redirect", "/openapi.json", "/redoc"})
+
+API_ROUTES = {
+    (method, path) for method, path in ROUTES if path not in DOC_ROUTE_PATHS
+}
 PATHS = {path for _, path in ROUTES}
 
 
@@ -382,6 +391,28 @@ REMOVED_PUBLIC_PATHS = frozenset({
 })
 REMOVED_PATHS = REMOVED_JINJA_PATHS | REMOVED_PUBLIC_PATHS
 
+#: Slice 3B.2AJ — operational and currently unconsumed paths hidden from Swagger
+#: with ``include_in_schema=False`` so /docs is the supported integration
+#: reference. **Hidden is not removed**: every one of these still resolves, still
+#: enforces its existing authentication, and is asserted present in ``ROUTES`` by
+#: the interface-area tests above. 13 paths / 14 operations
+#: (``/sources/{source_id}`` carries both GET and PATCH).
+HIDDEN_FROM_SCHEMA_PATHS = frozenset({
+    "/api/v1/health",
+    "/api/v1/raw-items",
+    "/api/v1/raw-items/{item_id}",
+    "/api/v1/stats",
+    "/api/v1/sources",
+    "/api/v1/sources/{source_id}",
+    "/api/v1/sources/{source_id}/runs",
+    "/api/v1/sources/{source_id}/trigger",
+    "/api/v1/alerts/process",
+    "/api/v1/events",
+    "/api/v1/events/{event_id}",
+    "/api/v1/client/alerts",
+    "/api/v1/client/alerts/{alert_id}",
+})
+
 #: 13 operations — /login previously served both GET and POST.
 REMOVED_OPERATIONS = frozenset({
     ("GET", "/login"), ("POST", "/login"), ("GET", "/logout"),
@@ -452,11 +483,18 @@ def test_removed_operations_are_no_longer_mounted(method, path):
     assert (method, path) not in ROUTES
 
 
-def test_openapi_diff_against_baseline_is_exactly_the_approved_removal():
-    """Nothing beyond the approved 12 paths may disappear, and nothing may appear."""
+def test_service_diff_against_baseline_is_exactly_the_approved_removal():
+    """Nothing beyond the approved 12 paths may leave the service, and nothing may appear.
+
+    Diffed against the **mounted route inventory**, not OpenAPI. Slice 3B.2AJ
+    hid 13 operational/unconsumed paths from Swagger with
+    ``include_in_schema=False``; they still serve traffic, so measuring removal
+    by the OpenAPI document would now report them as deleted when they are not.
+    Registration is the fact this guard was written to protect.
+    """
     baseline = _baseline()
     before = set(baseline["paths"])                  # path -> [METHOD, ...]
-    after = set(app.openapi()["paths"])
+    after = {path for _, path in API_ROUTES}
 
     assert before - after == set(REMOVED_PATHS), (
         "unexpected path removal: "
@@ -467,18 +505,35 @@ def test_openapi_diff_against_baseline_is_exactly_the_approved_removal():
     assert len(after) == 47
 
 
+def test_openapi_hides_exactly_the_approved_internal_paths():
+    """The Swagger surface is the mounted surface minus the 3B.2AJ hidden set."""
+    mounted = {path for _, path in API_ROUTES}
+    documented = set(app.openapi()["paths"])
+
+    assert documented <= mounted, (
+        f"OpenAPI documents unmounted paths: {sorted(documented - mounted)}"
+    )
+    assert mounted - documented == set(HIDDEN_FROM_SCHEMA_PATHS), (
+        "hidden-path set drifted: "
+        f"unexpectedly hidden {sorted((mounted - documented) - HIDDEN_FROM_SCHEMA_PATHS)}, "
+        f"unexpectedly visible {sorted(HIDDEN_FROM_SCHEMA_PATHS - (mounted - documented))}"
+    )
+    assert len(documented) == 34
+
+
 def test_retained_paths_keep_every_method_they_had():
-    """No retained path may lose or gain an HTTP method."""
+    """No retained path may lose or gain an HTTP method.
+
+    Measured against mounted routes for the same reason as the test above:
+    hiding a route from Swagger must not read as losing a method.
+    """
     baseline = _baseline()
     before_ops = {
         (method.upper(), path)
         for path, methods in baseline["paths"].items()
         for method in methods
     }
-    spec = app.openapi()
-    after_ops = {
-        (m.upper(), p) for p, ops in spec["paths"].items() for m in ops
-    }
+    after_ops = set(API_ROUTES)
     assert len(before_ops) == 64 and len(after_ops) == 51
     for method, path in before_ops:
         if path in REMOVED_PATHS:
