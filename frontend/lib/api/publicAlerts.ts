@@ -2,19 +2,15 @@ import { apiGet } from '@/lib/api/client';
 
 /**
  * Marketing teaser from `GET /alerts` (at most 3 Critical/High alerts).
- * Score, id, and legacy risk_level were removed from the public payload.
+ * Current public payload — no id, signal_score, risk_level, or source fields.
  */
 export type PublicAlertListItem = {
   title: string;
-  risk_band?: string | null;
+  risk_band: string;
   category: string;
-  published_at?: string | null;
+  /** HiddenAlerts publication time (sort key). */
+  published_at: string;
   summary?: string | null;
-  /** Legacy fields — ignored when absent. */
-  risk_level?: string | null;
-  source_published_at?: string | null;
-  id?: number;
-  signal_score?: number;
 };
 
 export type PublicAlertsListResponse = {

@@ -14,7 +14,7 @@ const levelBadge: Record<LiveAlert['level'], string> = {
   LOW: 'bg-success text-secondary-900',
 };
 
-/** Non-interactive teaser row — risk_band badge + title + date • category. */
+/** Non-interactive teaser row — risk_band badge + title + HiddenAlerts date • category. */
 export function LandingLiveAlertRow({
   alert,
   className,

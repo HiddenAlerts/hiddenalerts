@@ -17,11 +17,8 @@ import { LandingLiveAlertRow } from './LandingLiveAlertRow';
 
 type PanelMode = 'loading' | 'live' | 'empty';
 
-function mapRiskBandToLevel(
-  riskBand: string | null | undefined,
-  riskLevel: string | null | undefined,
-): RiskLevel {
-  const band = resolveAlertRiskBand(riskBand, riskLevel);
+function mapRiskBandToLevel(riskBand: string | null | undefined): RiskLevel {
+  const band = resolveAlertRiskBand(riskBand);
   if (band === 'critical') return 'CRITICAL';
   if (band === 'high') return 'HIGH';
   if (band === 'low' || band === 'below_60') return 'LOW';
@@ -48,24 +45,26 @@ function categoryTone(category: string): LiveAlert['categoryTone'] {
   return 'danger';
 }
 
-function formatTimestamp(iso: string | null | undefined): string {
+/** HiddenAlerts publication date — not the original source date. */
+function formatHiddenAlertsPublishedAt(iso: string | null | undefined): string {
   if (!iso) return '';
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('en-US', {
+  const formatted = date.toLocaleDateString('en-US', {
     month: 'long',
     day: 'numeric',
     year: 'numeric',
   });
+  return `Published by HiddenAlerts: ${formatted}`;
 }
 
 function mapPublicAlert(item: PublicAlertListItem): LiveAlert {
   return {
-    level: mapRiskBandToLevel(item.risk_band, item.risk_level),
+    level: mapRiskBandToLevel(item.risk_band),
     title: item.title,
     category: item.category,
     categoryTone: categoryTone(item.category),
-    timestamp: formatTimestamp(item.source_published_at ?? item.published_at),
+    timestamp: formatHiddenAlertsPublishedAt(item.published_at),
   };
 }
 
