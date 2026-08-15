@@ -7,7 +7,7 @@ import { LandingSection } from './LandingSection';
 
 /**
  * Approved final mockup: three equal columns —
- * Latest High-Risk Alerts | Intelligence Brief Preview | Lead Analyst.
+ * Latest Critical & High-Risk Alerts | Intelligence Brief Preview | Lead Analyst.
  */
 export function LandingIntelligencePreview() {
   const analyst = ANALYST_CONTENT;

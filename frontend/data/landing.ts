@@ -112,7 +112,7 @@ export type LiveAlert = {
 };
 
 export const LIVE_ALERTS_PANEL = {
-  title: 'Latest High-Risk Alerts',
+  title: 'Latest Critical & High-Risk Alerts',
   badge: 'Subscriber Preview',
   footnoteLead: 'Real threats. Verified sources. Updated continuously.',
   footnoteCta: 'More real-time alerts available with a subscription.',
