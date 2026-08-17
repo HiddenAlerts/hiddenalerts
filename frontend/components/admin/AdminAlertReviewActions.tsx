@@ -8,6 +8,7 @@ import { type FC, useEffect, useState } from 'react';
 
 /** Matches API `adjusted_risk_level` (`risk_level` values). */
 const ADJUSTED_RISK_LEVEL_OPTIONS = [
+  { value: 'critical', label: 'Critical' },
   { value: 'high', label: 'High' },
   { value: 'medium', label: 'Medium' },
   { value: 'low', label: 'Low' },

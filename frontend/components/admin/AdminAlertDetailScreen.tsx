@@ -11,7 +11,7 @@ import {
 import { useAdminAlertDetailQuery } from '@/hooks';
 import { getApiErrorMessage } from '@/lib/api/queryError';
 import { formatAdminDate, formatAdminDateTime } from '@/lib/formatAdminDate';
-import type { AdminAlertRiskExplanation } from '@/types/admin';
+import type { AdminAlertDetail, AdminAlertRiskExplanation } from '@/types/admin';
 import { ArrowLeft, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import type { FC, ReactNode } from 'react';
@@ -38,6 +38,12 @@ const Chip: FC<{ children: string }> = ({ children }) => (
     {children}
   </span>
 );
+
+function isAwaitingAdminReview(alert: AdminAlertDetail): boolean {
+  if (alert.status === 'published') return false;
+  if (alert.reviewStatus?.trim().toLowerCase() === 'approved') return false;
+  return true;
+}
 
 function formatEnumLabel(value?: string | null): string {
   if (!value?.trim()) return '—';
@@ -269,7 +275,9 @@ export const AdminAlertDetailScreen: FC<AdminAlertDetailScreenProps> = ({
         <WhyThisDecisionPanel explanation={alert.riskExplanation} />
       ) : null}
 
-      <AdminAlertReviewActions alert={alert} />
+      {isAwaitingAdminReview(alert) ? (
+        <AdminAlertReviewActions alert={alert} />
+      ) : null}
     </div>
   );
 };
