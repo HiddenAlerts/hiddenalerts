@@ -457,7 +457,7 @@ def test_no_response_model_changed_shape():
         "SubscriberAlertRead": {
             "id", "title", "summary", "category", "risk_level", "signal_score",
             "source_name", "source_url", "source_published_at", "published_at",
-            "risk_band",
+            "risk_band", "processed_at",
         },
         "AlertCategoriesResponse": {"categories", "total"},
         "AlertCategoryRead": {"value", "label", "count"},

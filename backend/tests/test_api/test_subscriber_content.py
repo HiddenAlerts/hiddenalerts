@@ -246,27 +246,29 @@ class TestSubscriberAlertsContent:
             sub = await client.get("/api/v1/subscriber/alerts?limit=500", headers=_AUTH)
         assert sub.status_code == 200
         # The subscriber item is the shared public base PLUS the V1 `risk_band`
-        # (Critical badge). This is asserted against the schema rather than by
-        # calling /api/alerts: that route is now a deliberately narrower
-        # marketing teaser and is no longer a comparable shape.
+        # (Critical badge) and `processed_at` (the third, distinct timestamp —
+        # see app/services/alert_query.py). This is asserted against the schema
+        # rather than by calling /api/alerts: that route is now a deliberately
+        # narrower marketing teaser and is no longer a comparable shape.
         from app.schemas.alert import PublicAlertRead, SubscriberAlertRead
 
         expected_keys = set(SubscriberAlertRead.model_fields)
         assert set(PublicAlertRead.model_fields) < expected_keys
-        assert expected_keys - set(PublicAlertRead.model_fields) == {"risk_band"}
+        assert expected_keys - set(PublicAlertRead.model_fields) == {"risk_band", "processed_at"}
 
         sub_alerts = sub.json()["alerts"]
         assert any(a["id"] == alert.id for a in sub_alerts)
         for s in sub_alerts:
             assert set(s) == expected_keys
-            # `risk_band` is derived from `signal_score`, which is legitimately
-            # None for an alert that was never scored. The session-scoped test
-            # database accumulates such rows from other modules, so the band is
-            # only asserted where a score exists — the mapping itself is what
-            # this guards, not the seeded corpus.
-            if s["signal_score"] is None:
-                assert s["risk_band"] is None
-            else:
+            # `risk_band` is the stored column, read verbatim — never derived
+            # from `signal_score` (that's the whole point of the canonical
+            # alignment; see app/services/alert_query.py). A populated score
+            # does NOT guarantee a populated band: that's exactly the
+            # pre-normalization legacy-row shape other tests in this module
+            # deliberately seed, and the session-scoped test database
+            # accumulates rows from every test in the module. Only the
+            # *domain* of a non-null value is guarded here.
+            if s["risk_band"] is not None:
                 assert s["risk_band"] in ("critical", "high", "medium", "below_60")
 
     async def test_signal_score_is_0_100_and_risk_derived(
@@ -298,7 +300,7 @@ class TestSubscriberTopAlerts:
     async def test_payload_shape_is_the_public_base_plus_risk_band(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Every public list field, plus the V1 `risk_band`.
+        """Every public list field, plus the V1 `risk_band` and `processed_at`.
 
         Asserted against the schema rather than by calling /api/alerts: that
         route is now a deliberately narrower marketing teaser, so it is no
@@ -321,7 +323,7 @@ class TestSubscriberTopAlerts:
         sub_alerts = body["alerts"]
         assert sub_alerts, "a freshly published Critical alert qualifies this week"
         expected = set(SubscriberAlertRead.model_fields)
-        assert expected - set(PublicAlertRead.model_fields) == {"risk_band"}
+        assert expected - set(PublicAlertRead.model_fields) == {"risk_band", "processed_at"}
         assert set(sub_alerts[0]) == expected
 
     async def test_an_out_of_window_alert_is_excluded_while_the_window_has_content(
@@ -689,23 +691,41 @@ class TestSubscriberSearch:
 # ---------------------------------------------------------------------------
 
 from app.api import public_alerts as public_alerts_api  # noqa: E402
-from app.api.subscriber import (  # noqa: E402
-    _BAND_CRITICAL_MIN,
-    _BAND_HIGH_MIN,
-    _BAND_MEDIUM_MIN,
-    _to_top_alert_read,
-)
 from app.pipeline.publishing.risk_bands import compute_risk_band  # noqa: E402
 
 
-def test_subscriber_band_constants_match_risk_bands():
-    # The mirrored SQL thresholds must agree with the canonical band logic.
-    assert compute_risk_band(_BAND_CRITICAL_MIN).value == "critical"
-    assert compute_risk_band(_BAND_CRITICAL_MIN - 1).value == "high"
-    assert compute_risk_band(_BAND_HIGH_MIN).value == "high"
-    assert compute_risk_band(_BAND_HIGH_MIN - 1).value == "medium"
-    assert compute_risk_band(_BAND_MEDIUM_MIN).value == "medium"
-    assert compute_risk_band(_BAND_MEDIUM_MIN - 1).value == "below_60"
+async def test_subscriber_filter_never_recomputes_band_from_score(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """The canonical-risk-band alignment's central guarantee: the Subscriber
+    list reads processed_alerts.risk_band and nothing else. A row whose score
+    would compute to "high" but whose stored risk_band disagrees (or is NULL —
+    the exact pre-normalization legacy-row shape) must NOT appear under
+    risk_band=high, and must NOT appear under risk_band=critical either.
+    """
+    cat = f"BandCat-{uuid.uuid4().hex[:8]}"
+    # Score of 19 alone would compute to "high" (see compute_risk_band), but
+    # the stored risk_band explicitly disagrees / is missing.
+    mismatched = await _seed_published_alert(
+        db_session, category=cat, signal_score=19, risk_band="critical"
+    )
+    legacy_null = await _seed_published_alert(
+        db_session, category=cat, signal_score=19, risk_band=None
+    )
+    genuinely_high = await _seed_published_alert(
+        db_session, category=cat, signal_score=19, risk_band="high"
+    )
+
+    sub_id = f"band-mismatch-{uuid.uuid4()}"
+    await _seed_profile_with_subscription(db_session, sub_id=sub_id, status="active")
+    with _patch_validator(_claims(sub=sub_id)):
+        resp = await client.get(
+            f"/api/v1/subscriber/alerts?category={cat}&risk_band=high", headers=_AUTH
+        )
+    ids = [a["id"] for a in resp.json()["alerts"]]
+    assert ids == [genuinely_high.id]
+    assert mismatched.id not in ids
+    assert legacy_null.id not in ids
 
 
 @pytest.mark.asyncio
@@ -716,25 +736,27 @@ class TestSubscriberRiskBandFilter:
         return sub_id
 
     @pytest.mark.parametrize(
-        "risk_level, score, band",
-        [("critical", 21, "critical"), ("high", 19, "high"),
-         ("medium", 16, "medium"), ("low", 10, "below_60")],
+        "band, score",
+        [("critical", 21), ("high", 19), ("medium", 16), ("below_60", 10)],
     )
     async def test_band_filter_selects_only_its_band(
-        self, client: AsyncClient, db_session: AsyncSession, risk_level, score, band
+        self, client: AsyncClient, db_session: AsyncSession, band, score
     ):
         cat = f"BandCat-{uuid.uuid4().hex[:8]}"
         # One published alert in each band, all under a unique category.
+        # signal_score alone decides the seed's default risk_band (see
+        # tests/test_api/test_public_alerts.py::_seed_alert), so these four
+        # rows land in exactly the four canonical bands.
         crit = await _seed_published_alert(db_session, category=cat, signal_score=21)
         high = await _seed_published_alert(db_session, category=cat, signal_score=19)
         med = await _seed_published_alert(db_session, category=cat, signal_score=16)
-        low = await _seed_published_alert(db_session, category=cat, signal_score=10)
-        wanted = {"critical": crit, "high": high, "medium": med, "low": low}[risk_level]
+        below = await _seed_published_alert(db_session, category=cat, signal_score=10)
+        wanted = {"critical": crit, "high": high, "medium": med, "below_60": below}[band]
 
         sub_id = await self._active(db_session)
         with _patch_validator(_claims(sub=sub_id)):
             resp = await client.get(
-                f"/api/v1/subscriber/alerts?category={cat}&risk_level={risk_level}",
+                f"/api/v1/subscriber/alerts?category={cat}&risk_band={band}",
                 headers=_AUTH,
             )
         assert resp.status_code == 200
@@ -751,18 +773,30 @@ class TestSubscriberRiskBandFilter:
         sub_id = await self._active(db_session)
         with _patch_validator(_claims(sub=sub_id)):
             resp = await client.get(
-                f"/api/v1/subscriber/alerts?category={cat}&risk_level=high", headers=_AUTH
+                f"/api/v1/subscriber/alerts?category={cat}&risk_band=high", headers=_AUTH
             )
         ids = [a["id"] for a in resp.json()["alerts"]]
         assert high.id in ids and crit.id not in ids
 
-    async def test_invalid_risk_level_returns_422(
+    async def test_invalid_risk_band_returns_422(
         self, client: AsyncClient, db_session: AsyncSession
     ):
         sub_id = await self._active(db_session)
         with _patch_validator(_claims(sub=sub_id)):
             resp = await client.get(
-                "/api/v1/subscriber/alerts?risk_level=extreme", headers=_AUTH
+                "/api/v1/subscriber/alerts?risk_band=extreme", headers=_AUTH
+            )
+        assert resp.status_code == 422
+
+    async def test_low_is_no_longer_a_valid_alias_for_below_60(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """The risk_level=low -> risk_band=below_60 translation was removed
+        along with risk_level itself; "low" is not a canonical risk_band value."""
+        sub_id = await self._active(db_session)
+        with _patch_validator(_claims(sub=sub_id)):
+            resp = await client.get(
+                "/api/v1/subscriber/alerts?risk_band=low", headers=_AUTH
             )
         assert resp.status_code == 422
 
@@ -820,18 +854,23 @@ def _instant(value: str | None) -> datetime | None:
 
 
 @pytest.mark.asyncio
-class TestSubscriberTopAlertsDisplayDate:
-    """Selection uses HiddenAlerts publication time; display prefers the source date.
+class TestSubscriberTopAlertsTimestampIntegrity:
+    """Three distinct timestamps, never aliased, everywhere in the subscriber
+    API including Top Alerts:
 
-    Two distinct timestamps, deliberately:
+    * ``ProcessedAlert.published_at`` — when HiddenAlerts published the alert.
+      Decides the seven-day window and the ordering, AND is what the API
+      reports as ``published_at`` — it is never overwritten with the source
+      date, on this endpoint or any other.
+    * ``source_published_at`` — the original article date. Exposed
+      separately, always, so the frontend can show both ("Published by
+      HiddenAlerts" / "Original Source Date") without either one standing in
+      for the other.
+    * ``processed_at`` — when HiddenAlerts processed the source item.
 
-    * ``ProcessedAlert.published_at`` — ours. Decides the seven-day window and the
-      ordering. Never shown when a source date exists.
-    * ``source_published_at`` — the original article date. What the Dashboard
-      shows, with our timestamp as the fallback.
-
-    An alert we published this week may therefore display an older article date.
-    That is expected and is not evidence the weekly filter failed.
+    An alert we published this week may have an older article date — that's
+    expected and shows up as two different values in two different fields,
+    never as one field silently becoming the other.
 
     Selection assertions go through the service with a wide limit and filter to
     the alerts each test created: the session-scoped database carries alerts from
@@ -878,67 +917,69 @@ class TestSubscriberTopAlertsDisplayDate:
         wanted = set(ids)
         return [a.id for a in alerts if a.id in wanted]
 
-    # --- display date ----------------------------------------------------
+    # --- the corrected timestamp contract ---------------------------------
 
-    async def test_display_date_prefers_the_source_article_date(self, db_session):
-        source_date = datetime(2026, 7, 29, 9, 0, tzinfo=timezone.utc)
-        ours = datetime(2026, 8, 1, 15, 0, tzinfo=timezone.utc)
+    async def test_published_at_is_never_overwritten_with_the_source_date(self, db_session):
+        """The exact regression this refinement fixes: source 2025-02-04,
+        HiddenAlerts publication 2026-08-17. published_at must report the
+        HiddenAlerts date, not the article date."""
+        source_date = datetime(2025, 2, 4, tzinfo=timezone.utc)
+        ours = datetime(2026, 8, 17, tzinfo=timezone.utc)
         alert = await self._alert(db_session, source_date=source_date, our_date=ours)
 
-        read = _to_top_alert_read(alert)
-        assert _as_utc(read.published_at) == source_date
-        assert _as_utc(read.published_at) != ours
+        read = public_alerts_api.to_subscriber_alert_read(alert)
+        assert _as_utc(read.published_at) == ours
+        assert _as_utc(read.published_at) != source_date
 
     async def test_source_published_at_remains_exposed_separately(self, db_session):
         source_date = datetime(2026, 7, 30, 8, 0, tzinfo=timezone.utc)
-        alert = await self._alert(
-            db_session, source_date=source_date,
-            our_date=datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc),
-        )
+        ours = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
+        alert = await self._alert(db_session, source_date=source_date, our_date=ours)
 
-        read = _to_top_alert_read(alert)
+        read = public_alerts_api.to_subscriber_alert_read(alert)
         assert _as_utc(read.source_published_at) == source_date
-        assert read.published_at == read.source_published_at
+        assert _as_utc(read.published_at) == ours
+        assert read.published_at != read.source_published_at
 
-    async def test_falls_back_to_our_publication_time_without_a_source_date(
-        self, db_session
-    ):
+    async def test_processed_at_is_independently_preserved(self, db_session):
+        source_date = datetime(2025, 2, 4, tzinfo=timezone.utc)
+        ours = datetime(2026, 8, 17, tzinfo=timezone.utc)
+        alert = await self._alert(db_session, source_date=source_date, our_date=ours)
+        processed = datetime(2026, 8, 16, tzinfo=timezone.utc)
+        alert.processed_at = processed
+        await db_session.commit()
+        await db_session.refresh(alert, attribute_names=["processed_at"])
+
+        read = public_alerts_api.to_subscriber_alert_read(alert)
+        values = {
+            _as_utc(read.published_at),
+            _as_utc(read.source_published_at),
+            _as_utc(read.processed_at),
+        }
+        assert len(values) == 3, "all three timestamps must remain distinct"
+        assert _as_utc(read.processed_at) == processed
+
+    async def test_no_source_date_leaves_source_published_at_null(self, db_session):
         ours = datetime(2026, 8, 1, 11, 0, tzinfo=timezone.utc)
         alert = await self._alert(db_session, source_date=None, our_date=ours)
 
-        read = _to_top_alert_read(alert)
+        read = public_alerts_api.to_subscriber_alert_read(alert)
         assert read.source_published_at is None
-        assert _as_utc(read.published_at) == ours
-
-    async def test_every_other_field_survives_the_copy(self, db_session):
-        alert = await self._alert(
-            db_session, source_date=datetime(2026, 7, 28, tzinfo=timezone.utc),
-            our_date=datetime(2026, 8, 1, tzinfo=timezone.utc),
-        )
-        base = public_alerts_api._to_public_read(alert)
-        top = _to_top_alert_read(alert)
-
-        differing = {
-            k for k in base.model_dump()
-            if getattr(base, k) != getattr(top, k)
-        }
-        assert differing == {"published_at"}, differing
+        assert _as_utc(read.published_at) == ours, "published_at is never derived from source_published_at"
 
     async def test_the_mapper_does_not_mutate_the_orm_instance(self, db_session):
         source_date = datetime(2026, 7, 15, 5, 0, tzinfo=timezone.utc)
         ours = datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc)
         alert = await self._alert(db_session, source_date=source_date, our_date=ours)
 
-        read = _to_top_alert_read(alert)
-        assert _as_utc(read.published_at) == source_date
+        public_alerts_api.to_subscriber_alert_read(alert)
 
-        # The ORM row is untouched, in memory and after a refresh.
         assert _as_utc(alert.published_at) == ours
         assert _as_utc(alert.raw_item.published_at) == source_date
         await db_session.refresh(alert)
         assert _as_utc(alert.published_at) == ours
 
-    # --- eligibility is unaffected by the display date -------------------
+    # --- eligibility/ordering are governed by published_at, never source_date --
 
     async def test_an_old_article_published_by_us_this_week_qualifies(self, db_session):
         alert = await self._alert(
@@ -946,7 +987,9 @@ class TestSubscriberTopAlertsDisplayDate:
             our_date=datetime.now(timezone.utc) - timedelta(days=1),
         )
         assert await self._selected_ids(db_session, alert.id) == [alert.id]
-        assert _as_utc(_to_top_alert_read(alert).published_at).year == 2025
+        read = public_alerts_api.to_subscriber_alert_read(alert)
+        assert _as_utc(read.published_at).year == datetime.now(timezone.utc).year
+        assert _as_utc(read.source_published_at).year == 2025
 
     async def test_a_recent_article_published_by_us_long_ago_is_excluded(
         self, db_session
@@ -964,10 +1007,12 @@ class TestSubscriberTopAlertsDisplayDate:
         assert alert.published_at is None
         assert await self._selected_ids(db_session, alert.id) == []
 
-    async def test_ordering_follows_our_timestamp_while_display_follows_the_source(
+    async def test_ordering_and_display_both_use_hiddenalerts_publication_time(
         self, db_session
     ):
-        """Same band, same score — A wins on our timestamp despite an older article."""
+        """Same band, same score — A wins the window ordering on our
+        timestamp despite an older article, and displays its true, distinct
+        published_at (August), not the article's (June/July)."""
         now = datetime.now(timezone.utc)
         alert_a = await self._alert(                       # older article, newer by us
             db_session, source_date=datetime(2026, 6, 1, tzinfo=timezone.utc),
@@ -982,8 +1027,12 @@ class TestSubscriberTopAlertsDisplayDate:
             alert_a.id, alert_b.id
         ], "ordering must use HiddenAlerts publication time, not the displayed date"
 
-        assert _as_utc(_to_top_alert_read(alert_a).published_at).month == 6
-        assert _as_utc(_to_top_alert_read(alert_b).published_at).month == 7
+        read_a = public_alerts_api.to_subscriber_alert_read(alert_a)
+        read_b = public_alerts_api.to_subscriber_alert_read(alert_b)
+        assert _as_utc(read_a.published_at).month == now.month
+        assert _as_utc(read_a.source_published_at).month == 6
+        assert _as_utc(read_b.published_at).month == now.month
+        assert _as_utc(read_b.source_published_at) == datetime(2026, 7, 31, tzinfo=timezone.utc)
 
     # --- nothing else changed --------------------------------------------
 
@@ -996,12 +1045,13 @@ class TestSubscriberTopAlertsDisplayDate:
         assert _as_utc(public.published_at) == ours, "public behaviour is unchanged"
         assert _as_utc(public.source_published_at) == source_date
 
-    async def test_other_subscriber_endpoints_keep_the_shared_mapper(
+    async def test_top_alerts_and_the_paginated_feed_report_identical_timestamps(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Only /alerts/top uses the display-date mapper in this refinement."""
-        source_date = datetime(2026, 7, 21, 6, 0, tzinfo=timezone.utc)
-        ours = datetime(2026, 8, 1, 10, 0, tzinfo=timezone.utc)
+        """Top Alerts and the paginated feed now share one mapper — there is
+        no second, subtly different implementation to drift out of sync."""
+        source_date = datetime(2025, 2, 4, tzinfo=timezone.utc)
+        ours = datetime.now(timezone.utc) - timedelta(hours=1)  # inside the 7-day window
         alert = await self._alert(db_session, source_date=source_date, our_date=ours)
         sub_id = f"othermap-{uuid.uuid4()}"
         await _seed_profile_with_subscription(db_session, sub_id=sub_id, status="active")
@@ -1010,9 +1060,17 @@ class TestSubscriberTopAlertsDisplayDate:
             listing = await client.get(
                 "/api/v1/subscriber/alerts?limit=500", headers=_AUTH
             )
-        row = next(a for a in listing.json()["alerts"] if a["id"] == alert.id)
-        assert _instant(row["published_at"]) == ours, "unchanged on the feed"
-        assert _instant(row["source_published_at"]) == source_date
+            top = await client.get("/api/v1/subscriber/alerts/top", headers=_AUTH)
+
+        list_row = next(a for a in listing.json()["alerts"] if a["id"] == alert.id)
+        top_row = next((a for a in top.json()["alerts"] if a["id"] == alert.id), None)
+        assert top_row is not None, "a fresh Critical alert must qualify for the window"
+
+        for row in (list_row, top_row):
+            assert _instant(row["published_at"]) == ours
+            assert _instant(row["source_published_at"]) == source_date
+        assert list_row["published_at"] == top_row["published_at"]
+        assert list_row["source_published_at"] == top_row["source_published_at"]
 
     async def test_the_shared_public_mapper_is_unchanged(self):
         import inspect
@@ -1022,9 +1080,12 @@ class TestSubscriberTopAlertsDisplayDate:
         assert "source_published_at or" not in inspect.getsource(
             public_alerts._to_public_read
         )
-        wrapper = inspect.getsource(subscriber._to_top_alert_read)
-        assert "_to_public_read" in wrapper
-        assert "model_copy" in wrapper
+        # No separate Top Alerts mapper exists to drift — the route calls the
+        # shared to_subscriber_alert_read directly.
+        assert not hasattr(subscriber, "_to_top_alert_read")
+        route_source = inspect.getsource(subscriber.subscriber_top_alerts)
+        assert "to_subscriber_alert_read" in route_source
+        assert "model_copy" not in route_source
 
     async def test_response_model_carries_band_and_fallback_metadata(self):
         """Top Alerts answers with its own wrapper.
@@ -1096,20 +1157,25 @@ class TestSubscriberTopAlertsDisplayDate:
 
 @pytest.mark.asyncio
 class TestSubscriberRiskBandContract:
-    async def _loaded(self, db_session, *, score, stored_band=None, risk_level="medium"):
-        """Seed a published alert and reload it with the mapper's relationships."""
+    async def _loaded(self, db_session, *, score, stored_band=..., risk_level="medium"):
+        """Seed a published alert and reload it with the mapper's relationships.
+
+        ``stored_band`` defaults to whatever the score canonically maps to —
+        mirroring the real pipeline, which always writes both together. Tests
+        that specifically exercise the stored-column-is-authoritative behavior
+        (independent of, or disagreeing with, the score) pass it explicitly,
+        including ``None`` for the pre-normalization legacy-row shape.
+        """
         from sqlalchemy import select
         from sqlalchemy.orm import selectinload
 
         from app.models.processed_alert import ProcessedAlert
         from app.models.raw_item import RawItem
 
+        band = compute_risk_band(score).value if stored_band is ... else stored_band
         alert = await _seed_published_alert(
-            db_session, signal_score=score, risk_level=risk_level
+            db_session, signal_score=score, risk_level=risk_level, risk_band=band
         )
-        if stored_band is not None:
-            alert.risk_band = stored_band
-            await db_session.commit()
 
         return (
             await db_session.execute(
@@ -1133,7 +1199,7 @@ class TestSubscriberRiskBandContract:
         self, db_session: AsyncSession, score, expected
     ):
         alert = await self._loaded(db_session, score=score)
-        assert _to_top_alert_read(alert).risk_band == expected
+        assert public_alerts_api.to_subscriber_alert_read(alert).risk_band == expected
 
     async def test_top_alerts_keeps_the_canonical_band_when_legacy_level_disagrees(
         self, db_session: AsyncSession
@@ -1142,7 +1208,7 @@ class TestSubscriberRiskBandContract:
         alert = await self._loaded(
             db_session, score=20, stored_band="critical", risk_level="high"
         )
-        read = _to_top_alert_read(alert)
+        read = public_alerts_api.to_subscriber_alert_read(alert)
         assert read.risk_band == "critical", "canonical V1 band must survive"
         assert read.risk_level == "high", "legacy field preserved, not rewritten"
 
@@ -1155,14 +1221,17 @@ class TestSubscriberRiskBandContract:
         `critical`, and the stored value is what the contract must return.
         """
         alert = await self._loaded(db_session, score=18, stored_band="critical")
-        assert _to_top_alert_read(alert).risk_band == "critical"
+        assert public_alerts_api.to_subscriber_alert_read(alert).risk_band == "critical"
 
-    async def test_band_falls_back_to_the_score_when_the_column_is_null(
+    async def test_null_band_is_reported_as_null_not_derived_from_score(
         self, db_session: AsyncSession
     ):
-        alert = await self._loaded(db_session, score=21)
-        assert alert.risk_band is None, "seed leaves the column unset"
-        assert _to_top_alert_read(alert).risk_band == "critical"
+        """The exact regression this alignment fixes: a NULL stored band must
+        never be silently upgraded to a computed guess, even with a score that
+        would otherwise imply Critical."""
+        alert = await self._loaded(db_session, score=21, stored_band=None)
+        assert alert.risk_band is None
+        assert public_alerts_api.to_subscriber_alert_read(alert).risk_band is None
 
     async def test_top_alerts_item_keeps_every_public_field(
         self, db_session: AsyncSession
@@ -1170,7 +1239,7 @@ class TestSubscriberRiskBandContract:
         from app.schemas.alert import PublicAlertRead
 
         alert = await self._loaded(db_session, score=19)
-        read = _to_top_alert_read(alert)
+        read = public_alerts_api.to_subscriber_alert_read(alert)
         assert set(PublicAlertRead.model_fields) <= set(type(read).model_fields), (
             "contract must stay additive"
         )

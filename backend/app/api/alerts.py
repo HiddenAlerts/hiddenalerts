@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from sqlalchemy import Text, or_, select
+from sqlalchemy import Text, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -48,6 +48,12 @@ from app.schemas.alert import (
     ProcessedAlertDetail,
     ProcessedAlertRead,
     RiskExplanation,
+)
+from app.services.alert_query import (
+    PUBLISHED_ORDER_BY,
+    apply_published_at_filters,
+    apply_source_published_at_filters,
+    risk_band_filter,
 )
 
 log = logging.getLogger(__name__)
@@ -145,33 +151,6 @@ def apply_manual_false_positive_state(
 # ---------------------------------------------------------------------------
 
 
-# Internal-score equivalents of Ken's M3 final 0–100 bands
-# (>=70 high, 40-69 medium, 1-39 low). Centralized in app.api._risk too, but
-# duplicated here for filter expressions that operate on the raw column.
-_RISK_HIGH_INTERNAL = 18
-_RISK_MEDIUM_INTERNAL = 10
-
-
-def _score_filter_for_risk_level(risk_level: str):
-    """Return a SQLAlchemy filter clause matching alerts whose *displayed*
-    risk level (derived from signal_score_total via M3 final bands) equals
-    the requested value. Falls back to a no-op for unknown values so the
-    endpoint still returns rather than 422-ing.
-    """
-    norm = risk_level.lower().strip()
-    if norm == "high":
-        return ProcessedAlert.signal_score_total >= _RISK_HIGH_INTERNAL
-    if norm == "medium":
-        return (ProcessedAlert.signal_score_total >= _RISK_MEDIUM_INTERNAL) & (
-            ProcessedAlert.signal_score_total < _RISK_HIGH_INTERNAL
-        )
-    if norm == "low":
-        return ProcessedAlert.signal_score_total < _RISK_MEDIUM_INTERNAL
-    # Unknown filter value — fall back to stored column to keep behaviour
-    # explicit instead of silently returning everything.
-    return ProcessedAlert.risk_level == norm
-
-
 def _alert_to_read(alert: ProcessedAlert) -> ProcessedAlertRead:
     """Map ORM ProcessedAlert to ProcessedAlertRead schema with joined fields."""
     title = None
@@ -240,9 +219,10 @@ def _build_risk_explanation(alert: ProcessedAlert) -> RiskExplanation:
     """Deterministic risk/decision explanation from already-stored fields.
 
     Pure read-only: `score_total` is the raw internal 5–25 sum and `score_100`
-    its 0–100 normalization (reusing the shared helper). `risk_band` falls back
-    to a computed band when the column is null — this fallback is response-only
-    and is NEVER written back to the DB.
+    its 0–100 normalization (reusing the shared helper). `risk_band` is the
+    stored column verbatim — a NULL band (a row the one-time normalization
+    tool hasn't reached yet) is reported as NULL, never guessed from the score,
+    so this explanation always reflects actual persisted state.
     """
     source_name = None
     source_credibility = None
@@ -250,13 +230,11 @@ def _build_risk_explanation(alert: ProcessedAlert) -> RiskExplanation:
         source_name = alert.raw_item.source.name
         source_credibility = alert.raw_item.source.credibility_score
 
-    band = alert.risk_band or compute_risk_band(alert.signal_score_total).value
-
     return RiskExplanation(
         score_total=alert.signal_score_total,  # raw internal 5–25
         score_100=risk_score_100(alert.signal_score_total),
         risk_level=risk_level_from_score(alert.signal_score_total),
-        risk_band=band,
+        risk_band=alert.risk_band,
         factors={
             "source_credibility": alert.score_source_credibility,
             "financial_impact": alert.score_financial_impact,
@@ -311,15 +289,54 @@ def _alert_to_detail(
 # ---------------------------------------------------------------------------
 
 
+# Admin "All Status" ordering — no Subscriber equivalent, since Subscriber
+# only ever sees Published rows. A pure PUBLISHED_ORDER_BY would sort the
+# entire historical Published backlog ahead of every Draft/Review alert
+# (their published_at is NULL, so NULLS LAST always pushes them to the very
+# end) — burying the operational queue Ken actually needs to work from behind
+# months of already-published intelligence. COALESCE lets each row sort by
+# whichever timestamp it actually has: Published rows by when we published
+# them, everything else by when we last processed them.
+_ADMIN_MIXED_STATE_ORDER_BY = (
+    func.coalesce(ProcessedAlert.published_at, ProcessedAlert.processed_at).desc(),
+    ProcessedAlert.processed_at.desc(),
+)
+
+
+def _admin_list_order_by(is_published: bool | None, publish_decision: str | None):
+    """Admin ordering depends on which operational slice is being viewed.
+
+    - ``is_published=true``  — identical to Subscriber (PUBLISHED_ORDER_BY),
+      so Admin's Published view and the Subscriber feed return the same order.
+    - ``is_published=false`` or a specific ``publish_decision`` — a Draft/
+      Review/Excluded/Hold row has no published_at by definition, so ordering
+      by processed_at is both correct and simpler than the mixed formula.
+    - Neither filter given ("All Status") — the mixed COALESCE ordering, so a
+      brand-new Draft/Review item surfaces near the top rather than behind the
+      entire Published history.
+    """
+    if is_published is True:
+        return PUBLISHED_ORDER_BY
+    if is_published is False or publish_decision is not None:
+        return (ProcessedAlert.processed_at.desc(),)
+    return _ADMIN_MIXED_STATE_ORDER_BY
+
+
 @router.get("/alerts", response_model=list[ProcessedAlertRead])
 async def list_alerts(
-    risk_level: str | None = Query(None, description="Filter by risk level: low, medium, high"),
     category: str | None = Query(None, description="Filter by primary_category"),
     source_id: int | None = Query(None, description="Filter by source ID"),
     source: str | None = Query(None, description="Filter by source name (partial match, case-insensitive)"),
     keyword: str | None = Query(None, description="Filter by keyword present in title or matched_keywords"),
-    since: datetime | None = Query(None, alias="start_date", description="Only alerts processed after this datetime (alias: start_date)"),
-    end_date: datetime | None = Query(None, description="Only alerts processed before this datetime"),
+    since: datetime | None = Query(None, alias="start_date", description="Admin operational filter on processed_at (when we processed the item). Alias: start_date."),
+    end_date: datetime | None = Query(None, description="Admin operational filter on processed_at (when we processed the item)."),
+    # Canonical date filters (shared contract with the Subscriber API) — see
+    # app/services/alert_query.py. Unlike since/start_date/end_date above,
+    # these are unambiguous about which timestamp they filter.
+    published_from: datetime | None = Query(None, description="Only alerts HiddenAlerts published on/after this instant (published_at)."),
+    published_to: datetime | None = Query(None, description="Only alerts HiddenAlerts published on/before this instant (published_at)."),
+    source_published_from: datetime | None = Query(None, description="Only alerts whose source article was published on/after this instant."),
+    source_published_to: datetime | None = Query(None, description="Only alerts whose source article was published on/before this instant."),
     is_relevant: bool | None = Query(None, description="Filter by relevance flag"),
     is_published: bool | None = Query(None, description="Filter by publication state (admin convenience)"),
     # V1 publication-state filters (Slice 6) — additive review-queue filters.
@@ -353,20 +370,24 @@ async def list_alerts(
                 detail=f"Invalid {field}: {value!r}. Allowed: {sorted(allowed)}",
             )
 
-    raw_item_join_needed = source_id is not None or source is not None or keyword is not None
+    raw_item_join_needed = (
+        source_id is not None
+        or source is not None
+        or keyword is not None
+        or source_published_from is not None
+        or source_published_to is not None
+    )
     stmt = (
         select(ProcessedAlert)
         .options(
             selectinload(ProcessedAlert.raw_item).selectinload(RawItem.source)
         )
-        .order_by(ProcessedAlert.processed_at.desc())
+        .order_by(*_admin_list_order_by(is_published, publish_decision))
     )
 
     if raw_item_join_needed:
         stmt = stmt.join(RawItem, RawItem.id == ProcessedAlert.raw_item_id)
 
-    if risk_level is not None:
-        stmt = stmt.where(_score_filter_for_risk_level(risk_level))
     if category is not None:
         stmt = stmt.where(ProcessedAlert.primary_category == category)
     if since is not None:
@@ -382,7 +403,10 @@ async def list_alerts(
     if pending_review_reason is not None:
         stmt = stmt.where(ProcessedAlert.pending_review_reason == pending_review_reason)
     if risk_band is not None:
-        stmt = stmt.where(ProcessedAlert.risk_band == risk_band)
+        # Canonical filter (app/services/alert_query.py) — always the stored
+        # column, identical semantics to the Subscriber API and the Admin
+        # Subscriber View. Never recomputed from signal_score_total.
+        stmt = stmt.where(risk_band_filter(risk_band))
     if is_excluded is not None:
         stmt = stmt.where(ProcessedAlert.is_excluded == is_excluded)
     if is_manual_hold is not None:
@@ -405,6 +429,16 @@ async def list_alerts(
                 ProcessedAlert.matched_keywords.cast(Text).ilike(f"%{keyword}%"),
             )
         )
+
+    stmt = apply_published_at_filters(
+        stmt, published_from=published_from, published_to=published_to
+    )
+    stmt, _ = apply_source_published_at_filters(
+        stmt,
+        source_published_from=source_published_from,
+        source_published_to=source_published_to,
+        raw_item_joined=raw_item_join_needed,
+    )
 
     stmt = stmt.offset(offset).limit(limit)
     result = await db.execute(stmt)

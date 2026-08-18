@@ -33,10 +33,6 @@ from sqlalchemy.orm import selectinload
 from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.pipeline.publishing.constants import DecisionSource
-from app.pipeline.publishing.risk_bands import (
-    _CRITICAL_MIN_INTERNAL,
-    _HIGH_MIN_INTERNAL,
-)
 
 log = logging.getLogger(__name__)
 
@@ -46,11 +42,12 @@ WINDOW_DAYS = 7
 #: Positions in the Dashboard widget.
 DEFAULT_LIMIT = 3
 
-#: Canonical internal-score floors, re-exported from the publishing risk bands so
-#: this module holds no second copy of the thresholds. Critical ≥ 20, High ≥ 18
-#: on the internal 5–25 scale (0–100: 80 and ~72). Medium (15–17) never qualifies.
-CRITICAL_MIN_SCORE = _CRITICAL_MIN_INTERNAL
-HIGH_MIN_SCORE = _HIGH_MIN_INTERNAL
+#: Critical/High qualify; Medium and below never do. Read from the stored,
+#: canonical processed_alerts.risk_band column — never recomputed from
+#: signal_score_total. A row can have a high score and still not qualify if
+#: its band was never materialized (see app/tools/v1_risk_band_normalization.py)
+#: or was intentionally overridden by manual review.
+_QUALIFYING_BANDS = ("critical", "high")
 
 #: Publication decisions that represent historical bulk operations rather than a
 #: current editorial act. Their ``published_at`` reflects when the backfill ran,
@@ -87,7 +84,7 @@ def eligibility_predicates() -> list:
     """
     return [
         ProcessedAlert.is_published.is_(True),
-        ProcessedAlert.signal_score_total >= HIGH_MIN_SCORE,
+        ProcessedAlert.risk_band.in_(_QUALIFYING_BANDS),
         ProcessedAlert.published_at.is_not(None),
         or_(
             ProcessedAlert.publication_state_source.is_(None),
@@ -108,8 +105,8 @@ async def get_top_alerts(
 
     * published by HiddenAlerts (``is_published``);
     * ``published_at`` present and within the last :data:`WINDOW_DAYS` days;
-    * ``signal_score_total`` at or above the canonical **High** floor, so only
-      Critical and High qualify;
+    * stored ``risk_band`` is Critical or High (:data:`_QUALIFYING_BANDS`) —
+      never recomputed from ``signal_score_total``;
     * not published by a historical bulk operation.
 
     Ordering — Critical band first, then score descending, then HiddenAlerts
@@ -121,7 +118,11 @@ async def get_top_alerts(
     cutoff = window_start(now)
 
     # 0 sorts before 1, so Critical precedes High regardless of score ties.
-    band_rank = case((ProcessedAlert.signal_score_total >= CRITICAL_MIN_SCORE, 0), else_=1)
+    # Ranked on the stored band, not score — qualification already happened in
+    # eligibility_predicates(); this only orders within the qualified set, and
+    # signal_score_total.desc() below is a legitimate tie-breaker, not a
+    # re-derivation of which band an alert belongs to.
+    band_rank = case((ProcessedAlert.risk_band == "critical", 0), else_=1)
 
     statement = (
         select(ProcessedAlert)

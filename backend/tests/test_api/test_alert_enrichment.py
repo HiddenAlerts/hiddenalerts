@@ -6,7 +6,6 @@ Factors as High/Medium/Low, Primary Exposure, Reason for Score) and prove no
 internal V1 moderation fields are produced.
 """
 from app.api._alert_enrichment import (
-    band_from_score100,
     build_risk_explanation,
     factor_labels,
     primary_exposure,
@@ -37,21 +36,17 @@ def _alert(**kw) -> ProcessedAlert:
     return ProcessedAlert(**base)
 
 
-def test_band_from_score100():
-    assert band_from_score100(88) == "critical"
-    assert band_from_score100(80) == "critical"
-    assert band_from_score100(72) == "high"
-    assert band_from_score100(64) == "medium"
-    assert band_from_score100(40) == "below_60"
-    assert band_from_score100(None) is None
-
-
-def test_risk_band_for_uses_stored_then_computes():
+def test_risk_band_for_reports_the_stored_column_verbatim():
     assert risk_band_for(_alert(risk_band="critical")) == "critical"
-    assert risk_band_for(_alert(risk_band=None, signal_score_total=20)) == "critical"
-    assert risk_band_for(_alert(risk_band=None, signal_score_total=18)) == "high"
-    assert risk_band_for(_alert(risk_band=None, signal_score_total=15)) == "medium"
-    assert risk_band_for(_alert(risk_band=None, signal_score_total=10)) == "below_60"
+    assert risk_band_for(_alert(risk_band="medium")) == "medium"
+
+
+def test_risk_band_for_never_invents_a_band_from_score():
+    """The exact regression this alignment fixes: a high score with no
+    materialized band must report None, not a computed guess — inventing one
+    here would let a pre-normalization row silently qualify as Critical."""
+    assert risk_band_for(_alert(risk_band=None, signal_score_total=20)) is None
+    assert risk_band_for(_alert(risk_band=None, signal_score_total=25)) is None
 
 
 def test_factor_labels_high_medium_low():
@@ -100,7 +95,7 @@ def test_subscriber_confidence():
 
 
 def test_build_risk_explanation_shape_and_no_internal_fields():
-    d = build_risk_explanation(_alert(signal_score_total=20)).model_dump()
+    d = build_risk_explanation(_alert(signal_score_total=20, risk_band="critical")).model_dump()
     assert d["risk_band"] == "critical"
     assert d["score"] == 80  # round(20/25*100)
     assert d["risk_level"] in ("high", "medium", "low")

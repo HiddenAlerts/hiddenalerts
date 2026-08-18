@@ -58,6 +58,7 @@ from app.schemas.alert import (
     PublicCategoryBreakdown,
     PublicTeaserAlertRead,
     PublicTeaserResponse,
+    SubscriberAlertRead,
 )
 from app.services.alert_category_service import published_alert_filter
 
@@ -543,6 +544,19 @@ def _to_public_read(alert: ProcessedAlert) -> PublicAlertRead:
         source_url=source_url,
         source_published_at=source_published_at,
         published_at=alert.published_at,
+    )
+
+
+def to_subscriber_alert_read(alert: ProcessedAlert) -> SubscriberAlertRead:
+    """Map a Published `ProcessedAlert` to the Subscriber list-item schema.
+
+    `risk_band` and `processed_at` come straight off the ORM row; `risk_band`
+    is never recomputed from `signal_score_total` here.
+    """
+    return SubscriberAlertRead(
+        **_to_public_read(alert).model_dump(),
+        risk_band=alert.risk_band,
+        processed_at=alert.processed_at,
     )
 
 

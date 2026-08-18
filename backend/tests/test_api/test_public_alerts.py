@@ -43,6 +43,12 @@ from app.api.public_alerts import PUBLIC_SUMMARY_MAX_CHARS, summary_preview
 from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.source import Source
+from app.pipeline.publishing.risk_bands import compute_risk_band
+
+#: Sentinel distinguishing "caller didn't pass risk_band" (auto-compute from
+#: signal_score, matching what the real pipeline always does) from "caller
+#: explicitly wants risk_band=None" (for the rows-with-no-band edge case).
+_RISK_BAND_UNSET = object()
 
 
 
@@ -136,13 +142,23 @@ async def _seed_alert(
     score_cross_source: int | None = None,
     score_trend_acceleration: int | None = None,
     ai_model: str | None = None,
+    risk_band: str | None | object = _RISK_BAND_UNSET,
 ) -> ProcessedAlert:
+    # Mirrors the real pipeline, which always writes signal_score_total and
+    # risk_band together (app/pipeline/alert_pipeline.py:_apply_publish_decision
+    # / _apply_terminal_state): default to the canonical band for the given
+    # score unless a test explicitly wants a different (or NULL) risk_band to
+    # exercise the pre-normalization legacy-row edge case.
+    resolved_risk_band = (
+        compute_risk_band(signal_score).value if risk_band is _RISK_BAND_UNSET else risk_band
+    )
     alert = ProcessedAlert(
         raw_item_id=raw_item.id,
         risk_level=risk_level,
         primary_category=category,
         secondary_category=secondary_category,
         signal_score_total=signal_score,
+        risk_band=resolved_risk_band,
         summary=summary,
         is_relevant=is_relevant,
         is_published=is_published,

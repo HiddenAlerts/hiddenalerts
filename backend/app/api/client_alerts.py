@@ -27,6 +27,7 @@ from app.models.source import Source
 from app.models.user import User
 from app.pipeline.publishing.constants import RISK_BANDS
 from app.schemas.alert import ClientAlertDetail, ClientAlertRead
+from app.services.alert_query import risk_band_filter
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/client", tags=["client"])
@@ -36,16 +37,13 @@ router = APIRouter(prefix="/client", tags=["client"])
 _RISK_HIGH_INTERNAL = 18
 _RISK_MEDIUM_INTERNAL = 10
 
-# Internal-score equivalents of the V1 risk bands (risk_bands.py: 20/18/15).
-_BAND_CRITICAL_INTERNAL = 20
-_BAND_HIGH_INTERNAL = 18
-_BAND_MEDIUM_INTERNAL = 15
-
-
 def _score_filter_for_risk_level(risk_level: str):
     """Return a SQLAlchemy filter that matches alerts whose *displayed* risk
     level (derived from signal_score_total) equals the requested value. Mirrors
-    the helper in app/api/alerts.py to keep client and admin filtering aligned."""
+    the helper in app/api/alerts.py to keep client and admin filtering aligned.
+
+    This is the legacy display concept (risk_level), not the V1 qualification
+    band — see risk_band_filter (app/services/alert_query.py) for that."""
     norm = risk_level.lower().strip()
     if norm == "high":
         return ProcessedAlert.signal_score_total >= _RISK_HIGH_INTERNAL
@@ -56,23 +54,6 @@ def _score_filter_for_risk_level(risk_level: str):
     if norm == "low":
         return ProcessedAlert.signal_score_total < _RISK_MEDIUM_INTERNAL
     return ProcessedAlert.risk_level == norm
-
-
-def _score_filter_for_risk_band(risk_band: str):
-    """Filter by V1 risk band (OPEN-6) via the score range, so it works for both
-    post-V1 (stored band) and legacy (computed) alerts consistently."""
-    norm = risk_band.lower().strip()
-    if norm == "critical":
-        return ProcessedAlert.signal_score_total >= _BAND_CRITICAL_INTERNAL
-    if norm == "high":
-        return (ProcessedAlert.signal_score_total >= _BAND_HIGH_INTERNAL) & (
-            ProcessedAlert.signal_score_total < _BAND_CRITICAL_INTERNAL
-        )
-    if norm == "medium":
-        return (ProcessedAlert.signal_score_total >= _BAND_MEDIUM_INTERNAL) & (
-            ProcessedAlert.signal_score_total < _BAND_HIGH_INTERNAL
-        )
-    return ProcessedAlert.signal_score_total < _BAND_MEDIUM_INTERNAL  # below_60
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +85,7 @@ def _to_client_read(alert: ProcessedAlert) -> ClientAlertRead:
         source_name=source_name,
         item_url=item_url,
         risk_level=derived_risk_level,
-        # V1 band for the Critical/High/Medium badge (stored, computed fallback).
+        # V1 band for the Critical/High/Medium badge — stored column verbatim.
         risk_band=risk_band_for(alert),
         primary_category=alert.primary_category,
         # `signal_score_total` is exposed on the 0–100 frontend scale.
@@ -174,7 +155,7 @@ async def list_client_alerts(
     if risk_level is not None:
         stmt = stmt.where(_score_filter_for_risk_level(risk_level))
     if risk_band is not None:
-        stmt = stmt.where(_score_filter_for_risk_band(risk_band))
+        stmt = stmt.where(risk_band_filter(risk_band))
     if category is not None:
         stmt = stmt.where(ProcessedAlert.primary_category == category)
 

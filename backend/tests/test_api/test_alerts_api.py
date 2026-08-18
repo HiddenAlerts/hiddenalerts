@@ -12,6 +12,7 @@ from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.source import Source
 from app.models.user import User
+from app.pipeline.publishing.risk_bands import compute_risk_band
 
 
 # ---------------------------------------------------------------------------
@@ -669,8 +670,10 @@ async def test_risk_explanation_factors_and_reason(client, db_session):
 
 
 @pytest.mark.asyncio
-async def test_risk_explanation_band_fallback_not_persisted(client, db_session):
-    """risk_band is None on the row but the explanation derives it; DB stays NULL."""
+async def test_risk_explanation_reports_stored_null_band_without_inventing_one(client, db_session):
+    """The exact regression this alignment fixes: risk_band is NULL on the row
+    (pre-normalization legacy shape) despite a score that would imply Critical.
+    The explanation must report NULL, never a computed guess."""
     user = await _create_admin_user(db_session)
     alert = await _seed_v1_alert(
         db_session, suffix="v1fallback", signal_score_total=22, risk_band=None,
@@ -679,9 +682,9 @@ async def test_risk_explanation_band_fallback_not_persisted(client, db_session):
     token = _make_token(user)
 
     resp = await client.get(f"/api/v1/alerts/{alert.id}", headers=_auth(token))
-    assert resp.json()["risk_explanation"]["risk_band"] == "critical"  # computed fallback
+    assert resp.json()["risk_explanation"]["risk_band"] is None
 
-    # The DB column was NOT written by the read path.
+    # The DB column stays exactly as seeded — read paths never write.
     from sqlalchemy import select as _select
     row = (
         await db_session.execute(
@@ -1052,13 +1055,18 @@ _CLIENT_FORBIDDEN = {
 }
 
 
-async def _seed_client_alert(db_session, *, suffix, score=22, category="Consumer Scam"):
+async def _seed_client_alert(
+    db_session, *, suffix, score=22, category="Consumer Scam", risk_band=...
+):
+    """``risk_band`` defaults to whatever the score canonically maps to —
+    mirroring the real pipeline, which always writes both together."""
     _, raw = await _make_source_and_raw(db_session, url_suffix=suffix)
+    band = compute_risk_band(score).value if risk_band is ... else risk_band
     alert = ProcessedAlert(
         raw_item_id=raw.id, is_relevant=True, is_published=True,
         primary_category=category, victim_scale_raw="nationwide",
         matched_keywords=["payment fraud"], summary="A payment fraud scam.",
-        signal_score_total=score,
+        signal_score_total=score, risk_band=band,
         score_source_credibility=5, score_financial_impact=5, score_victim_scale=4,
         score_cross_source=5, score_trend_acceleration=3,
         published_at=datetime.now(timezone.utc), processed_at=datetime.now(timezone.utc),
@@ -1115,6 +1123,22 @@ async def test_client_risk_band_filter(client, db_session):
     crit_only = await client.get("/api/v1/client/alerts?risk_band=critical", headers=hdr)
     ids = {a["id"] for a in crit_only.json()}
     assert crit.id in ids and med.id not in ids
+
+
+@pytest.mark.asyncio
+async def test_client_risk_band_filter_reads_the_stored_column_not_score(client, db_session):
+    """client_alerts.py used to filter risk_band via a signal_score_total range
+    — the same defect class this alignment fixes on Admin/Subscriber. A row
+    whose score implies Critical but whose stored band says High (or is NULL)
+    must not appear under risk_band=critical."""
+    user = await _create_subscriber_user(db_session)
+    mismatched = await _seed_client_alert(db_session, suffix="o6c3", score=22, risk_band="high")
+    null_band = await _seed_client_alert(db_session, suffix="o6c4", score=23, risk_band=None)
+    hdr = {"Authorization": f"Bearer {_make_token(user)}"}
+
+    crit_only = await client.get("/api/v1/client/alerts?risk_band=critical", headers=hdr)
+    ids = {a["id"] for a in crit_only.json()}
+    assert mismatched.id not in ids and null_band.id not in ids
 
     bad = await client.get("/api/v1/client/alerts?risk_band=bogus", headers=hdr)
     assert bad.status_code == 422

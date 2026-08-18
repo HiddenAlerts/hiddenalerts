@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from app.api._risk import risk_level_from_score, risk_score_100
 from app.models.processed_alert import ProcessedAlert
-from app.pipeline.publishing.risk_bands import compute_risk_band
 from app.schemas.alert import SubscriberRiskExplanation
 
 # Internal-score thresholds for the legacy 3-level confidence display (M3 bands).
@@ -42,23 +41,18 @@ _CATEGORY_EXPOSURE: dict[str, list[str]] = {
 _PAYMENT_HINTS = ("payment", "card", "bank", "wire", "ach", "account takeover")
 
 
-def band_from_score100(score_100: int | None) -> str | None:
-    """Map a normalized 0–100 score to a V1 band — for list items where only the
-    0–100 score is at hand (no ORM)."""
-    if score_100 is None:
-        return None
-    if score_100 >= 80:
-        return "critical"
-    if score_100 >= 70:
-        return "high"
-    if score_100 >= 60:
-        return "medium"
-    return "below_60"
+def risk_band_for(alert: ProcessedAlert) -> str | None:
+    """The canonical V1 band, straight off the stored column.
 
-
-def risk_band_for(alert: ProcessedAlert) -> str:
-    """Stored V1 band with a computed fallback (matches the admin builder)."""
-    return alert.risk_band or compute_risk_band(alert.signal_score_total).value
+    Never recomputed from signal_score_total: a row's band is materialized
+    once, at write time (pipeline scoring, manual review, or the one-time
+    normalization tool), and every read path — including this one — reports
+    that stored value verbatim, including None for a row that hasn't been
+    normalized yet. Inventing a band here would let the same alert qualify as
+    Critical in one response and not another depending on which code path
+    rendered it.
+    """
+    return alert.risk_band
 
 
 def _label(value: int | None) -> str | None:

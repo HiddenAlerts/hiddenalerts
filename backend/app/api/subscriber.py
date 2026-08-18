@@ -15,14 +15,13 @@ from datetime import datetime, timezone
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import public_alerts as public_alerts_api
 from app.api import search as search_api
 from app.api._responses import FORBIDDEN_SUBSCRIPTION
 from app.api._alert_enrichment import (
-    band_from_score100,
     build_risk_explanation,
     risk_band_for,
 )
@@ -34,9 +33,8 @@ from app.auth.supabase import SubscriberContext, get_current_subscriber
 from app.config import settings
 from app.database import get_db
 from app.models.processed_alert import ProcessedAlert
-from app.models.raw_item import RawItem
-from app.models.source import Source
 from app.models.subscription import Subscription
+from app.pipeline.publishing.constants import RISK_BANDS
 from app.schemas.alert import (
     SubscriberAlertDetail,
     SubscriberAlertRead,
@@ -52,6 +50,7 @@ from app.schemas.subscriber import (
     SubscriptionMeRead,
 )
 from app.services import alert_category_service
+from app.services.alert_query import published_alerts_stmt
 from app.services.top_alerts_service import (
     get_latest_qualifying_alerts,
     get_top_alerts,
@@ -148,33 +147,6 @@ async def get_subscriber_access(
 # ---------------------------------------------------------------------------
 
 
-# Internal signal_score_total lower bounds per V1 risk band. Source of truth is
-# app.pipeline.publishing.risk_bands.compute_risk_band; mirrored here so the SQL
-# filter/counts bucket alerts exactly like the badges the subscriber UI renders
-# (Critical 80–100, High 70–79, Medium 60–69 on the 0–100 scale). Kept in sync by
-# tests/test_api/test_subscriber_content.py.
-_BAND_CRITICAL_MIN = 20
-_BAND_HIGH_MIN = 18
-_BAND_MEDIUM_MIN = 15
-
-# risk_level values the subscriber feed accepts (mutually exclusive V1 bands).
-_SUBSCRIBER_RISK_LEVELS = frozenset({"critical", "high", "medium", "low"})
-
-
-def _subscriber_risk_band_filter(risk_level: str):
-    """Return a SQL predicate on ``signal_score_total`` for a subscriber risk band."""
-    score = ProcessedAlert.signal_score_total
-    rl = risk_level.strip().lower()
-    if rl == "critical":
-        return score >= _BAND_CRITICAL_MIN
-    if rl == "high":
-        return and_(score >= _BAND_HIGH_MIN, score < _BAND_CRITICAL_MIN)
-    if rl == "medium":
-        return and_(score >= _BAND_MEDIUM_MIN, score < _BAND_HIGH_MIN)
-    # "low" == below_60
-    return score < _BAND_MEDIUM_MIN
-
-
 @router.get(
     "/alerts/stats",
     response_model=SubscriberAlertStatsResponse,
@@ -191,18 +163,19 @@ async def subscriber_alert_stats(
     """
     base = await public_alerts_api.published_stats_impl(db)
 
-    score = ProcessedAlert.signal_score_total
+    # Canonical: grouped on the stored risk_band column, exactly like the list
+    # filter and the Admin API — never recomputed from signal_score_total. A
+    # published row with risk_band still NULL (pre-normalization legacy data;
+    # see app/tools/v1_risk_band_normalization.py) falls into none of these four
+    # buckets, so the buckets can undercount base.total_alerts until that
+    # one-time normalization runs — that's accurate uncertainty, not a bug.
     row = (
         await db.execute(
             select(
-                func.count(case((score >= _BAND_CRITICAL_MIN, 1))).label("critical"),
-                func.count(
-                    case((and_(score >= _BAND_HIGH_MIN, score < _BAND_CRITICAL_MIN), 1))
-                ).label("high"),
-                func.count(
-                    case((and_(score >= _BAND_MEDIUM_MIN, score < _BAND_HIGH_MIN), 1))
-                ).label("medium"),
-                func.count(case((score < _BAND_MEDIUM_MIN, 1))).label("low"),
+                func.count(case((ProcessedAlert.risk_band == "critical", 1))).label("critical"),
+                func.count(case((ProcessedAlert.risk_band == "high", 1))).label("high"),
+                func.count(case((ProcessedAlert.risk_band == "medium", 1))).label("medium"),
+                func.count(case((ProcessedAlert.risk_band == "below_60", 1))).label("low"),
             ).where(ProcessedAlert.is_published.is_(True))
         )
     ).one()
@@ -215,35 +188,6 @@ async def subscriber_alert_stats(
         low_count=row.low,
         category_breakdown=base.category_breakdown,
     )
-
-
-def _to_top_alert_read(alert: ProcessedAlert) -> SubscriberAlertRead:
-    """Subscriber mapping, with the original article date shown as ``published_at``.
-
-    Two different dates are in play, and only one of them is the user's:
-
-    * ``ProcessedAlert.published_at`` — when *HiddenAlerts* published the alert.
-      This decides weekly eligibility and ordering, and is never displayed when a
-      source date exists.
-    * ``source_published_at`` — when the original article was published. This is
-      what the Dashboard shows, falling back to our own timestamp only when the
-      source gave us no date.
-
-    Returns :class:`SubscriberAlertRead` so Top Alerts carries the canonical V1
-    ``risk_band`` like the rest of the subscriber feed. It previously returned the
-    bare public schema, which has no ``risk_band`` — the Dashboard then fell back
-    to the legacy ``risk_level`` and, because that fallback deliberately never
-    invents Critical, a ``critical`` alert rendered as "high". The band is read
-    from the stored column (with the usual computed fallback), so nothing is
-    re-derived from the score here.
-
-    A copy is returned; neither the ORM instance nor the shared public mapper is
-    touched, and ``source_published_at`` stays populated in its own field.
-    """
-    read = public_alerts_api._to_public_read(alert)
-    if read.source_published_at is not None:
-        read = read.model_copy(update={"published_at": read.source_published_at})
-    return SubscriberAlertRead(**read.model_dump(), risk_band=risk_band_for(alert))
 
 
 #: Shown when the widget is filled from outside the rolling window.
@@ -269,9 +213,12 @@ async def subscriber_top_alerts(
     Dashboard widget was showing January 2026 and 2025 alerts. See
     :mod:`app.services.top_alerts_service` for the eligibility and ordering rules.
 
-    Selection uses HiddenAlerts publication time; the date shown prefers the
-    original article date — see :func:`_to_top_alert_read`. An alert published by
-    us this week may therefore display an older article date.
+    Selection and ordering use HiddenAlerts publication time (`published_at`).
+    Items are mapped through the same `public_alerts_api.to_subscriber_alert_read`
+    every other subscriber surface uses, so `published_at` always means "when
+    HiddenAlerts published it" here too — it is never overwritten with
+    `source_published_at`, which stays available as its own field for the
+    frontend to display alongside it.
 
     **Fallback applies only to an empty result.** One or two qualifying alerts are
     returned exactly as found — padding a short week with older alerts would
@@ -292,7 +239,7 @@ async def subscriber_top_alerts(
         is_fallback = bool(alerts)
 
     return SubscriberTopAlertsResponse(
-        alerts=[_to_top_alert_read(alert) for alert in alerts],
+        alerts=[public_alerts_api.to_subscriber_alert_read(alert) for alert in alerts],
         is_fallback=is_fallback,
         message=TOP_ALERTS_FALLBACK_MESSAGE if is_fallback else None,
     )
@@ -322,9 +269,13 @@ async def subscriber_alert_categories(
     responses=FORBIDDEN_SUBSCRIPTION,
 )
 async def subscriber_alerts(
-    risk_level: str | None = Query(None, description="Filter by V1 band: critical, high, medium, low"),
+    risk_band: str | None = Query(None, description="Filter by V1 band: critical, high, medium, below_60"),
     category: str | None = Query(None, description="Filter by category (exact match)"),
     source: str | None = Query(None, description="Partial source name search"),
+    published_from: datetime | None = Query(None, description="Only alerts HiddenAlerts published on/after this instant (published_at)."),
+    published_to: datetime | None = Query(None, description="Only alerts HiddenAlerts published on/before this instant (published_at)."),
+    source_published_from: datetime | None = Query(None, description="Only alerts whose source article was published on/after this instant."),
+    source_published_to: datetime | None = Query(None, description="Only alerts whose source article was published on/before this instant."),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     _: ActiveSubscriberContext = Depends(require_active_subscription),
@@ -332,39 +283,33 @@ async def subscriber_alerts(
 ) -> SubscriberAlertsResponse:
     """Published-alerts feed with the V1 `risk_band` (Critical badge) on each item.
 
-    The `risk_level` filter uses the V1 risk bands (critical/high/medium/low) so it
-    matches the badges — Critical (score 80–100) is selectable and mutually
-    exclusive from High (70–79). Ordering and visibility mirror the published feed.
+    `risk_band` is the same canonical parameter Admin accepts — critical/high
+    are selectable and mutually exclusive, matching the badges exactly.
+    Filtering, ordering, and the returned `risk_band` all come from
+    `app.services.alert_query.published_alerts_stmt` and always read the
+    stored `risk_band` column — never recomputed from `signal_score_total`.
+    No date filter means every historical Published alert remains visible
+    exactly as before; the four `*_from`/`*_to` params are opt-in.
     """
-    if risk_level is not None and risk_level.strip().lower() not in _SUBSCRIBER_RISK_LEVELS:
+    if risk_band is not None and risk_band not in RISK_BANDS:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Invalid risk_level: {risk_level!r}. Allowed: {sorted(_SUBSCRIBER_RISK_LEVELS)}",
+            detail=f"Invalid risk_band: {risk_band!r}. Allowed: {sorted(RISK_BANDS)}",
         )
 
-    stmt = public_alerts_api._published_base_stmt().order_by(
-        ProcessedAlert.published_at.desc().nullslast(),
-        ProcessedAlert.processed_at.desc(),
-    )
-    if risk_level is not None:
-        stmt = stmt.where(_subscriber_risk_band_filter(risk_level))
-    if category is not None:
-        stmt = stmt.where(ProcessedAlert.primary_category == category)
-    if source is not None:
-        stmt = (
-            stmt.join(RawItem, RawItem.id == ProcessedAlert.raw_item_id)
-            .join(Source, Source.id == RawItem.source_id)
-            .where(Source.name.ilike(f"%{source}%"))
-        )
-    stmt = stmt.offset(offset).limit(limit)
+    stmt = published_alerts_stmt(
+        risk_band=risk_band,
+        category=category,
+        source=source,
+        published_from=published_from,
+        published_to=published_to,
+        source_published_from=source_published_from,
+        source_published_to=source_published_to,
+    ).offset(offset).limit(limit)
 
     alerts = (await db.execute(stmt)).scalars().all()
-    reads = [public_alerts_api._to_public_read(a) for a in alerts]
     return SubscriberAlertsResponse(
-        alerts=[
-            SubscriberAlertRead(**r.model_dump(), risk_band=band_from_score100(r.signal_score))
-            for r in reads
-        ]
+        alerts=[public_alerts_api.to_subscriber_alert_read(a) for a in alerts]
     )
 
 

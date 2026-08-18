@@ -60,8 +60,10 @@ class RiskExplanation(BaseModel):
 
     Built in the API mapping layer from already-stored fields (no DB writes).
     `score_total` is the raw internal 5–25 sum; `score_100` is the normalized
-    0–100 value. `risk_band` falls back to a computed band when the column is
-    null (the fallback is response-only and never persisted).
+    0–100 value. `risk_band` is the stored `ProcessedAlert.risk_band` value,
+    reported verbatim — no read-time fallback is performed. `None` means the
+    row hasn't had its band materialized yet (pre-normalization legacy state),
+    not that the alert is unqualified; it is never inferred from the score.
     """
 
     score_total: int | None = None
@@ -399,9 +401,16 @@ class PublicAlertsResponse(BaseModel):
 
 
 class SubscriberAlertRead(PublicAlertRead):
-    """Public list item + V1 `risk_band` for the Critical/High/Medium badge."""
+    """Public list item + V1 `risk_band` for the Critical/High/Medium badge.
+
+    Also carries `processed_at` (when HiddenAlerts processed the source item) as
+    a third, distinct timestamp alongside the inherited `published_at` (when
+    HiddenAlerts published it) and `source_published_at` (the original article
+    date) — none of the three is ever aliased to another.
+    """
 
     risk_band: str | None = None
+    processed_at: datetime | None = None
 
 
 class SubscriberAlertsResponse(BaseModel):

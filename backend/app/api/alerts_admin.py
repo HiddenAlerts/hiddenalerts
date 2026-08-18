@@ -3,6 +3,8 @@
 Mounted under ``/api/v1`` in ``app.main``, giving paths such as
 ``/api/v1/admin/alerts/categories``. All routes require an admin user.
 """
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 

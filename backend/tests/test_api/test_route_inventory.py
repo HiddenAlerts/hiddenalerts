@@ -192,10 +192,13 @@ def test_shared_public_mappers_remain_operational():
 
     assert callable(public_alerts._to_public_read)
     assert callable(public_alerts._to_public_detail)
+    assert callable(public_alerts.to_subscriber_alert_read)
     assert callable(search.search_alerts_impl)
 
-    # Each is genuinely reached from a subscriber handler.
-    assert "_to_public_read" in inspect.getsource(subscriber._to_top_alert_read)
+    # Each is genuinely reached from a subscriber handler. Top Alerts uses the
+    # same shared list-item mapper as the paginated feed — no second, subtly
+    # different mapper exists (see app/api/public_alerts.py::to_subscriber_alert_read).
+    assert "to_subscriber_alert_read" in inspect.getsource(subscriber.subscriber_top_alerts)
     assert "_to_public_detail" in inspect.getsource(subscriber.subscriber_alert_detail)
     assert "search_alerts_impl" in inspect.getsource(subscriber.subscriber_search_alerts)
 
@@ -209,6 +212,34 @@ def test_dead_risk_level_helper_is_gone():
     from app.api import public_alerts
 
     assert not hasattr(public_alerts, "_title_case_level")
+
+
+def test_admin_alerts_list_no_longer_documents_risk_level_as_a_filter():
+    """risk_band is the sole canonical V1 filter on both Admin and Subscriber
+    now — risk_level was removed as a competing Admin list parameter (its
+    score-range filtering helper, `_score_filter_for_risk_level`, is gone
+    along with it), so it must not appear in the live OpenAPI parameter list
+    for GET /api/v1/alerts."""
+    from app.api import alerts as alerts_module
+    from app.main import app
+
+    assert not hasattr(alerts_module, "_score_filter_for_risk_level")
+
+    spec = app.openapi()
+    params = spec["paths"]["/api/v1/alerts"]["get"]["parameters"]
+    names = {p["name"] for p in params}
+    assert "risk_level" not in names
+    assert "risk_band" in names
+
+
+def test_subscriber_alerts_documents_risk_band_not_risk_level():
+    from app.main import app
+
+    spec = app.openapi()
+    params = spec["paths"]["/api/v1/subscriber/alerts"]["get"]["parameters"]
+    names = {p["name"] for p in params}
+    assert "risk_level" not in names
+    assert "risk_band" in names
 
 
 def test_no_new_public_route_was_introduced():
@@ -484,7 +515,8 @@ def test_removed_operations_are_no_longer_mounted(method, path):
 
 
 def test_service_diff_against_baseline_is_exactly_the_approved_removal():
-    """Nothing beyond the approved 12 paths may leave the service, and nothing may appear.
+    """Nothing beyond the approved 12 paths may leave the service, and nothing
+    may appear.
 
     Diffed against the **mounted route inventory**, not OpenAPI. Slice 3B.2AJ
     hid 13 operational/unconsumed paths from Swagger with

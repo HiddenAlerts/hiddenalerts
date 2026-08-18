@@ -14,18 +14,27 @@ from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.source import Source
 from app.pipeline.publishing.constants import DecisionSource
-from app.pipeline.publishing.risk_bands import RiskBandValue, compute_risk_band
+from app.pipeline.publishing.risk_bands import (
+    _CRITICAL_MIN_INTERNAL,
+    _HIGH_MIN_INTERNAL,
+    RiskBandValue,
+    compute_risk_band,
+)
 from app.services import top_alerts_service as service
 from app.services.top_alerts_service import (
-    CRITICAL_MIN_SCORE,
     DEFAULT_LIMIT,
-    HIGH_MIN_SCORE,
     WINDOW_DAYS,
     get_top_alerts,
     window_start,
 )
 
 NOW = datetime(2026, 8, 2, 12, 0, 0, tzinfo=timezone.utc)
+
+#: Internal-scale scores that map to Critical/High — used only to seed a
+#: plausible score alongside an explicit risk_band; eligibility itself is
+#: risk_band-driven (see test_top_alerts_service tests below).
+CRITICAL_MIN_SCORE = _CRITICAL_MIN_INTERNAL
+HIGH_MIN_SCORE = _HIGH_MIN_INTERNAL
 
 
 @pytest.fixture
@@ -47,8 +56,15 @@ async def seed(db_session):
     async def _make(
         *, score=20, published_at=NOW - timedelta(days=1), is_published=True,
         decision_source=DecisionSource.AUTO_POLICY.value,
-        source_published_at=None, title=None,
+        source_published_at=None, title=None, risk_band=...,
     ):
+        # risk_band defaults to whatever the score canonically maps to — this
+        # mirrors the real pipeline, which always writes both together. Pass
+        # risk_band explicitly (including None) to exercise the stored-column-
+        # is-authoritative behavior independent of score.
+        if risk_band is ...:
+            risk_band = compute_risk_band(score).value
+
         counter["n"] += 1
         n = counter["n"]
         item = RawItem(
@@ -64,7 +80,8 @@ async def seed(db_session):
 
         alert = ProcessedAlert(
             raw_item_id=item.id, summary=f"Summary {n}", primary_category="Fraud",
-            is_relevant=True, signal_score_total=score, is_published=is_published,
+            is_relevant=True, signal_score_total=score, risk_band=risk_band,
+            is_published=is_published,
             published_at=published_at, publication_state_source=decision_source,
         )
         db_session.add(alert)
@@ -134,18 +151,32 @@ async def test_an_unpublished_alert_is_excluded(db_session, seed):
     assert await _top_ids(db_session, seed) == []
 
 
-def test_thresholds_come_from_the_canonical_risk_bands():
-    """No second copy of the band floors lives in this service."""
-    from app.pipeline.publishing import risk_bands
-
-    assert CRITICAL_MIN_SCORE == risk_bands._CRITICAL_MIN_INTERNAL == 20
-    assert HIGH_MIN_SCORE == risk_bands._HIGH_MIN_INTERNAL == 18
-
+def test_eligibility_reads_no_score_thresholds_at_all():
+    """Qualification is risk_band-driven; the service must hold no numeric
+    score-threshold literal that could silently reintroduce score-based
+    eligibility (see app/services/alert_query.py for the canonical rationale).
+    """
     literals = [
         node.value for node in ast.walk(ast.parse(inspect.getsource(service)))
         if isinstance(node, ast.Constant) and isinstance(node.value, int)
     ]
-    assert 20 not in literals and 18 not in literals, "thresholds must be imported"
+    assert 20 not in literals and 18 not in literals, "no score threshold belongs here"
+
+
+@pytest.mark.asyncio
+async def test_stored_medium_band_never_qualifies_even_with_a_critical_score(db_session, seed):
+    """The exact regression this alignment fixes: score alone must not decide
+    eligibility once a row has an explicit, disagreeing stored band."""
+    await seed(score=CRITICAL_MIN_SCORE, risk_band="medium")
+    assert await _top_ids(db_session, seed) == []
+
+
+@pytest.mark.asyncio
+async def test_stored_null_band_never_qualifies_even_with_a_high_score(db_session, seed):
+    """Pre-normalization legacy shape: real score, no materialized band. Must
+    stay invisible rather than have a band invented for it at read time."""
+    await seed(score=25, risk_band=None)
+    assert await _top_ids(db_session, seed) == []
 
 
 # ===========================================================================
@@ -424,7 +455,7 @@ async def test_fallback_excludes_unpublished_alerts(db_session, seed):
 
 @pytest.mark.asyncio
 async def test_fallback_excludes_below_high(db_session, seed):
-    await seed(score=service.HIGH_MIN_SCORE - 1, published_at=NOW - timedelta(days=100))
+    await seed(score=HIGH_MIN_SCORE - 1, published_at=NOW - timedelta(days=100))
     assert await _fallback_ids(db_session, seed) == []
 
 
