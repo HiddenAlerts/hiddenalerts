@@ -34,7 +34,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.processed_alert import ProcessedAlert
 from app.models.subscription import Subscription
-from app.pipeline.publishing.constants import RISK_BANDS
+from app.pipeline.publishing.constants import RiskBandValue
 from app.schemas.alert import (
     SubscriberAlertDetail,
     SubscriberAlertRead,
@@ -269,7 +269,7 @@ async def subscriber_alert_categories(
     responses=FORBIDDEN_SUBSCRIPTION,
 )
 async def subscriber_alerts(
-    risk_band: str | None = Query(None, description="Filter by V1 band: critical, high, medium, below_60"),
+    risk_band: RiskBandValue | None = Query(None, description="Filter by the canonical stored risk_band: critical, high, medium, below_60."),
     category: str | None = Query(None, description="Filter by category (exact match)"),
     source: str | None = Query(None, description="Partial source name search"),
     published_from: datetime | None = Query(None, description="Only alerts HiddenAlerts published on/after this instant (published_at)."),
@@ -291,14 +291,8 @@ async def subscriber_alerts(
     No date filter means every historical Published alert remains visible
     exactly as before; the four `*_from`/`*_to` params are opt-in.
     """
-    if risk_band is not None and risk_band not in RISK_BANDS:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Invalid risk_band: {risk_band!r}. Allowed: {sorted(RISK_BANDS)}",
-        )
-
     stmt = published_alerts_stmt(
-        risk_band=risk_band,
+        risk_band=risk_band.value if risk_band is not None else None,
         category=category,
         source=source,
         published_from=published_from,

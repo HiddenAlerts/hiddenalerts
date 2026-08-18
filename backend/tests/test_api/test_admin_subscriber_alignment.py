@@ -400,6 +400,82 @@ class TestPaginationParity:
 
 
 @pytest.mark.asyncio
+class TestEqualTimestampDeterministicOrdering:
+    """PUBLISHED_ORDER_BY ends in ``id DESC`` — without it, rows sharing an
+    identical (published_at, processed_at) pair have no defined relative
+    order, so Admin's Published view and Subscriber's feed could each order
+    a tie differently, or reorder between two identical calls. These prove
+    both APIs agree on ``id DESC`` for a genuine timestamp tie and stay
+    stable/complete across paginated offsets.
+    """
+
+    async def test_admin_and_subscriber_agree_on_id_desc_for_identical_timestamps(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        cat = f"AlignTie-{uuid.uuid4().hex[:8]}"
+        tie_time = datetime.now(timezone.utc)
+        seeded = []
+        for _ in range(5):
+            alert = await _seed_band_alert(
+                db_session, category=cat, score=19, our_date=tie_time
+            )
+            alert.processed_at = tie_time
+            seeded.append(alert)
+        db_session.add_all(seeded)
+        await db_session.commit()
+        expected = sorted((a.id for a in seeded), reverse=True)
+
+        admin_alerts = await _admin_get(
+            client, db_session, f"category={cat}&risk_band=high&limit=10&offset=0"
+        )
+        sub_alerts = await _subscriber_get(
+            client, db_session, f"category={cat}&risk_band=high&limit=10&offset=0"
+        )
+        assert [a["id"] for a in admin_alerts] == expected
+        assert [a["id"] for a in sub_alerts] == expected
+
+        # Repeated identical calls return the identical order.
+        admin_again = await _admin_get(
+            client, db_session, f"category={cat}&risk_band=high&limit=10&offset=0"
+        )
+        assert [a["id"] for a in admin_again] == expected
+
+    async def test_paginated_offsets_over_a_tie_have_no_duplicates_or_gaps(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        cat = f"AlignTiePage-{uuid.uuid4().hex[:8]}"
+        tie_time = datetime.now(timezone.utc)
+        seeded = []
+        for _ in range(7):
+            alert = await _seed_band_alert(
+                db_session, category=cat, score=19, our_date=tie_time
+            )
+            alert.processed_at = tie_time
+            seeded.append(alert)
+        db_session.add_all(seeded)
+        await db_session.commit()
+        expected = sorted((a.id for a in seeded), reverse=True)
+
+        collected_admin: list[int] = []
+        collected_sub: list[int] = []
+        for offset in (0, 3, 6):
+            admin_page = await _admin_get(
+                client, db_session,
+                f"category={cat}&risk_band=high&limit=3&offset={offset}",
+            )
+            sub_page = await _subscriber_get(
+                client, db_session,
+                f"category={cat}&risk_band=high&limit=3&offset={offset}",
+            )
+            collected_admin.extend(a["id"] for a in admin_page)
+            collected_sub.extend(a["id"] for a in sub_page)
+
+        assert collected_admin == expected
+        assert collected_sub == expected
+        assert len(set(collected_admin)) == len(collected_admin), "no duplicates across pages"
+
+
+@pytest.mark.asyncio
 class TestInvalidRiskBand:
     async def test_admin_rejects_an_invalid_risk_band_with_422(
         self, client: AsyncClient, db_session: AsyncSession

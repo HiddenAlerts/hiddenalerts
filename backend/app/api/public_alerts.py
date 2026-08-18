@@ -2,7 +2,7 @@
 
 This module owns exactly **one unauthenticated route**:
 
-  GET /api/alerts   — paginated published alert feed, used by the Landing Page
+GET /api/alerts — capped public marketing teaser for the Landing Page
 
 Everything else here is **shared implementation** reached through protected
 Subscriber endpoints in ``app/api/subscriber.py``:
@@ -50,6 +50,7 @@ from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
 from app.models.source import Source
 from app.pipeline.entities import is_agency_name
+from app.pipeline.publishing.constants import RiskBandValue
 from app.schemas.alert import (
     PublicAlertDetail,
     PublicAlertRead,
@@ -627,10 +628,15 @@ async def list_published_alerts_impl(
     limit: int,
     offset: int,
 ) -> PublicAlertsResponse:
-    """Shared implementation for the published-alerts list feed.
+    """Pre-teaser implementation of the published-alerts list feed.
 
-    Used by the public ``GET /api/alerts`` and the subscriber
-    ``GET /api/v1/subscriber/alerts`` routes so they behave identically.
+    Not called by any currently-mounted route: ``GET /api/alerts`` is now the
+    narrow marketing teaser (``list_public_alerts`` / ``_to_teaser_read``
+    below), and ``GET /api/v1/subscriber/alerts`` is built from
+    ``app.services.alert_query.published_alerts_stmt`` (stored ``risk_band``,
+    not the ``risk_level`` score-bucket filter this function implements).
+    Retained only because nothing currently imports it; do not treat it as
+    live behavior or documentation of what either route does today.
     """
     stmt = _published_base_stmt().order_by(
         ProcessedAlert.published_at.desc().nullslast(),
@@ -681,6 +687,13 @@ async def list_published_alerts_impl(
 
 #: Hard server-side cap. Not a default a caller can raise.
 PUBLIC_TEASER_LIMIT = 3
+
+#: Teaser eligibility reads the stored, canonical ``risk_band`` column —
+#: never ``signal_score_total`` — so a row only qualifies once its band has
+#: actually been materialized (pipeline scoring, manual review, or the V1
+#: normalization backfill for legacy rows). No new threshold domain: these
+#: are the same four canonical values as ``RiskBandValue`` everywhere else.
+_TEASER_QUALIFYING_BANDS = (RiskBandValue.CRITICAL.value, RiskBandValue.HIGH.value)
 
 #: Preview budget for the stored summary.
 PUBLIC_SUMMARY_MAX_SENTENCES = 2
@@ -773,6 +786,9 @@ async def list_public_alerts(
     Returns at most three of the most recently published Critical/High alerts,
     with only the fields needed to show that HiddenAlerts is publishing current,
     serious intelligence: headline, band, category, date and a short preview.
+    Critical/High qualification reads the stored, canonical ``risk_band``
+    column — never ``signal_score_total`` — matching the returned ``risk_band``
+    field exactly; a row is never shown with a band the response disagrees with.
 
     Everything that constitutes the product — scores, source attribution,
     credibility, entities, evidence, analysis and review state — is withheld and
@@ -788,7 +804,7 @@ async def list_public_alerts(
         select(ProcessedAlert)
         .where(
             published_alert_filter(),
-            ProcessedAlert.signal_score_total >= _RISK_HIGH_THRESHOLD,
+            ProcessedAlert.risk_band.in_(_TEASER_QUALIFYING_BANDS),
             ProcessedAlert.published_at.is_not(None),
         )
         .options(selectinload(ProcessedAlert.raw_item))

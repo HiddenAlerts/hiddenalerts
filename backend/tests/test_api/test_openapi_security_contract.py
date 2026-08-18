@@ -562,3 +562,147 @@ def test_final_documented_surface_counts():
 
 def test_service_still_serves_every_route_it_did():
     assert len(ROUTES) == 51
+
+
+# ===========================================================================
+# Final Alert Contract and Documentation Refinement (18 August 2026):
+# the Admin/Subscriber risk_band contract as a durable OpenAPI regression,
+# not a one-time manual `app.openapi()` inspection that can silently drift.
+# ===========================================================================
+
+
+def _query_param_names(method: str, path: str) -> set[str]:
+    params = OPERATIONS[(method.upper(), path)].get("parameters", [])
+    return {p["name"] for p in params if p.get("in") == "query"}
+
+
+#: The exact, final Admin Alerts query contract — see app/api/alerts.py.
+#: Deliberately exhaustive (not just "risk_level absent") so a silently
+#: renamed or dropped shared filter fails here too.
+ADMIN_ALERTS_QUERY_PARAMS = {
+    "category", "source_id", "source", "keyword", "start_date", "end_date",
+    "published_from", "published_to", "source_published_from", "source_published_to",
+    "is_relevant", "is_published", "publish_decision", "pending_review_reason",
+    "risk_band", "is_excluded", "is_manual_hold", "published_by_rule",
+    "publication_state_source", "limit", "offset",
+}
+
+#: The exact, final Subscriber Alerts query contract — see app/api/subscriber.py.
+SUBSCRIBER_ALERTS_QUERY_PARAMS = {
+    "risk_band", "category", "source", "published_from", "published_to",
+    "source_published_from", "source_published_to", "limit", "offset",
+}
+
+
+def test_admin_alerts_openapi_query_parameters_are_exactly_the_final_contract():
+    assert _query_param_names("GET", "/api/v1/alerts") == ADMIN_ALERTS_QUERY_PARAMS
+
+
+def test_subscriber_alerts_openapi_query_parameters_are_exactly_the_final_contract():
+    assert _query_param_names("GET", "/api/v1/subscriber/alerts") == SUBSCRIBER_ALERTS_QUERY_PARAMS
+
+
+def test_neither_alerts_endpoint_documents_risk_level_as_a_filter():
+    assert "risk_level" not in _query_param_names("GET", "/api/v1/alerts")
+    assert "risk_level" not in _query_param_names("GET", "/api/v1/subscriber/alerts")
+
+
+def test_admin_start_date_is_documented_by_its_public_alias_not_the_internal_variable_name():
+    """The route param is named ``since`` in Python (``alias="start_date"``) —
+    OpenAPI must show the public alias, never the internal variable name."""
+    names = _query_param_names("GET", "/api/v1/alerts")
+    assert "start_date" in names
+    assert "since" not in names
+
+
+def _resolve_schema(node: dict) -> dict:
+    """Follow a single $ref one level, the only nesting these params use."""
+    ref = node.get("$ref")
+    if ref is None:
+        # anyOf: [{"$ref": ...}, {"type": "null"}] — the Optional[...] shape.
+        for branch in node.get("anyOf", []):
+            if "$ref" in branch:
+                ref = branch["$ref"]
+                break
+    if ref is None:
+        return node
+    assert ref.startswith("#/components/schemas/")
+    return SPEC["components"]["schemas"][ref.removeprefix("#/components/schemas/")]
+
+
+@pytest.mark.parametrize("path", ["/api/v1/alerts", "/api/v1/subscriber/alerts"])
+def test_risk_band_query_param_resolves_to_the_exact_four_canonical_values(path):
+    """Not just "the parameter exists" — the enum it resolves to (following a
+    $ref into components/schemas if FastAPI put it there) must be exactly the
+    four canonical RiskBandValue members, nothing added or dropped."""
+    params = OPERATIONS[("GET", path)]["parameters"]
+    risk_band_param = next(p for p in params if p["name"] == "risk_band")
+    resolved = _resolve_schema(risk_band_param["schema"])
+    assert resolved.get("enum") == ["critical", "high", "medium", "below_60"]
+
+
+def test_risk_band_value_component_schema_is_the_single_enum_definition():
+    """Guards against a second, drift-prone enum/Literal being introduced
+    instead of reusing RiskBandValue."""
+    schema = SPEC["components"]["schemas"]["RiskBandValue"]
+    assert schema["enum"] == ["critical", "high", "medium", "below_60"]
+    assert schema["type"] == "string"
+
+
+def test_subscriber_alert_read_exposes_the_four_documented_alert_fields_with_distinct_descriptions():
+    props = SPEC["components"]["schemas"]["SubscriberAlertRead"]["properties"]
+    for field in ("risk_band", "published_at", "source_published_at", "processed_at"):
+        assert field in props, f"{field} missing from SubscriberAlertRead"
+        description = props[field].get("description", "")
+        assert description, f"{field} has no OpenAPI description"
+
+    # The three timestamps must not read as interchangeable paraphrases of
+    # each other — each description names something the others don't.
+    assert "HiddenAlerts" in props["published_at"]["description"]
+    assert "source" in props["source_published_at"]["description"].lower()
+    assert "processed" in props["processed_at"]["description"].lower()
+    assert "never recomputed" in props["risk_band"]["description"].lower()
+
+
+def test_top_alerts_response_references_the_same_subscriber_alert_read_item_schema():
+    """Top Alerts must not have its own parallel item schema that could drift
+    from the paginated feed's — both are SubscriberAlertRead."""
+    response = SPEC["components"]["schemas"]["SubscriberTopAlertsResponse"]["properties"]["alerts"]
+    resolved = _resolve_schema(response.get("items", response))
+    assert resolved is SPEC["components"]["schemas"]["SubscriberAlertRead"]
+
+
+def test_public_teaser_schema_does_not_leak_score_or_risk_level():
+    """Regression guard for the exact leak class the teaser is designed to prevent."""
+    props = SPEC["components"]["schemas"]["PublicTeaserAlertRead"]["properties"]
+    for forbidden in ("signal_score", "risk_level", "source_name", "source_url", "id"):
+        assert forbidden not in props, f"{forbidden} leaked onto the public teaser"
+
+
+def test_admin_date_filter_descriptions_are_semantically_distinct():
+    """published_from/to, source_published_from/to and start_date/end_date must
+    each name the timestamp they filter — never generic, interchangeable "date"
+    wording that could let one be mistaken for another."""
+    params = {p["name"]: p for p in OPERATIONS[("GET", "/api/v1/alerts")]["parameters"]}
+    published = (params["published_from"]["description"] + params["published_to"]["description"]).lower()
+    source_published = (
+        params["source_published_from"]["description"] + params["source_published_to"]["description"]
+    ).lower()
+    operational = (params["start_date"]["description"] + params["end_date"]["description"]).lower()
+
+    assert "hiddenalerts" in published and "published_at" in published
+    assert "source" in source_published and "article" in source_published
+    assert "processed_at" in operational
+    # The three descriptions must not be identical to one another.
+    assert len({published, source_published, operational}) == 3
+
+
+def test_subscriber_date_filter_descriptions_are_semantically_distinct():
+    params = {p["name"]: p for p in OPERATIONS[("GET", "/api/v1/subscriber/alerts")]["parameters"]}
+    published = (params["published_from"]["description"] + params["published_to"]["description"]).lower()
+    source_published = (
+        params["source_published_from"]["description"] + params["source_published_to"]["description"]
+    ).lower()
+    assert "published" in published
+    assert "source" in source_published and "article" in source_published
+    assert published != source_published

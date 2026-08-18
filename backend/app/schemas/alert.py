@@ -6,6 +6,20 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+#: Shared OpenAPI description for every response `risk_band` field below, so
+#: Swagger states the contract in one place instead of five slightly different
+#: paraphrases. Kept as a runtime `str | None` (not the `RiskBandValue` enum
+#: used on request Query params) deliberately: a response field validates
+#: whatever `processed_alerts.risk_band` actually holds, and typing it as the
+#: enum would turn any out-of-domain legacy value already in the database into
+#: a 500 on read instead of just passing the stored string through.
+_RISK_BAND_FIELD_DESCRIPTION = (
+    "Canonical stored V1 band: critical | high | medium | below_60. Read "
+    "verbatim from processed_alerts.risk_band — never recomputed from "
+    "signal_score_total at read time. null means the row has not been "
+    "normalized yet, not that it is unqualified."
+)
+
 
 class ProcessedAlertRead(BaseModel):
     """Summary view of a processed alert — used in list endpoints."""
@@ -42,7 +56,7 @@ class ProcessedAlertRead(BaseModel):
     # These mirror the processed_alerts columns written by the V1 pipeline so
     # review queues can see WHY an alert was published / reviewed / excluded /
     # held without opening the detail page. Never exposed on public endpoints.
-    risk_band: str | None = None
+    risk_band: str | None = Field(default=None, description=_RISK_BAND_FIELD_DESCRIPTION)
     publish_decision: str | None = None
     publish_decision_reason: str | None = None
     pending_review_reason: str | None = None
@@ -220,7 +234,7 @@ class SubscriberRiskExplanation(BaseModel):
     """
 
     score: int | None = None  # 0–100
-    risk_band: str | None = None  # critical | high | medium | below_60
+    risk_band: str | None = Field(default=None, description=_RISK_BAND_FIELD_DESCRIPTION)
     risk_level: str | None = None  # legacy high | medium | low
     confidence: str | None = None  # High | Medium | Low
     factors: dict[str, int | None] | None = None  # raw per-factor scores
@@ -285,10 +299,23 @@ class PublicAlertRead(BaseModel):
     signal_score: int | None = None
     source_name: str | None = None
     source_url: str | None = None
-    # Original source/press-release publication date — what to display on the
-    # frontend feed. Falls back to null when the source did not provide a date.
-    source_published_at: datetime | None = None
-    published_at: datetime | None = None
+    source_published_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When the original source article/press-release was published, per "
+            "the source itself. Distinct from published_at below and never "
+            "substituted for it; null when the source did not provide a date."
+        ),
+    )
+    published_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When HiddenAlerts itself published the alert — distinct from "
+            "source_published_at above and never substituted for it. This is "
+            "the field canonical Published ordering sorts on "
+            "(published_at DESC NULLS LAST, processed_at DESC, id DESC)."
+        ),
+    )
 
 
 class PublicKeyIntelItem(BaseModel):
@@ -373,9 +400,18 @@ class PublicAlertDetail(BaseModel):
     secondary_category: str | None = None
     source_name: str | None = None
     source_url: str | None = None
-    source_published_at: datetime | None = None
-    published_at: datetime | None = None
-    processed_at: datetime | None = None
+    source_published_at: datetime | None = Field(
+        default=None,
+        description="When the original source article/press-release was published. Distinct from published_at.",
+    )
+    published_at: datetime | None = Field(
+        default=None,
+        description="When HiddenAlerts itself published the alert. Distinct from source_published_at.",
+    )
+    processed_at: datetime | None = Field(
+        default=None,
+        description="When HiddenAlerts processed the source item. Distinct from published_at and source_published_at.",
+    )
     # Default [] preserves the prior contract — entities is always present even
     # when there are no extracted names.
     entities: list[str] = []
@@ -409,8 +445,11 @@ class SubscriberAlertRead(PublicAlertRead):
     date) — none of the three is ever aliased to another.
     """
 
-    risk_band: str | None = None
-    processed_at: datetime | None = None
+    risk_band: str | None = Field(default=None, description=_RISK_BAND_FIELD_DESCRIPTION)
+    processed_at: datetime | None = Field(
+        default=None,
+        description="When HiddenAlerts processed the source item. Distinct from published_at and source_published_at.",
+    )
 
 
 class SubscriberAlertsResponse(BaseModel):
@@ -438,7 +477,7 @@ class SubscriberTopAlertsResponse(BaseModel):
 class SubscriberAlertDetail(PublicAlertDetail):
     """Public enriched detail + V1 `risk_band` + the curated risk explanation."""
 
-    risk_band: str | None = None
+    risk_band: str | None = Field(default=None, description=_RISK_BAND_FIELD_DESCRIPTION)
     risk_explanation: SubscriberRiskExplanation | None = None
 
 
@@ -462,7 +501,7 @@ class PublicTeaserAlertRead(BaseModel):
     title: str | None = None
     #: Canonical V1 band — the public presentation field. Legacy `risk_level`
     #: is intentionally not exposed here.
-    risk_band: str | None = None
+    risk_band: str | None = Field(default=None, description=_RISK_BAND_FIELD_DESCRIPTION)
     category: str | None = None
     #: HiddenAlerts publication time — the client-confirmed card date for the
     #: landing teaser, and also what selects and orders it. The original article

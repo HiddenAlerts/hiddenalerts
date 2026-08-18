@@ -1612,6 +1612,108 @@ async def test_teaser_returns_the_canonical_band(
     assert item["risk_band"] == band
 
 
+# ---------------------------------------------------------------------------
+# Teaser qualification reads ONLY the stored `risk_band` column — never
+# `signal_score_total` — matching `app/api/public_alerts.py::list_public_alerts`.
+# A stored band that disagrees with what the score would otherwise imply must
+# always win: a stored override always beats the score, and a NULL (not yet
+# normalized) band never qualifies no matter how high the score is.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_teaser_stored_medium_never_qualifies_even_with_a_critical_score(
+    client, db_session, teaser_seed
+):
+    await teaser_seed(
+        title="Teaser stored medium", published_at=_epoch(), score=25, risk_band="medium"
+    )
+    titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
+    assert "Teaser stored medium" not in titles
+
+
+@pytest.mark.asyncio
+async def test_teaser_stored_below_60_never_qualifies_even_with_a_high_score(
+    client, db_session, teaser_seed
+):
+    await teaser_seed(
+        title="Teaser stored below_60", published_at=_epoch(), score=19, risk_band="below_60"
+    )
+    titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
+    assert "Teaser stored below_60" not in titles
+
+
+@pytest.mark.asyncio
+async def test_teaser_stored_null_never_qualifies_even_with_a_critical_score(
+    client, db_session, teaser_seed
+):
+    await teaser_seed(
+        title="Teaser stored null", published_at=_epoch(), score=24, risk_band=None
+    )
+    titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
+    assert "Teaser stored null" not in titles
+
+
+@pytest.mark.asyncio
+async def test_teaser_stored_critical_qualifies_even_with_a_low_score(
+    client, db_session, teaser_seed
+):
+    await teaser_seed(
+        title="Teaser stored critical override", published_at=_epoch(), score=5,
+        risk_band="critical",
+    )
+    titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
+    assert "Teaser stored critical override" in titles
+
+
+@pytest.mark.asyncio
+async def test_teaser_stored_high_qualifies_even_with_a_low_score(
+    client, db_session, teaser_seed
+):
+    await teaser_seed(
+        title="Teaser stored high override", published_at=_epoch(), score=3,
+        risk_band="high",
+    )
+    titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
+    assert "Teaser stored high override" in titles
+
+
+@pytest.mark.asyncio
+async def test_teaser_unpublished_stored_critical_never_qualifies(
+    client, db_session, teaser_seed
+):
+    await teaser_seed(
+        title="Teaser unpublished critical", published_at=_epoch(), score=24,
+        risk_band="critical", is_published=False,
+    )
+    titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
+    assert "Teaser unpublished critical" not in titles
+
+
+@pytest.mark.asyncio
+async def test_teaser_response_band_matches_the_stored_override_not_the_score(
+    client, db_session, teaser_seed
+):
+    await teaser_seed(
+        title="Teaser mismatched band", published_at=_epoch(), score=3, risk_band="high"
+    )
+    alerts = (await client.get("/api/alerts")).json()["alerts"]
+    item = next(a for a in alerts if a["title"] == "Teaser mismatched band")
+    assert item["risk_band"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_teaser_ties_on_published_at_break_by_id_desc(client, db_session, teaser_seed):
+    same_time = _epoch()
+    await teaser_seed(title="Teaser tie first", published_at=same_time, risk_band="high")
+    await teaser_seed(title="Teaser tie second", published_at=same_time, risk_band="high")
+    await teaser_seed(title="Teaser tie third", published_at=same_time, risk_band="high")
+
+    titles = [a["title"] for a in (await client.get("/api/alerts")).json()["alerts"]]
+    # All three share published_at, so id DESC (creation order reversed) decides.
+    assert titles[:3] == ["Teaser tie third", "Teaser tie second", "Teaser tie first"]
+
+
 @pytest.mark.asyncio
 async def test_teaser_summary_is_capped_and_leaves_the_stored_row_alone(
     client, db_session, teaser_seed

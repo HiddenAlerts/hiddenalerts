@@ -288,7 +288,8 @@ http://localhost:8000/docs           → OpenAPI documentation
 | `score_cross_source` | INTEGER | 1–5 |
 | `score_trend_acceleration` | INTEGER | 1–5 |
 | `signal_score_total` | INTEGER | Internal sum of 5 factors (5–25). API responses normalize this to 0–100 before exposing it (the field name in the response is also `signal_score` / `signal_score_total`, but the value is on a 0–100 scale). |
-| `risk_level` | VARCHAR | M3 final 0–100 bands (Ken-approved May 06): `low` (1–39) / `medium` (40–69) / `high` (≥70). Public, admin, and client endpoints all derive risk from the score at read time rather than from this stored column, so legacy rows with stale levels still display correctly. |
+| `risk_level` | VARCHAR | Legacy `low`/`medium`/`high` band, **display-only**. Not used for filtering, badges, or publication eligibility on any endpoint. |
+| `risk_band` | VARCHAR | **Canonical** V1 band: `critical` / `high` / `medium` / `below_60`. The sole source of truth for badge/filter/eligibility purposes on both the Admin and Subscriber alert APIs — materialized once at write time (pipeline scoring, manual review, or the one-time legacy-row normalization tool) and never recomputed from `signal_score_total` at read time. A `NULL` value means the row hasn't been normalized yet. |
 
 ### Migrations
 
@@ -308,8 +309,10 @@ alembic revision --autogenerate -m "description"
 | `0006` | Alert publication — adds `is_published`, `published_at`, `published_by_user_id` to processed_alerts; partial index on published rows |
 | `0007`–`0010` | Subscriber billing/subscriptions (Auth/Payment Phase 1) + V1 alert-publishing state |
 | `0011` | `intelligence_briefs` table — Intelligence Brief module (admin CMS + subscriber library); unique `slug`/`brief_code`, btree + GIN indexes |
+| `0012` | Splits `run_logs` skip telemetry into url/content/invalid counters; adds a `(source_id, run_started_at DESC)` index |
+| `0013` | Durable per-source URL exclusion decisions (`source_url_decisions`); adds `run_logs.items_skipped_external` |
 
-Current head: **`0011`**.
+Current head: **`0013`** (repository and production — verified via `alembic current` against both).
 
 ---
 
@@ -353,8 +356,8 @@ docker compose up -d --build
 # 6. Apply migrations
 docker compose exec app alembic upgrade head
 
-# 7. Confirm the head is 0011
-docker compose exec app alembic current      # -> 0011 (head)
+# 7. Confirm the migration applied
+docker compose exec app alembic current      # -> head (0013 as of 18 August 2026; check the Migrations table above for the current value)
 
 # 8. Health check
 curl -s https://api.hiddenalerts.com/api/v1/health
@@ -379,7 +382,7 @@ Use placeholders `<ADMIN_TOKEN>`, `<SUBSCRIBER_TOKEN>`, `<BRIEF_ID>`,
 ```bash
 # Health + migration
 curl -s https://api.hiddenalerts.com/api/v1/health
-docker compose exec app alembic current            # 0011 (head)
+docker compose exec app alembic current            # -> head (0013 as of 18 August 2026)
 
 # Admin + subscriber lists reachable
 curl -s "https://api.hiddenalerts.com/api/v1/admin/intelligence-briefs?limit=5" \
@@ -489,7 +492,8 @@ Step 3 — Signal Scoring (signal_scorer.py)
     score_trend_acceleration  = compare keyword freq last 7d vs prior 7d
     signal_score_total        = sum(5 factors)         # internal 5–25 (in DB)
     # API exposes the same field as 0–100: round(total / 25 * 100)
-    risk_level                = low(<40) / medium(40–69) / high(≥70)  # M3 final bands
+    risk_band                 = critical(≥80) / high(70–79) / medium(60–69) / below_60(<60)  # canonical, written once here
+    risk_level                = low(<40) / medium(40–69) / high(≥70)  # legacy, display-only, not used for publish/badge decisions
 
 Step 4 — Event Grouping (event_grouper.py)
     Match: same primary_category + entity name overlap + within 7 days
@@ -511,28 +515,35 @@ Each processed alert receives five independent scores (1–5 each):
 | Cross-Source | 1 source→1, 2 sources→3, 3+→5 (updated as events gain more sources) |
 | Trend Acceleration | Compare keyword matches last 7d vs prior 7d — stable→1, 25–99% increase→3, 100%+ surge→5 |
 
-**Risk bands (M3 final, Ken-approved May 06)** — the DB column
-`signal_score_total` is on the internal 5–25 scale; every API response (public,
-admin, subscriber) normalizes that value to a 0–100 score before exposing it.
-The field name on the response stays `signal_score` / `signal_score_total` /
-`score` so no frontend change is required. `risk_level` is derived from the
-0–100 value:
+**Risk bands** — the DB column `signal_score_total` is on the internal 5–25
+scale; every API response (public, admin, subscriber) normalizes that value to
+a 0–100 score before exposing it. The field name on the response stays
+`signal_score` / `signal_score_total` / `score` so no frontend change is
+required. The **canonical** band is `processed_alerts.risk_band`, computed
+once at write time from the score and never recomputed at read time — it is
+the sole source of truth for badges, filtering, and publish eligibility on
+both the Admin and Subscriber alert APIs:
 
 | Band | API score (0–100) | DB `signal_score_total` (5–25) |
 |------|-------------------|-------------------------------|
-| High | 70–100 | ≥18 |
-| Medium | 40–69 | 10–17 |
-| Low | 1–39 | ≤9 |
+| `critical` | 80–100 | ≥20 |
+| `high` | 70–79 | 18–19 |
+| `medium` | 60–69 | 15–17 |
+| `below_60` | <60 (or unset) | ≤14 / `NULL` |
 
-**Tier 1 auto-publish rule:** an alert is auto-published only when **all four** conditions hold:
+The legacy `risk_level` column (`low`/`medium`/`high`) still exists and is
+returned on some responses for backward display compatibility, but it is
+**not** used for filtering, badges, or publish eligibility anywhere.
 
-1. `ai_result.is_relevant == True` — AI confirmed the article describes a real fraud / financial-crime mechanism (defensive guard against any code path that lets an irrelevant alert reach scoring).
-2. `signal_score_total ≥ 10` — Medium-and-above under M3 final bands. Ken explicitly approved Medium auto-publish on May 06; Low alerts remain admin-manual-only.
-3. `source.credibility_score ≥ 4` — government / regulator / law-enforcement source.
+**V1 auto-publish policy (`DEFAULT_V1_POLICY`):** an alert is auto-published only when **all** conditions hold:
+
+1. `ai_result.is_relevant == True` — AI confirmed the article describes a real fraud / financial-crime mechanism.
+2. `risk_band` is `critical` or `high` — **`medium` alerts route to manual admin review, not auto-publish**; `below_60` is excluded outright. (There is no "Medium auto-publishes" rule anymore — that was an earlier, superseded policy.)
+3. Effective source credibility ≥ 4 (subject to source-specific rule overrides — see `app/pipeline/publishing/source_rules.py`).
 4. `primary_category` is in the auto-publish allowlist:
    `Investment Fraud`, `Cybercrime`, `Consumer Scam`, `Money Laundering`, `Cryptocurrency Fraud`.
 
-`Other` and any unknown / borderline category **never auto-publish** — they go to manual admin review. Manual admin approval remains available for any alert (including `Other` and below-threshold scores) via the dashboard's review workflow.
+`Other` and any unknown / borderline category **never auto-publish** — they go to manual admin review. Manual admin approval remains available for any alert (including `Other`, `medium`, and `below_60`) via the Admin review workflow in the React Admin UI (there is no server-rendered dashboard anymore).
 
 ---
 
@@ -551,38 +562,45 @@ Base URL: `http://localhost:8000`
 Authenticated endpoints accept either a valid `access_token` cookie **or** an `Authorization: Bearer <token>` header. Cookie takes priority when both are present.
 
 > **Subscriber vs internal endpoints:**  
-> `/api/v1/client/alerts` and `/api/v1/client/alerts/{id}` are the **subscriber-safe** published feed — use these in the frontend.  
-> `/api/v1/alerts` and `/api/v1/alerts/{id}` are **internal/admin** endpoints — they return all alerts regardless of publication state and expose internal review and scoring fields.
+> `/api/v1/subscriber/alerts` and `/api/v1/subscriber/alerts/{id}` (Supabase JWT + active subscription) are the
+> **subscriber-safe** published feed to use in the frontend — see the Subscriber Feed table below.
+> `/api/v1/client/alerts` and `/api/v1/client/alerts/{id}` are a retained **transitional internal** API with no known
+> frontend consumer, hidden from Swagger (`include_in_schema=False`) — do not build against these.
+> `/api/v1/alerts` and `/api/v1/alerts/{id}` are **internal, any-authenticated-user** endpoints — they return all
+> alerts regardless of publication state and expose internal review and scoring fields. Auth is `get_current_user`
+> (a valid JWT cookie/Bearer token), **not** role-gated to admins specifically today — see the note in
+> `MVP-API-Contract-V2.md` §3. That's a distinct guard from the `/api/v1/admin/*`, Sources, Raw Items and Stats
+> routes below, which do require the `admin` role (`require_admin`).
 
 ### System
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/api/v1/health` | No | DB + scheduler status |
-| `GET` | `/api/v1/stats` | No | Item counts by source + totals |
+| `GET` | `/api/v1/stats` | Admin (`require_admin`) | Item counts by source + totals |
 
 ### Sources
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/v1/sources` | No | List all sources |
-| `GET` | `/api/v1/sources/{id}` | No | Single source detail |
-| `PATCH` | `/api/v1/sources/{id}` | No | Update `is_active` or polling interval |
-| `GET` | `/api/v1/sources/{id}/runs` | No | Recent run logs |
-| `POST` | `/api/v1/sources/{id}/trigger` | No | Manual collection run (202) |
+| `GET` | `/api/v1/sources` | Admin (`require_admin`) | List all sources |
+| `GET` | `/api/v1/sources/{id}` | Admin (`require_admin`) | Single source detail |
+| `PATCH` | `/api/v1/sources/{id}` | Admin (`require_admin`) | Update `is_active` or polling interval |
+| `GET` | `/api/v1/sources/{id}/runs` | Admin (`require_admin`) | Recent run logs |
+| `POST` | `/api/v1/sources/{id}/trigger` | Admin (`require_admin`) | Manual collection run (202) |
 
 ### Raw Items
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/v1/raw-items` | No | Paginated items (filter: source_id, since, is_duplicate) |
-| `GET` | `/api/v1/raw-items/{id}` | No | Full detail incl. raw_text + raw_html |
+| `GET` | `/api/v1/raw-items` | Admin (`require_admin`) | Paginated items (filter: source_id, since, is_duplicate) |
+| `GET` | `/api/v1/raw-items/{id}` | Admin (`require_admin`) | Full detail incl. raw_text + raw_html |
 
 ### Public Feed — No Auth Required
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/alerts` | No | Paginated published alert feed — the Landing Page source |
+| `GET` | `/api/alerts` | No | Landing Page marketing teaser — max 3 items, Critical/High only (by stored `risk_band`), narrow field set (`title`, `risk_band`, `category`, `published_at`, `summary`) — not a general paginated feed |
 
 > **Retired by 06 August 2026.** `GET /api/alerts/top`, `GET /api/alerts/{id}`,
 > `GET /api/alerts/stats` and `GET /api/search/alerts` were **removed** and now
@@ -593,7 +611,7 @@ Authenticated endpoints accept either a valid `access_token` cookie **or** an `A
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/v1/subscriber/alerts` | Supabase + subscription | Paginated published feed with the V1 `risk_band`; filters `category`, `risk_level`, `source` |
+| `GET` | `/api/v1/subscriber/alerts` | Supabase + subscription | Paginated published feed with the V1 `risk_band`; filters `risk_band` (critical/high/medium/below_60 — the only risk filter, no `risk_level`), `category`, `source`, `published_from`/`published_to`, `source_published_from`/`source_published_to` |
 | `GET` | `/api/v1/subscriber/alerts/{alert_id}` | Supabase + subscription | Enriched alert detail (replaces the public detail route) |
 | `GET` | `/api/v1/subscriber/alerts/top` | Supabase + subscription | Top Alerts This Week — Critical/High, rolling 7 days, max 3 |
 | `GET` | `/api/v1/subscriber/alerts/stats` | Supabase + subscription | Aggregate counts with V1 bands (`critical_count`) |
@@ -641,7 +659,7 @@ Authenticated endpoints accept either a valid `access_token` cookie **or** an `A
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/v1/alerts` | Yes | List alerts (filter: risk_level, category, source_id, since) |
+| `GET` | `/api/v1/alerts` | Yes | List alerts (filter: `risk_band` — no `risk_level` filter — plus `category`, `source_id`, `since`, `is_published`, `publish_decision`, and more; see `MVP-API-Contract-V2.md` §3.1) |
 | `GET` | `/api/v1/alerts/{id}` | Yes | Alert detail with score breakdown |
 | `POST` | `/api/v1/alerts/process` | Yes | Manually trigger AI pipeline (202) |
 | `POST` | `/api/v1/alerts/{id}/review` | Yes | Submit review action |
@@ -662,6 +680,11 @@ Authenticated endpoints accept either a valid `access_token` cookie **or** an `A
 | `POST` | `/api/v1/auth/change-password` | Yes | Update password (validates current first) |
 
 ### Client — Subscriber-Safe Feed (M3)
+
+> **Hidden from Swagger, no known frontend consumer.** Kept for backward compatibility only — do not build new
+> frontend work against this table. `GET /api/v1/subscriber/alerts*` (above) is the real subscriber path. Unlike the
+> Admin and Subscriber alert APIs, this legacy route still accepts a `risk_level` filter alongside `risk_band` — that
+> is specific to this one retained internal route, not the current contract described elsewhere in this document.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -812,7 +835,7 @@ TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
   -d '{"email":"YOUR_ADMIN_EMAIL","password":"YOUR_ADMIN_PASSWORD"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
-curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_level=high&limit=10" \
+curl "http://localhost:8000/api/v1/alerts?is_relevant=true&risk_band=high&limit=10" \
   -H "Authorization: Bearer $TOKEN"
 
 # Alert review and source monitoring are served by the React Admin UI against
@@ -953,12 +976,22 @@ docker stats --no-stream
 
 ### Quick sanity check that scoring is on the 0–100 scale (M3 final)
 
+`GET /api/alerts` (the unauthenticated Landing Page teaser) does **not** expose `signal_score` or `risk_level` —
+its field set is narrow by design (`title`, `risk_band`, `category`, `published_at`, `summary` only). Check the
+canonical `risk_band` there instead, or use an authenticated endpoint for the actual score:
+
 ```bash
-# Should show signal_score values in the 40–95 range (not 5–25).
-curl -s https://hiddenalerts.com/api/alerts | python3 -c \
+# Public teaser — confirms risk_band is one of the four canonical values.
+curl -s https://api.hiddenalerts.com/api/alerts | python3 -c \
   "import json, sys; \
    d = json.load(sys.stdin); \
-   for a in d['alerts'][:5]: print(a['signal_score'], a['risk_level'])"
+   for a in d['alerts'][:5]: print(a['risk_band'], a['title'])"
+
+# Authenticated Admin check — should show signal_score_total values in the 0–100 range (not 5–25).
+curl -s "https://api.hiddenalerts.com/api/v1/alerts?limit=5" \
+  -H "Authorization: Bearer $TOKEN" | python3 -c \
+  "import json, sys; \
+   for a in json.load(sys.stdin): print(a['signal_score_total'], a['risk_band'])"
 ```
 
 ---

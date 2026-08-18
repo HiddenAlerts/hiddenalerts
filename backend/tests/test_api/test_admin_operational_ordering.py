@@ -195,6 +195,109 @@ class TestOperationalOrdering:
 
 
 @pytest.mark.asyncio
+class TestEqualTimestampDeterministicOrdering:
+    """Every Admin ordering branch ends in ``id DESC`` (see
+    ``_admin_list_order_by``) — without it, rows sharing an identical
+    processed_at (or COALESCE(published_at, processed_at)) have no defined
+    relative order, so equal-timestamp results could reorder or lose/duplicate
+    rows across paginated offsets. These pin ``id DESC`` as the deciding
+    tie-breaker for each branch that can plausibly see a timestamp tie.
+    """
+
+    async def test_draft_ties_break_on_id_desc(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        cat = f"OpTieDraft-{uuid.uuid4().hex[:8]}"
+        seeded = [
+            await _seed(db_session, category=cat, processed_at=NOW, is_published=False)
+            for _ in range(4)
+        ]
+        expected = sorted((a.id for a in seeded), reverse=True)
+
+        alerts = await _admin_list(client, db_session, f"category={cat}&is_published=false")
+        assert [a["id"] for a in alerts] == expected
+
+    async def test_review_queue_ties_break_on_id_desc(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        cat = f"OpTieReview-{uuid.uuid4().hex[:8]}"
+        seeded = [
+            await _seed(
+                db_session, category=cat, processed_at=NOW,
+                is_published=False, publish_decision="review",
+            )
+            for _ in range(4)
+        ]
+        expected = sorted((a.id for a in seeded), reverse=True)
+
+        alerts = await _admin_list(client, db_session, f"category={cat}&publish_decision=review")
+        assert [a["id"] for a in alerts] == expected
+
+    async def test_all_status_mixed_ties_break_on_id_desc(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Both a Published tie and a Draft tie sharing the same COALESCE
+        value must each resolve deterministically by id, independently."""
+        cat = f"OpTieMixed-{uuid.uuid4().hex[:8]}"
+        published = [
+            await _seed(
+                db_session, category=cat, processed_at=NOW,
+                is_published=True, published_at=NOW,
+            )
+            for _ in range(3)
+        ]
+        drafts = [
+            await _seed(
+                db_session, category=cat,
+                processed_at=NOW - timedelta(hours=1), is_published=False,
+            )
+            for _ in range(3)
+        ]
+        expected = sorted((a.id for a in published), reverse=True) + sorted(
+            (a.id for a in drafts), reverse=True
+        )
+
+        alerts = await _admin_list(client, db_session, f"category={cat}")
+        assert [a["id"] for a in alerts] == expected
+
+    async def test_repeated_identical_calls_return_the_same_order(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        cat = f"OpTieStable-{uuid.uuid4().hex[:8]}"
+        seeded = [
+            await _seed(db_session, category=cat, processed_at=NOW, is_published=False)
+            for _ in range(5)
+        ]
+        expected = sorted((a.id for a in seeded), reverse=True)
+
+        first = await _admin_list(client, db_session, f"category={cat}&is_published=false")
+        second = await _admin_list(client, db_session, f"category={cat}&is_published=false")
+        assert [a["id"] for a in first] == expected
+        assert [a["id"] for a in second] == expected
+
+    async def test_paginated_offsets_over_a_tie_have_no_duplicates_or_gaps(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        cat = f"OpTiePage-{uuid.uuid4().hex[:8]}"
+        seeded = [
+            await _seed(db_session, category=cat, processed_at=NOW, is_published=False)
+            for _ in range(7)
+        ]
+        expected = sorted((a.id for a in seeded), reverse=True)
+
+        collected: list[int] = []
+        for offset in (0, 3, 6):
+            page = await _admin_list(
+                client, db_session,
+                f"category={cat}&is_published=false&limit=3&offset={offset}",
+            )
+            collected.extend(a["id"] for a in page)
+
+        assert collected == expected
+        assert len(set(collected)) == len(collected), "no duplicates across pages"
+
+
+@pytest.mark.asyncio
 class TestThreeTimestampsStayDistinct:
     async def test_published_source_and_processed_timestamps_never_alias(
         self, client: AsyncClient, db_session: AsyncSession

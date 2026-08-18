@@ -14,13 +14,16 @@ define independently:
      one-time backfill that closes that gap for existing rows).
 
   2. **Published-alert ordering** — ``published_at DESC NULLS LAST,
-     processed_at DESC``. ``published_at`` is when HiddenAlerts published the
-     intelligence; ``processed_at`` breaks ties and orders never-published rows
-     (NULL ``published_at``) among themselves. Admin uses this ordering only
-     when it's actually viewing the Published subset — its operational states
-     (Draft, Review, Excluded, Hold, "All Status") order differently, entirely
-     within ``app/api/alerts.py``, since that's Admin-specific behavior with no
-     Subscriber equivalent.
+     processed_at DESC, id DESC``. ``published_at`` is when HiddenAlerts
+     published the intelligence; ``processed_at`` breaks ties and orders
+     never-published rows (NULL ``published_at``) among themselves; ``id``
+     is the final deterministic tie-breaker so equal-timestamp rows still
+     have one stable, repeatable order across paginated calls. Admin uses
+     this ordering only when it's actually viewing the Published subset — its
+     operational states (Draft, Review, Excluded, Hold, "All Status") order
+     differently, entirely within ``app/api/alerts.py``, since that's
+     Admin-specific behavior with no Subscriber equivalent (those orderings
+     carry their own ``id DESC`` tie-breaker too).
 
   3. **Date-range filtering** — two independent, non-aliased timestamps:
      ``published_at`` (HiddenAlerts' own publish time) and
@@ -45,10 +48,16 @@ from app.models.source import Source
 from app.pipeline.publishing.constants import RISK_BANDS
 from app.services.alert_category_service import published_alert_filter
 
-#: Canonical Published-alert ordering — see module docstring point 2.
+#: Canonical Published-alert ordering — see module docstring point 2. The
+#: trailing ``id.desc()`` is a pure tie-breaker: without it, rows sharing an
+#: identical (published_at, processed_at) pair have no defined relative order,
+#: so equal-timestamp pages could return duplicates/gaps or reorder between
+#: identical calls. ``id`` is monotonically assigned and never reused, so it's
+#: a safe deterministic tie-breaker that doesn't change any real ordering.
 PUBLISHED_ORDER_BY = (
     ProcessedAlert.published_at.desc().nullslast(),
     ProcessedAlert.processed_at.desc(),
+    ProcessedAlert.id.desc(),
 )
 
 
@@ -77,6 +86,40 @@ def apply_published_at_filters(
     if published_to is not None:
         stmt = stmt.where(ProcessedAlert.published_at <= published_to)
     return stmt
+
+
+def apply_category_filter(stmt: Select, *, category: str | None) -> Select:
+    """Filter on ``ProcessedAlert.primary_category`` — identical predicate for
+    Admin and Subscriber, so it lives here instead of being written twice."""
+    if category is not None:
+        stmt = stmt.where(ProcessedAlert.primary_category == category)
+    return stmt
+
+
+def apply_source_name_filter(
+    stmt: Select,
+    *,
+    source: str | None,
+    raw_item_joined: bool,
+) -> tuple[Select, bool]:
+    """Filter on the source's display name (partial, case-insensitive match).
+
+    Joins ``raw_items``/``sources`` only when ``source`` is actually given and
+    only if the caller hasn't already joined ``raw_items`` for another reason
+    (Admin's ``source_id``/``keyword`` filters, for instance) —
+    ``raw_item_joined`` is threaded through the same way
+    ``apply_source_published_at_filters`` does, so the join is never added
+    twice.
+    """
+    if source is None:
+        return stmt, raw_item_joined
+    if not raw_item_joined:
+        stmt = stmt.join(RawItem, RawItem.id == ProcessedAlert.raw_item_id)
+        raw_item_joined = True
+    stmt = stmt.join(Source, Source.id == RawItem.source_id).where(
+        Source.name.ilike(f"%{source}%")
+    )
+    return stmt, raw_item_joined
 
 
 def apply_source_published_at_filters(
@@ -118,8 +161,9 @@ def published_alerts_stmt(
     """The Subscriber Alerts API's Published-only query: ``is_published = True``
     plus the canonical risk-band, category, source, and date filters built from
     the primitives above. Admin's equivalent Published view
-    (``GET /api/v1/alerts?is_published=true``) is built from the same
-    ``risk_band_filter``/``apply_published_at_filters``/
+    (``GET /api/v1/alerts?is_published=true``) is built from the exact same
+    ``published_alert_filter``/``risk_band_filter``/``apply_category_filter``/
+    ``apply_source_name_filter``/``apply_published_at_filters``/
     ``apply_source_published_at_filters``/``PUBLISHED_ORDER_BY`` primitives
     directly in ``app/api/alerts.py`` rather than calling this function, since
     Admin also composes them with operational filters (Draft, Review, Excluded,
@@ -136,15 +180,10 @@ def published_alerts_stmt(
 
     if risk_band is not None:
         stmt = stmt.where(risk_band_filter(risk_band))
-    if category is not None:
-        stmt = stmt.where(ProcessedAlert.primary_category == category)
-    if source is not None:
-        stmt = (
-            stmt.join(RawItem, RawItem.id == ProcessedAlert.raw_item_id)
-            .join(Source, Source.id == RawItem.source_id)
-            .where(Source.name.ilike(f"%{source}%"))
-        )
-        raw_item_joined = True
+    stmt = apply_category_filter(stmt, category=category)
+    stmt, raw_item_joined = apply_source_name_filter(
+        stmt, source=source, raw_item_joined=raw_item_joined
+    )
 
     stmt = apply_published_at_filters(
         stmt, published_from=published_from, published_to=published_to

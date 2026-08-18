@@ -24,48 +24,94 @@
 >
 > For the current surface see `README.md` and the live OpenAPI at
 > `https://api.hiddenalerts.com/docs`.
+>
+> ## ⚠️ Superseded further on 18 August 2026 — `risk_band` is now the ONLY risk filter on the active Admin and Subscriber Alerts APIs
+>
+> A production bug was fixed: the Subscriber API used to **recompute** a risk
+> band from `signal_score_total` at read time, while the Admin API read the
+> **stored** `processed_alerts.risk_band` column — the two disagreed on which
+> alerts were "Critical" / "High" for any row where the stored band was still
+> `NULL`. That is fixed. **`processed_alerts.risk_band` is now the sole
+> canonical source for band/badge purposes on both the Admin and Subscriber
+> APIs, always. Nothing recomputes a band from score at read time, anywhere.**
+>
+> This section of the document (and every section below that touches
+> risk/score/band) has been rewritten accordingly. In particular, throughout
+> this document below §0, wherever you see historical text describing
+> `risk_level` bands (`low`/`medium`/`high` from a score) as something the
+> server "re-derives on every read" or as a **filter parameter**, that
+> description is now **wrong** and describes the bug that was just fixed — it
+> is left in place only inside sections already marked **retired/404** above,
+> as a historical record of what the old, no-longer-reachable routes used to
+> do. Current, live endpoints are documented fresh, below.
+>
+> **The final contract, no transition window:**
+> - Both `GET /api/v1/alerts` (Admin) and `GET /api/v1/subscriber/alerts`
+>   (Subscriber) accept **one** risk filter: `risk_band`, an enum of exactly
+>   `critical` | `high` | `medium` | `below_60`. Typed in OpenAPI — Swagger
+>   renders it as a dropdown.
+> - There is **no** `risk_level` filter on either endpoint, no
+>   `risk_level`→`risk_band` translation, no `low`→`below_60` alias, no
+>   dual-parameter compatibility mode, no fallback for an outdated frontend.
+>   This is final — do not send `risk_level` as a filter to either endpoint.
+> - `risk_level` still appears on some response bodies as a **display-only**
+>   legacy field (and as `adjusted_risk_level` on the manual-review request
+>   body) — it is never authoritative for badges, filtering, or eligibility.
+>   See the rewritten "Risk Band & Risk Level" section right below the Table
+>   of Contents.
+> - The unrelated `GET /api/v1/events` route has its own separate `risk_level`
+>   query param — a different feature entirely, not part of this contract, not
+>   to be conflated with alert risk_band/risk_level.
+> - The retained hidden /api/v1/client/alerts endpoint still has its legacy
+>   risk_level filter. For low, medium and high it filters using the legacy
+>   score-derived display bands from signal_score_total. It is not part of the
+>   current frontend contract and must not be used as a model for the Admin or
+>   Subscriber APIs.
 
-
-**Last updated:** 06 August 2026  
-**Version:** 0.2.0  
-**Base URL:** `http://localhost:8000` (local dev)  /  `https://hiddenalerts.com` (production)  
+**Last updated:** 18 August 2026  
+**Version:** 0.3.1  
+**Base URL:** `http://localhost:8000` (local dev)  /  `https://api.hiddenalerts.com` (production — the API host;
+the marketing site at `https://hiddenalerts.com` is a separate frontend, not the REST API)  
 **Interactive docs (Swagger UI):** `https://api.hiddenalerts.com/docs`  
-**API Prefix:** All JSON REST endpoints live under `/api/v1`
+**API Prefix:** Most versioned application APIs live under `/api/v1`. The public Landing Page teaser is GET /api/alerts.
 
 **Backend contact:** Adnan
 
 ## Overview
 
-- **Admin surface** — Ken and internal admins. Full access to all alerts, review workflow, pipeline controls. Served by
-  the React Admin UI over the Internal-JWT Admin APIs. (The server-rendered `/dashboard` was retired by 06 August 2026.)
-- **Subscriber surface** — End users (newsletter subscribers). Access only to curated, published alerts through the
-  `/client` endpoints.
-- **Public feed** — The endpoint frontend app uses for public display of curated alerts. No authentication required.
-  Returns curated alerts only.
+- **Admin surface** — Ken and internal admins. Full access to all alerts, review workflow, and the Intelligence Brief
+  CMS. Served by the React Admin UI over the Internal-JWT Admin APIs (`get_current_user` — any valid JWT
+  cookie/Bearer token, not role-gated beyond authentication unless a section below says otherwise). The
+  server-rendered `/dashboard` was retired by 06 August 2026 and there is no server-rendered UI anymore — do not
+  reference "the dashboard" as a real current surface.
+- **Subscriber surface** — Paying end users. Curated, **published-only** alerts and Intelligence Briefs through
+  `GET /api/v1/subscriber/*`. Requires a Supabase JWT **and** an active subscription (`require_active_subscription`)
+  on every content route except `/me` and `/access`, which only need a valid Supabase token.
+- **Public feed** — `GET /api/alerts`, unauthenticated. A **marketing teaser** for the Landing Page (max 3 items, a
+  narrow field set) — not a general public intelligence API. See §0.1.
 
-Both admin and subscriber surfaces authenticate through the same backend. Token is the same JWT regardless of role —
-what changes is which endpoints accept it.
+Admin and Subscriber use **different token systems** (Internal JWT vs. Supabase JWT) — they are not interchangeable,
+unlike an earlier draft of this document implied.
 
 ---
 
 ## Table of Contents
 
 0. [**Public Feed — Current Frontend MVP Endpoints**](#0-public-feed--current-frontend-mvp-endpoints)
+    - [Risk Band (canonical) & Risk Level (legacy display)](#risk-band-canonical--risk-level-legacy-display-updated-18-august-2026)
     - [GET /api/alerts *(marketing teaser)*](#01-get-apialerts--public-marketing-teaser)
     - [GET /api/v1/subscriber/alerts/top *(primary + fallback)*](#02-get-apiv1subscriberalertstop--top-alerts-this-week)
-    - [GET /api/alerts/{id} *(retired)*](#02-get-apialertsid--published-alert-detail-new)
-    - [GET /api/alerts/top *(retired)*](#03-get-apialertstop--curated-top-alerts-new)
-    - [GET /api/alerts/stats *(retired)*](#04-get-apialertsstats--published-alert-stats-new)
+    - [Retired public endpoints *(404, historical)*](#03-retired-public-endpoints)
 1. [Authentication Overview](#1-authentication-overview)
 2. [Auth Endpoints](#2-auth-endpoints)
 3. [Alerts — Admin](#3-alerts--admin)
-4. [Alerts — Subscriber (Public Feed)](#4-alerts--subscriber-public-feed)
-5. [Events](#5-events)
-6. [Sources (Admin Settings)](#6-sources-admin-settings)
-7. [Raw Items & Stats](#7-raw-items--stats)
-8. [Health Check](#8-health-check)
+4. [Alerts — Subscriber](#4-alerts--subscriber)
+5. [Events *(hidden/internal)*](#5-events-hidden-internal)
+6. [Sources (Admin Settings) *(hidden/internal)*](#6-sources-admin-settings-hidden-internal)
+7. [Raw Items & Stats *(hidden/internal)*](#7-raw-items--stats-hidden-internal)
+8. [Health Check *(hidden/internal)*](#8-health-check-hidden-internal)
 9. [HTML Dashboard Routes](#9-html-dashboard-routes-server-rendered)
-10. [Roles & Access Matrix](#10-roles--access-matrix)
+10. [Full Route Inventory & Roles/Access Matrix](#10-full-route-inventory--rolesaccess-matrix)
 11. [Error Responses](#11-error-responses)
 12. [Integration Guide](#12-frontend-integration-guide)
 
@@ -73,48 +119,88 @@ what changes is which endpoints accept it.
 
 ## 0. Public Feed
 
-> **Hasnain: Please use the four endpoints below for the current frontend MVP phase.**
-> No authentication required on any of them. All return published (admin-approved) alerts only.
+> **Hasnain: current frontend endpoints, current-first.** None of the four routes in the old "MVP phase" table below
+> are what you should be integrating today — three are 404 and the fourth changed shape. Use this instead:
 >
-> | Endpoint | Purpose |
-> |---|---|
-> | `GET /api/alerts` | Paginated list for the main feed |
-> | ~~`GET /api/alerts/top`~~ | *retired — `GET /api/v1/subscriber/alerts/top`* |
-> | ~~`GET /api/alerts/{id}`~~ | *retired — `GET /api/v1/subscriber/alerts/{alert_id}`* |
-> | ~~`GET /api/alerts/stats`~~ | *retired — `GET /api/v1/subscriber/alerts/stats`* |
+> | Surface | Endpoint | Auth |
+> |---|---|---|
+> | Public Landing teaser | `GET /api/alerts` | None — max 3 narrow teaser items, §0.1 |
+> | Subscriber alerts feed | `GET /api/v1/subscriber/alerts` | Supabase JWT + active subscription, §4.1 |
+> | Subscriber alert detail | `GET /api/v1/subscriber/alerts/{alert_id}` | Supabase JWT + active subscription, §4.2 |
+> | Subscriber Top Alerts | `GET /api/v1/subscriber/alerts/top` | Supabase JWT + active subscription, §0.2 / §4.5 |
+> | Subscriber stats | `GET /api/v1/subscriber/alerts/stats` | Supabase JWT + active subscription, §4.3 |
+> | Subscriber search | `GET /api/v1/subscriber/search/alerts` | Supabase JWT + active subscription, §4.6 |
+> | Admin review (internal tooling, not the paid frontend) | `GET /api/v1/alerts`, `POST /api/v1/alerts/{alert_id}/review` | Internal JWT today (`get_current_user`, any authenticated user — see §3 and §16 note) |
 >
-> Internal `/api/v1/alerts*` endpoints remain admin-only and the
-> subscriber `/api/v1/client/alerts*` set is reserved for future authenticated
-> flows — do not wire either into the current MVP frontend.
+> `GET /api/alerts` is **not** a general paginated feed — it's a narrow, unauthenticated marketing teaser (max 3
+> items) for the Landing Page only. Do not build the paid Alerts Page against it. See §0.3 for what the old
+> four-endpoint table used to point at and why those routes 404 now.
 
-Base URL: `http://localhost:8000/api/alerts` (local) / `https://hiddenalerts.com/api/alerts` (prod)
+Base URL: `http://localhost:8000` (local) / `https://api.hiddenalerts.com` (production — the API host, distinct from
+the marketing site at `https://hiddenalerts.com`). Public teaser example: `https://api.hiddenalerts.com/api/alerts`.
 
 ---
 
-### Risk Score & Risk Level (M3 final, Ken-approved 2026-05-06)
+### Risk Band (canonical) & Risk Level (legacy display) — updated 18 August 2026
 
-The score returned in every API response — `signal_score` on list endpoints,
-`score` on detail, `signal_score_total` on admin / subscriber endpoints — is **already on the 0–100 frontend scale**.
-The frontend displays this number directly; no client-side normalization needed.
+**`risk_band` is the single source of truth for badges, filtering, and eligibility on every active, documented
+Alerts surface** — Admin Alerts (§3), Subscriber Alerts (§4), Subscriber Top Alerts, and the public Landing teaser
+(§0.1). It is a stored column, `processed_alerts.risk_band`, with exactly four values:
 
-`risk_level` is derived strictly from that 0–100 value with these bands:
+| Band        | Score (0–100) | Internal 5–25 sum |
+|-------------|---------------|--------------------|
+| `critical`  | 80 – 100      | ≥ 20               |
+| `high`      | 70 – 79       | 18 – 19            |
+| `medium`    | 60 – 69       | 15 – 17            |
+| `below_60`  | < 60 (or unset) | ≤ 14 / `NULL`    |
 
-| Band     | Score (0–100) |
-|----------|---------------|
-| `high`   | ≥ 70          |
-| `medium` | 40 – 69       |
-| `low`    | 1 – 39        |
+- **Never recomputed from `signal_score_total` at read time, on any endpoint.** The band is materialized once, at
+  write time only — pipeline scoring, a manual admin review action, or the one-time legacy-row normalization tool —
+  and every read path (Admin list/detail, Subscriber list/detail/top/stats) reports that stored value verbatim,
+  including `null` for a row the normalization tool hasn't reached yet. A `null` band is reported as `null`, never
+  guessed from the score.
+- This is the fix for a real bug: the Subscriber API used to recompute a band from score at query time while the
+  Admin API read the stored column, so the two surfaces could disagree on which alerts were Critical/High for any row
+  whose stored band was `NULL`. That inconsistency is gone — both APIs now read the exact same stored value.
+- **Both `GET /api/v1/alerts` (Admin) and `GET /api/v1/subscriber/alerts` (Subscriber) accept exactly one risk
+  filter, `risk_band`**, typed as an enum of the four values above (OpenAPI renders it as a Swagger dropdown). There
+  is no `risk_level` filter on either endpoint — do not send one, and do not attempt a `low`→`below_60` or
+  `high`→`high` "compatibility" translation on the frontend; there is no transition window, this is the final contract.
+- **Auto-publish policy:** `critical` and `high` bands auto-publish; `medium` goes to manual admin review; `below_60` is excluded from publication.
 
-**Worked examples** (per Ken's spec): the underlying 5-factor signal sum gets normalized to `round(sum / 25 * 100)`
-server-side, so internal `17 → 68`
-(Medium), `19 → 76` (High), `21 → 84` (High), `18 → 72` (High band floor). Frontend never sees the 5–25 internal scale.
+**`risk_level` still exists, display-only.** It's a legacy `low`/`medium`/`high` value retained on some response
+models purely for backward display compatibility (and as `adjusted_risk_level` on the manual-review request body —
+see §3.3). It is **not** authoritative for any badge, filter, or eligibility decision — treat it as a secondary,
+cosmetic field if your UI still references it, and prefer `risk_band` for anything that drives logic. Where
+`risk_level` is returned, it is still derived from `signal_score_total` for **display purposes on the Admin surface
+only** (so an admin reviewer sees a live score-consistent value even for a pre-normalization row) — this has no
+bearing on badges/filtering, which are `risk_band`-only everywhere.
 
-The server re-derives `risk_level` from the score on every read (public, admin, client) so legacy alerts with stale
-stored `risk_level` values still display under the new bands without reprocessing.
+> The unrelated `GET /api/v1/events` route (hidden/internal, §5) has its own separate `risk_level` query param — a
+> different feature, different field, not part of this contract. Don't conflate the two.
+>
+> **Exception, do not build against this:** the hidden, transitional `GET /api/v1/client/alerts` (§10 — no known
+> frontend consumer, `include_in_schema=False`) still has its own separate, untouched `risk_level` list filter
+> (matching the stored `risk_level` column, not a score recomputation). It predates this contract and was
+> intentionally left alone — it is not part of the Admin/Subscriber `risk_band` contract above and must not be used
+> as a model for either. Use `GET /api/v1/subscriber/alerts` instead.
 
-**Auto-publish rule (server-side):** alerts auto-publish to the public feed when all of the following hold —
-`is_relevant`, score normalizes to ≥ 40 on 0–100 (Medium-and-above), source credibility ≥ 4, and an allowed fraud
-category. Low-band alerts (score < 40) stay in admin-manual review.
+**Three distinct timestamps, never aliased** — this recurs on every alert-bearing endpoint below:
+
+| Field | Meaning | What filters/sorts on it |
+|---|---|---|
+| `published_at` | When **HiddenAlerts itself** published the alert. | Canonical Published ordering sorts on this. `published_from`/`published_to` filter this. |
+| `source_published_at` | The original source article's own publish date (from the raw item / RSS). | `source_published_from`/`source_published_to` filter this. Never substituted for `published_at`. |
+| `processed_at` | When HiddenAlerts processed/ingested the item. | Admin's `start_date`/`end_date` (aliases `since`/`end_date`) filter this — an Admin-**operational** filter, not the same thing as `published_from`/`published_to`. |
+
+**Canonical Published ordering** (Admin's `is_published=true` view **and** the Subscriber feed — identical):
+`published_at DESC NULLS LAST, processed_at DESC, id DESC`. The trailing `id DESC` is a deterministic tie-breaker for
+rows sharing identical timestamps.
+
+**Admin operational ordering** (`GET /api/v1/alerts`, when not viewing the Published subset):
+- `is_published=false` or a specific `publish_decision` given → `processed_at DESC, id DESC`.
+- Neither filter given ("All Status") → `COALESCE(published_at, processed_at) DESC, processed_at DESC, id DESC`, so a
+  brand-new Draft/Review item isn't buried behind months of Published history.
 
 ---
 
@@ -189,26 +275,29 @@ curl "http://localhost:8000/api/alerts?limit=100"
 
 Requires an active subscription. Returns at most **3** alerts.
 
-**Primary rule (unchanged):** published Critical/High alerts whose HiddenAlerts
-`published_at` falls in the rolling last **7 days**, ordered Critical before
-High, then score descending, then `published_at` descending, then id. Historical
-bulk publications (`candidate_backfill`, `system_migration`) are excluded.
+**Primary rule:** published alerts whose **stored** `risk_band` column is `critical` or `high` — never recomputed
+from score — and whose HiddenAlerts `published_at` falls in the rolling last **7 days**, ordered Critical before
+High, then score descending, then `published_at` descending, then id. Historical bulk publications
+(`candidate_backfill`, `system_migration`) are excluded. Historical (pre-7-day) alerts are excluded from this primary
+result set — they only ever appear via the fallback below.
 
-**Fallback (added 08 August 2026):** engages **only when the primary rule returns
-zero alerts**. One or two current alerts are returned exactly as found — the
-widget is never padded, because presenting an older alert alongside this week's
-would misrepresent it as equally current. When the window is completely empty the
-latest qualifying Critical/High alerts are returned instead, ordered by
-`published_at` descending, with `is_fallback: true` and an explanatory `message`.
+**Fallback:** engages **only when the primary rule returns zero alerts**. One or two current alerts are returned
+exactly as found — the widget is **never padded** to fill 3, because presenting an older alert alongside this week's
+would misrepresent it as equally current. When the 7-day window is completely empty, the latest qualifying (stored
+`risk_band` `critical`/`high`) alerts are returned instead, ordered by `published_at` descending, with
+`is_fallback: true` and an explanatory `message`.
 
-All other eligibility rules are identical in both paths; the fallback widens only
-the date range.
+All other eligibility rules are identical in both paths; the fallback widens only the date range.
+
+Items are mapped through the exact same field mapper the paginated Subscriber feed (§4.1) uses — `published_at`,
+`source_published_at`, and `processed_at` follow the identical three-timestamp contract as the list; `published_at`
+is never overwritten with `source_published_at` here (a previous version of this widget had that bug; it is fixed).
 
 **Current-data response:**
 
 ```json
 {
-  "alerts": [ { "id": 1312, "title": "…", "risk_band": "critical", "risk_level": "high", "signal_score": 80, "category": "Investment Fraud", "source_name": "FBI National Press Releases", "source_url": "https://www.fbi.gov/…", "source_published_at": "2026-04-06T11:33:00Z", "published_at": "2026-04-06T11:33:00Z", "summary": "…" } ],
+  "alerts": [ { "id": 1312, "title": "…", "risk_band": "critical", "risk_level": "high", "signal_score": 80, "category": "Investment Fraud", "source_name": "FBI National Press Releases", "source_url": "https://www.fbi.gov/…", "source_published_at": "2026-04-06T11:33:00Z", "published_at": "2026-04-06T11:33:00Z", "processed_at": "2026-04-06T11:40:12Z", "summary": "…" } ],
   "is_fallback": false,
   "message": null
 }
@@ -226,7 +315,7 @@ the date range.
 
 | Field         | Type            | Description                                                                     |
 |---------------|-----------------|---------------------------------------------------------------------------------|
-| `alerts`      | `array`         | Subscriber alert items — the public list shape plus the canonical `risk_band`   |
+| `alerts`      | `array`         | Subscriber alert items (§4.1 shape) — `risk_band` is the canonical badge field; `risk_level` is legacy display-only and NOT what gated eligibility for this widget |
 | `is_fallback` | `bool`          | `true` when the items came from outside the rolling 7-day window                 |
 | `message`     | `string\|null`  | Explanatory text to display; `null` unless `is_fallback` is `true`               |
 
@@ -244,9 +333,9 @@ the list. Otherwise show no notice. Alert rendering is otherwise unchanged.
 - Results are sorted newest-published first.
 - If `"alerts": []`, no alerts have been published yet — the admin reviews and publishes them.
 - Do NOT use `/api/v1/alerts` or `/api/v1/client/alerts` for this phase — those require auth.
-- `risk_level` values are lowercase here: `"low"`, `"medium"`, `"high"` — capitalise in the UI. **Derived from
-  `signal_score` on the server** (M3 final bands: `≥70` high, `40..69` medium, `<40` low). Older alerts whose stored
-  value is stale will still display correctly. Filtering on `risk_level=high` also uses the derived bucket.
+- This teaser does not expose `risk_level` at all (see "Deliberately withheld" above) — only `risk_band`
+  (`"critical"` or `"high"`, since the teaser only selects strong alerts). There is **no filter parameter** on this
+  endpoint for risk at all — see "Optional Query Parameters" above.
 - `signal_score` is the **0–100 frontend score** — render it directly on the badge / progress bar. The 5-factor internal
   sum (5–25) is normalized server-side and never exposed in API responses.
 - Category values: `Investment Fraud`, `Cybercrime`, `Consumer Scam`, `Money Laundering`, `Cryptocurrency Fraud`,
@@ -258,608 +347,26 @@ the list. Otherwise show no notice. Alert rendering is otherwise unchanged.
 
 ---
 
-### 0.2 GET /api/alerts/{id} *(retired)* — Enriched Public Alert Detail
+### 0.3 Retired Public Endpoints
 
-> **Retired by 06 August 2026 — returns 404.** Replaced by `GET /api/v1/subscriber/alerts/{alert_id}`.
+> **404 today.** These existed under the old M3-era public contract and were removed by 06 August 2026 (Slice
+> 3B.2P). Full historical documentation — request/response shapes, worked examples — is not repeated here; it is
+> preserved in Git history (this file's state before 06 August 2026) if it's ever needed for archaeology. What
+> Hasnain needs is just the replacement:
 
-```
-GET /api/alerts/{id}
-```
+| Retired route | Returns today | Current replacement |
+|---|---|---|
+| `GET /api/alerts/{id}` | 404 | `GET /api/v1/subscriber/alerts/{alert_id}` (§4.2) — Supabase JWT + active subscription |
+| `GET /api/alerts/top` | 404 | `GET /api/v1/subscriber/alerts/top` (§0.2 / §4.5) — Supabase JWT + active subscription |
+| `GET /api/alerts/stats` | 404 | `GET /api/v1/subscriber/alerts/stats` (§4.3) — Supabase JWT + active subscription |
+| `GET /api/search/alerts` | 404 | `GET /api/v1/subscriber/search/alerts` (§4.6) — Supabase JWT + active subscription |
 
-**No authentication required.**  
-Returns the full public detail for a single published alert.  
-Returns `404` if the alert does not exist **or** is not yet published.
-
-Optional sections (`why_it_matters`, `key_intelligence`, `risk_assessment`,
-`sources`, `affected_group`, `subcategory`, `timeline`, `related_signals`) are **omitted from the JSON when their
-underlying data is empty** — Hasnain does not have to filter blanks on the frontend.
-
-> Note: `risk_level` and `confidence` are returned in **Title Case** (`"High"`,
-> `"Medium"`, `"Low"`) on the detail endpoint to match Ken's design spec. The
-> list endpoint (`GET /api/alerts`) keeps the lowercase form for backward
-> compatibility — convert as needed when navigating list → detail.
-> `risk_level` is **derived from `score` on the server** (M3 final bands:
-> `≥70` High, `40..69` Medium, `<40` Low) — do not compute it on the client and
-> do not trust the legacy stored value. The `score` and `signal_score` fields
-> are both on the 0–100 scale; render either directly on the badge.
-
-> **Timestamp reference (read this — frequently confused):**
-> | Field | Meaning | Use it for |
-> |---|---|---|
-> | `source_published_at` | Original article / press-release publication date | List cards (what readers expect).
-> Backward-compat alias on detail. |
-> | `published_at` | When HiddenAlerts (admin) published the alert on the platform | Internal sort key; appears in
-> `timeline`. |
-> | `processed_at` | When the AI pipeline processed the alert | Audit only — not for display. |
-> | `published_date` | Canonical display date for the **detail page** | Render this on the detail page header. Resolves
-> in priority order: `source_published_at` → `published_at` → `processed_at`. |
-
-> **`related_signals` cleanness + quantity rule:** an alert appears here only
-> if it (a) is published, (b) shares an event with the current alert, AND
-> (c) shares at least one named entity. Event grouping alone is too broad; the
-> entity-overlap requirement keeps drift out. **At least 2 qualifying peers are
-> required** (Ken's "two to four items max"); fewer means the section is
-> **omitted entirely**. Capped at 4.
->
-> Agency / regulator names (FBI, DOJ, U.S. Attorney's Office, SEC, OFAC, IC3,
-> IRS, HHS, etc.) are excluded from the entity-overlap check — they appear
-> in nearly every fraud alert and would otherwise surface thematically
-> unrelated peers. Overlap matches on real subjects (companies, individuals,
-> domains) only.
-
-**Response `200 OK` (rich example with all optional sections populated):**
-
-```json
-{
-  "id": 42,
-  "title": "SEC Charges Investment Firm with $4.2M Fraud",
-  "score": 80,
-  "risk_level": "High",
-  "confidence": "High",
-  "summary": "The SEC charged a New York-based firm with defrauding investors...",
-  "why_it_matters": [
-    "Reported by a trusted source.",
-    "Financial impact reported as $4.2M.",
-    "Victim scope indicated as multiple."
-  ],
-  "key_intelligence": [
-    {
-      "label": "Fraud Type",
-      "value": "Wire Fraud"
-    },
-    {
-      "label": "Financial Impact",
-      "value": "$4.2M"
-    },
-    {
-      "label": "Affected Group",
-      "value": "Multiple victims or organizations"
-    },
-    {
-      "label": "Source Credibility",
-      "value": "High"
-    },
-    {
-      "label": "Named Entities",
-      "value": "SEC, New York-based Firm"
-    }
-  ],
-  "risk_assessment": "High risk based on credible source reporting and strong supporting fraud signals indicating broad or significant impact.",
-  "sources": [
-    {
-      "name": "SEC Press Releases",
-      "url": "https://sec.gov/news/press-release/..."
-    }
-  ],
-  "published_date": "2026-04-22T08:00:00Z",
-  "category": "Investment Fraud",
-  "subcategory": "Wire Fraud",
-  "affected_group": "Multiple victims or organizations",
-  "timeline": [
-    {
-      "date": "2026-04-22T08:00:00Z",
-      "event": "Source published the alert"
-    },
-    {
-      "date": "2026-04-22T10:30:01Z",
-      "event": "Alert published to dashboard"
-    }
-  ],
-  "related_signals": [
-    {
-      "id": 38,
-      "title": "DOJ indicts related actor",
-      "score": 68,
-      "risk_level": "Medium"
-    }
-  ],
-  "signal_score": 80,
-  "secondary_category": "Wire Fraud",
-  "source_name": "SEC Press Releases",
-  "source_url": "https://sec.gov/news/press-release/...",
-  "source_published_at": "2026-04-22T08:00:00Z",
-  "published_at": "2026-04-22T10:30:01Z",
-  "processed_at": "2026-04-22T10:15:00Z",
-  "entities": [
-    "SEC",
-    "New York-based Firm"
-  ]
-}
-```
-
-**Field Reference:**
-
-| Field              | Type                             | Description                                                                                                                                                                |
-|--------------------|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `id`               | `int`                            | Unique alert ID                                                                                                                                                            |
-| `title`            | `string\|null`                   | Article/press release title                                                                                                                                                |
-| `score`            | `int\|null`                      | **Risk score on a 0–100 scale.** Use this for the score badge / progress bar.                                                                                              |
-| `risk_level`       | `string\|null`                   | **Title case**: `"High"`, `"Medium"`, or `"Low"` — derived from `score` (≥70 high, 40–69 medium, <40 low)                                                                  |
-| `confidence`       | `string\|null`                   | **Title case** — derived from source credibility + score + relevance                                                                                                       |
-| `summary`          | `string\|null`                   | AI-generated summary                                                                                                                                                       |
-| `why_it_matters`   | `string[]?`                      | 1–3 short bullets — omitted if no qualifying signals                                                                                                                       |
-| `key_intelligence` | `{label,value}[]?`               | Structured data points — omitted if empty                                                                                                                                  |
-| `risk_assessment`  | `string`                         | Short 1–2 sentence justification tied to `risk_level`                                                                                                                      |
-| `sources`          | `{name,url}[]?`                  | Source references (current source — array form for future multi-source)                                                                                                    |
-| `published_date`   | `datetime\|null`                 | Best display date — `source_published_at` first, then `published_at`, then `processed_at`                                                                                  |
-| `category`         | `string\|null`                   | Primary fraud category                                                                                                                                                     |
-| `subcategory`      | `string?`                        | Secondary classification — omitted if absent                                                                                                                               |
-| `affected_group`   | `string?`                        | Human-readable victim scope — omitted if absent                                                                                                                            |
-| `timeline`         | `{date,event}[]?`                | Source-pub + platform-pub timestamps — omitted if no timestamps                                                                                                            |
-| `related_signals`  | `{id,title,score,risk_level}[]?` | 2–4 published peers via shared event **and** entity overlap — omitted when fewer than 2 qualifying peers exist. `score` is on the 0–100 scale, `risk_level` is title case. |
-
-**Backward-compatibility additive fields** (kept from the prior contract; safe to keep using if your frontend already
-references them):
-
-| Field                 | Type             | Description                                                                                                           |
-|-----------------------|------------------|-----------------------------------------------------------------------------------------------------------------------|
-| `signal_score`        | `int\|null`      | Alias for `score` — same 0–100 value. Both fields always carry the normalized score; never the raw 5–25 internal sum. |
-| `secondary_category`  | `string\|null`   | Alias for `subcategory`                                                                                               |
-| `source_name`         | `string\|null`   | First source's name (mirrors `sources[0].name`)                                                                       |
-| `source_url`          | `string\|null`   | First source's url (mirrors `sources[0].url`)                                                                         |
-| `source_published_at` | `datetime\|null` | Original source publication date                                                                                      |
-| `published_at`        | `datetime\|null` | When admin published on platform                                                                                      |
-| `processed_at`        | `datetime\|null` | When AI processed                                                                                                     |
-| `entities`            | `string[]`       | Flat entity list (always present, may be empty)                                                                       |
-
-**NOT returned** (intentionally excluded): score breakdown fields (`score_source_credibility`, `score_financial_impact`,
-`score_victim_scale`,
-`score_cross_source`, `score_trend_acceleration`), review history, moderation state (`is_published`, `is_relevant`), raw
-`entities_json`,
-`ai_model`, `matched_keywords`, `financial_impact_estimate`,
-`victim_scale_raw`, `published_by_user_id`.
-
-**Errors:**
-| Code | Reason | |------|--------| | `404` | Alert not found or not published |
-
-**Quick Test:**
-
-```bash
-curl http://localhost:8000/api/alerts/42
-```
+Every replacement above requires a Supabase JWT and an active subscription — none of these are unauthenticated
+successors to the old public routes. If your integration still calls any left-hand route, it is broken today, not
+merely deprecated.
 
 ---
 
-### 0.3 GET /api/alerts/top *(retired)* — Curated Top Alerts
-
-> **Retired — returns 404.** Replaced by `GET /api/v1/subscriber/alerts/top`.
-
-```
-GET /api/alerts/top
-```
-
-**No authentication required.** Returns the strongest 3 published alerts for a dashboard hero panel. Same response shape
-as `GET /api/alerts` so the same list-card UI can consume it.
-
-**Response `200 OK`:**
-
-```json
-{
-  "alerts": [
-    {
-      "id": 87,
-      "title": "DOJ Indicts Crypto Network in $50M Money Laundering Case",
-      "summary": "...",
-      "category": "Money Laundering",
-      "risk_level": "high",
-      "signal_score": 88,
-      "source_name": "DOJ Press Releases",
-      "source_url": "https://justice.gov/...",
-      "source_published_at": "2026-04-21T13:00:00Z",
-      "published_at": "2026-04-21T15:11:08Z"
-    }
-  ]
-}
-```
-
-Field reference is identical to `0.1 GET /api/alerts` — see that table.
-`signal_score` is on the 0–100 scale; `risk_level` follows the same bands (≥70 High, 40–69 Medium, <40 Low) and is
-server-derived. Same response shape as `GET /api/alerts`, so the existing list-card UI can render Top Alerts without
-changes. **Use `source_published_at` for the date on Top Alerts cards** (same convention as the main list);
-`published_at` is the platform publish time and stays internal-only.
-
-**What `top` selects (deterministic, server-side):**
-
-1. **Threshold:** only published alerts whose normalized `signal_score >= 60`
-   on the 0–100 frontend scale. The threshold sits intentionally below the high cutoff (`signal_score >= 70`) so
-   genuinely strong medium-high alerts qualify.
-2. **Ranking** (descending priority):
-    1. **Score** — the 0–100 `signal_score` wins; higher first.
-    2. **Signal strength** — number of `event_sources` bridges attached to the alert (more sources confirming the event
-       ranks higher).
-    3. **Source credibility** (1–5 from `sources.credibility_score`).
-    4. **Recency** — `source_published_at` → platform `published_at` →
-       `processed_at`, whichever is available first.
-3. **Duplicate-entity suppression** — if the alert's primary entity (first non-empty *non-agency* name from
-   `entities_json["names"]`, lowercase + stripped) has already been claimed by a higher-ranked alert, the alert is
-   skipped. This prevents the panel from showing two cards about the same company / individual / domain. Prosecutor /
-   regulator / law-enforcement names (FBI, DOJ, U.S. Attorney's Office, SEC, OFAC, IC3, IRS, HHS, etc.)
-   are excluded from this match — they appear in nearly every fraud alert and would otherwise collapse unrelated alerts
-   together. When all of an alert's entities are agencies, a per-alert fallback key is used so the alert is never
-   silently dropped.
-4. **Cap:** at most 3 alerts. May return fewer (or `{"alerts": []}`) if not enough alerts qualify — frontend should
-   handle the empty case gracefully.
-
-**No internal fields are exposed.** Score components, AI metadata, raw victim/financial fields, moderation status, and
-`entities_json` are never in the response — same field-leakage protection as `GET /api/alerts`.
-
-**Errors:**
-
-| Status | Reason                                                   |
-|--------|----------------------------------------------------------|
-| `200`  | Always (returns `{"alerts": []}` when nothing qualifies) |
-
-**Quick Test:**
-
-```bash
-# retired  — use GET /api/v1/subscriber/alerts/top (auth required)
-```
-
----
-
-### 0.4 GET /api/alerts/stats — Published Alert Stats *(retired)*
-
-> **Retired — returns 404.** Replaced by `GET /api/v1/subscriber/alerts/stats`.
-
-```
-GET /api/alerts/stats
-```
-
-**No authentication required.**  
-Returns aggregate counts for published alerts only. Use this to drive a summary dashboard panel or stats section.
-
-**Response `200 OK`:**
-
-```json
-{
-  "total_alerts": 42,
-  "high_count": 8,
-  "medium_count": 25,
-  "low_count": 9,
-  "category_breakdown": [
-    {
-      "category": "Investment Fraud",
-      "count": 12
-    },
-    {
-      "category": "Cybercrime",
-      "count": 10
-    },
-    {
-      "category": "Consumer Scam",
-      "count": 8
-    },
-    {
-      "category": "Money Laundering",
-      "count": 7
-    },
-    {
-      "category": "Cryptocurrency Fraud",
-      "count": 5
-    }
-  ]
-}
-```
-
-**Field Reference:**
-
-| Field                           | Type     | Description                                                          |
-|---------------------------------|----------|----------------------------------------------------------------------|
-| `total_alerts`                  | `int`    | Total number of published alerts                                     |
-| `high_count`                    | `int`    | Published alerts with `risk_level = "high"` (`signal_score ≥ 70`)    |
-| `medium_count`                  | `int`    | Published alerts with `risk_level = "medium"` (`signal_score` 40–69) |
-| `low_count`                     | `int`    | Published alerts with `risk_level = "low"` (`signal_score < 40`)     |
-| `category_breakdown`            | `array`  | Per-category counts, ordered by count descending                     |
-| `category_breakdown[].category` | `string` | Fraud category name                                                  |
-| `category_breakdown[].count`    | `int`    | Number of published alerts in that category                          |
-
-**Notes:**
-
-- All aggregates are derived exclusively from published alerts. Unpublished alerts are never counted.
-- Alerts with no `primary_category` are counted in `total_alerts` but excluded from `category_breakdown`.
-- When no alerts are published, all counts are `0` and `category_breakdown` is `[]`.
-
-**Quick Test:**
-
-```bash
-# retired  — use GET /api/v1/subscriber/alerts/stats (auth required)
-```
-
----
-
-### 0.5 GET /api/search/alerts — Search Published Alerts *(retired)*
-
-> **Retired — returns 404.** Replaced by `GET /api/v1/subscriber/search/alerts`.
-
-```
-GET /api/search/alerts?q=Dimitriy&min_score=0&limit=50&group_limit=20
-```
-
-**No authentication required.**
-Free-text search across published alerts only. Returns entity-grouped results plus a flat top-level `alerts` list for
-drilldown. Powered by PostgreSQL ILIKE — no fuzzy / typo / semantic search, no Elasticsearch, no vector DB.
-
-**Query Parameters:**
-
-| Param         | Type   | Required | Default | Behavior                                                                                                                    |
-|---------------|--------|----------|---------|-----------------------------------------------------------------------------------------------------------------------------|
-| `q`           | string | yes      | —       | Trimmed; empty/whitespace → `422`. Case-insensitive. Multi-word treated as a literal phrase.                                |
-| `min_score`   | int    | no       | `0`     | Normalized 0–100 score threshold. Default 0 returns all matching published alerts; pass 40/60/70 for higher-risk filtering. |
-| `limit`       | int    | no       | `50`    | Cap on the top-level `alerts` list. Values `> 100` are **clamped** to 100. Values `< 1` are rejected with 422.              |
-| `group_limit` | int    | no       | `20`    | Cap on alerts inside each group. Values `> 50` are **clamped** to 50. Values `< 1` are rejected with 422.                   |
-
-**Example A — entity match (real production response from `q=Dimitriy`):**
-
-The query matches `Dimitriy Nezhinskiy` in the AI's parsed entity list, so the result lands in an `entity` group and
-`matched_entity` is populated.
-
-```json
-{
-  "query": "Dimitriy",
-  "normalized_query": "dimitriy",
-  "total_alerts": 1,
-  "group_count": 1,
-  "groups": [
-    {
-      "entity": "dimitriy nezhinskiy",
-      "group_type": "entity",
-      "alertCount": 1,
-      "sourceCount": 1,
-      "sources": [
-        "FBI National Press Releases"
-      ],
-      "earliest": "2025-02-07T12:00:00Z",
-      "latest": "2025-02-07T12:00:00Z",
-      "alerts": [
-        {
-          "id": 324,
-          "title": "FBI Announces Nationwide Crackdown on South American Theft Groups",
-          "summary": "The FBI announced a nationwide crackdown on South American Theft Groups (SATGs) involved in a series of burglaries targeting professional athletes' homes. The operation led to the arrest of Dimitriy Nezhinskiy and Juan Villar in Manhattan for running a major fencing operation for stolen goods. ...",
-          "category": "Cybercrime",
-          "risk_level": "medium",
-          "signal_score": 68,
-          "source_name": "FBI National Press Releases",
-          "source_url": "https://www.fbi.gov/news/press-releases/fbi-announces-nationwide-crackdown-on-south-american-theft-groups",
-          "source_published_at": "2025-02-07T12:00:00Z",
-          "published_at": "2026-04-22T20:02:53.432056Z",
-          "matched_entity": "dimitriy nezhinskiy"
-        }
-      ]
-    }
-  ],
-  "alerts": [
-    {
-      "id": 324,
-      "title": "FBI Announces Nationwide Crackdown on South American Theft Groups",
-      "summary": "The FBI announced a nationwide crackdown on South American Theft Groups (SATGs) involved in a series of burglaries targeting professional athletes' homes. ...",
-      "category": "Cybercrime",
-      "risk_level": "medium",
-      "signal_score": 68,
-      "source_name": "FBI National Press Releases",
-      "source_url": "https://www.fbi.gov/news/press-releases/fbi-announces-nationwide-crackdown-on-south-american-theft-groups",
-      "source_published_at": "2025-02-07T12:00:00Z",
-      "published_at": "2026-04-22T20:02:53.432056Z",
-      "matched_entity": "dimitriy nezhinskiy"
-    }
-  ]
-}
-```
-
-**Example B — keyword fallback (real production response from `q=South American Theft Groups`):**
-
-Same alert, but the query phrase is *not* one of the AI's extracted entity names — it appears only in the title/summary.
-The alert lands in a `keyword`
-fallback group and `matched_entity` is `null`.
-
-```json
-{
-  "query": "South American Theft Groups",
-  "normalized_query": "south american theft groups",
-  "total_alerts": 1,
-  "group_count": 1,
-  "groups": [
-    {
-      "entity": "south american theft groups",
-      "group_type": "keyword",
-      "alertCount": 1,
-      "sourceCount": 1,
-      "sources": [
-        "FBI National Press Releases"
-      ],
-      "earliest": "2025-02-07T12:00:00Z",
-      "latest": "2025-02-07T12:00:00Z",
-      "alerts": [
-        {
-          "id": 324,
-          "title": "FBI Announces Nationwide Crackdown on South American Theft Groups",
-          "summary": "...",
-          "category": "Cybercrime",
-          "risk_level": "medium",
-          "signal_score": 68,
-          "source_name": "FBI National Press Releases",
-          "source_url": "https://www.fbi.gov/news/press-releases/fbi-announces-nationwide-crackdown-on-south-american-theft-groups",
-          "source_published_at": "2025-02-07T12:00:00Z",
-          "published_at": "2026-04-22T20:02:53.432056Z",
-          "matched_entity": null
-        }
-      ]
-    }
-  ],
-  "alerts": [
-    {
-      "id": 324,
-      "title": "FBI Announces Nationwide Crackdown on South American Theft Groups",
-      "summary": "...",
-      "category": "Cybercrime",
-      "risk_level": "medium",
-      "signal_score": 68,
-      "source_name": "FBI National Press Releases",
-      "source_url": "https://www.fbi.gov/news/press-releases/fbi-announces-nationwide-crackdown-on-south-american-theft-groups",
-      "source_published_at": "2025-02-07T12:00:00Z",
-      "published_at": "2026-04-22T20:02:53.432056Z",
-      "matched_entity": null
-    }
-  ]
-}
-```
-
-> Frontend hint: render the entity name in `groups[*].entity` as the group
-> heading. When `group_type == "keyword"`, label it something like
-> "Other matches" or echo `normalized_query` directly so the user understands
-> these matched on text rather than a known company / person.
-
-**Empty Response (no matches):**
-
-```json
-{
-  "query": "unknown-company",
-  "normalized_query": "unknown-company",
-  "total_alerts": 0,
-  "group_count": 0,
-  "groups": [],
-  "alerts": []
-}
-```
-
-**Field Reference — top level:**
-
-| Field              | Type     | Description                                                                                                        |
-|--------------------|----------|--------------------------------------------------------------------------------------------------------------------|
-| `query`            | `string` | The query string as the client sent it.                                                                            |
-| `normalized_query` | `string` | Trimmed + lowercased query — useful when the frontend echoes the search term.                                      |
-| `total_alerts`     | `int`    | Number of **unique** matching alerts (deduped by id).                                                              |
-| `group_count`      | `int`    | Number of returned groups (entity groups + the keyword fallback group when present).                               |
-| `groups`           | `array`  | Grouped results. Entity groups first, keyword fallback last.                                                       |
-| `alerts`           | `array`  | Flat unique-by-id list of all matching alerts, capped at `limit`. Ranked by `signal_score` DESC then recency DESC. |
-
-**Field Reference — `groups[*]`:**
-
-| Field         | Type             | Description                                                                                                                         |
-|---------------|------------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| `entity`      | `string`         | Group key — the matched entity name (lowercased + trimmed) for entity groups, or the normalized query for keyword fallback.         |
-| `group_type`  | `string`         | `"entity"` or `"keyword"`.                                                                                                          |
-| `alertCount`  | `int`            | Total alerts in this group **before** `group_limit` truncation.                                                                     |
-| `sourceCount` | `int`            | Number of unique source names in this group.                                                                                        |
-| `sources`     | `array<string>`  | Unique source names (sorted).                                                                                                       |
-| `earliest`    | `datetime\|null` | Earliest timestamp across this group's alerts. Resolves in priority order: `source_published_at` → `published_at` → `processed_at`. |
-| `latest`      | `datetime\|null` | Latest timestamp (same priority order).                                                                                             |
-| `alerts`      | `array`          | Alerts in this group, ranked the same way as the top-level list, capped at `group_limit`.                                           |
-
-**Field Reference — `alerts[*]` and `groups[*].alerts[*]`:**
-
-| Field                 | Type             | Description                                                                                                                                                                                         |
-|-----------------------|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `id`                  | `int`            | Unique alert ID.                                                                                                                                                                                    |
-| `title`               | `string\|null`   | Article / press-release title.                                                                                                                                                                      |
-| `summary`             | `string\|null`   | AI summary (3–5 sentences).                                                                                                                                                                         |
-| `category`            | `string\|null`   | Primary fraud category.                                                                                                                                                                             |
-| `risk_level`          | `string\|null`   | Derived from `signal_score`: `"high"` ≥ 70, `"medium"` 40–69, `"low"` < 40. Lowercase.                                                                                                              |
-| `signal_score`        | `int\|null`      | Normalized 0–100 score. The DB stores 5–25 internally; the API normalizes on the way out.                                                                                                           |
-| `source_name`         | `string\|null`   | Publisher (e.g. "SEC Press Releases").                                                                                                                                                              |
-| `source_url`          | `string\|null`   | Article URL — same as the source link on `/api/alerts/{id}`.                                                                                                                                        |
-| `source_published_at` | `datetime\|null` | Original press-release / article date.                                                                                                                                                              |
-| `published_at`        | `datetime\|null` | When HiddenAlerts published the alert.                                                                                                                                                              |
-| `matched_entity`      | `string\|null`   | The entity that matched (lowercased) when the alert sits in an entity group; the alert's primary parsed-entity match in the top-level list; `null` when the match was on title/summary/source only. |
-
-**Matching rules:**
-
-- Case-insensitive `ILIKE %q%` on title, summary, source name, and `cast(entities_json AS TEXT)`.
-- The JSON-text match is only a SQL candidate filter; `matched_entity` is always sourced from the parsed entity list,
-  never from raw JSON text.
-- Multi-word `q` must appear contiguous in some field — no per-word OR, no fuzzy.
-- Unpublished alerts are excluded by design.
-
-**Grouping rules (entity-first, mixed):**
-
-- Alerts whose parsed entities contain `q` produce one `group_type="entity"` group per distinct matched entity
-  (lowercased + trimmed).
-- An alert tagged with multiple matching entities appears in **every** relevant entity group. `total_alerts` counts
-  unique alerts, so the sum of `alertCount` across groups can exceed `total_alerts`.
-- Alerts that match only via title / summary / source go into a single `group_type="keyword"` fallback group keyed by
-  the normalized query — they are **never dropped**.
-- When no candidate has a parsed entity match, only the keyword fallback group is returned.
-- Entity groups are sorted by `alertCount` DESC, then top-alert `signal_score` DESC. The keyword fallback group is
-  appended last.
-
-**Ranking (groups and full list):**
-
-1. `signal_score` DESC.
-2. Effective recency DESC = `source_published_at` ?? `published_at` ?? `processed_at`.
-
-**Risk filter:**
-
-- `min_score=0` (default) → no filtering.
-- `min_score=40` → high + most-medium alerts (internal `signal_score_total >= 10`).
-- `min_score=70` → high alerts only (internal `signal_score_total >= 18`).
-- Resolution is in steps of 4 on the public scale because the internal scale is integer 5–25.
-
-**Frontend-safe — never returned:**
-review history · score-factor breakdowns · raw `entities_json` · `ai_model` · `victim_scale_raw` ·
-`financial_impact_estimate` · `is_published` · `is_relevant` · `matched_keywords` · `published_by_user_id` · raw HTML /
-text / hashes.
-
-**Quick Tests (verified against production):**
-
-```bash
-# Entity match — produces an entity group with matched_entity populated.
-# retired  — use GET /api/v1/subscriber/search/alerts (auth required)
-
-# Same alert, but the query phrase is not in the AI's parsed entities.
-# Lands in a keyword fallback group; matched_entity is null.
-# retired  — use GET /api/v1/subscriber/search/alerts (auth required)
-
-# Empty query is rejected.
-# retired  — use GET /api/v1/subscriber/search/alerts (auth required)
-# expect: 422
-
-# Higher-risk filter (only alerts with normalized score ≥ 70).
-# retired  — use GET /api/v1/subscriber/search/alerts (auth required)
-
-# Unknown query → empty envelope.
-# retired  — use GET /api/v1/subscriber/search/alerts (auth required)
-```
-
-> **Encoding note:** spaces and special characters in `q` must be URL-encoded.
-> Either use `%20` (e.g. `q=Operation%20Level%20Up`) or pass `-G --data-urlencode "q=..."`
-> as in the SATGs example above. `encodeURIComponent` / `URLSearchParams` on the
-> frontend handles this automatically.
-
-**Notes for Hasnain:**
-
-- The API is unauthenticated for this MVP. Do not gate the search UI behind login.
-- `signal_score` is already on the 0–100 scale — do not divide or multiply on the frontend.
-- Prefer `groups[*].alerts` for an entity-clustered view, and the top-level `alerts` for "show all matches" /
-  pagination-style displays.
-- Display the top entity groups first (entity-first ordering is enforced by the API). The keyword fallback group is
-  appended last.
-- For the keyword fallback group's heading, label it something like "Other matches" rather than echoing the entity field
-  literally — `entity` there is just the normalized query string.
-- An alert may appear in multiple entity groups when it has several matching tags — that's intentional. Use `id` for
-  client-side dedup if you need a single "list view".
-- Multi-word search is a literal phrase. If a user types `binance ftx`, suggest a UX hint or perform two separate
-  searches client-side.
-
----
 
 ## 1. Authentication Overview
 
@@ -1023,9 +530,18 @@ Updates the authenticated user's password.
 
 ## 3. Alerts — Admin
 
-These endpoints return **all** alerts (published and unpublished) and are intended for the admin review workflow.
+These endpoints return **all** alerts (published and unpublished) and are intended for the admin review workflow —
+the React Admin UI, not any server-rendered page.
 
-**Auth required:** Cookie or Bearer token with **any** valid user (checked against `get_current_user`).
+**Auth required:** requires authentication via JWT cookie or Bearer token — any valid user (checked against
+`get_current_user`). This is **not** admin-role-gated today: any authenticated user, not just an admin, can call
+`GET /api/v1/alerts`, `GET /api/v1/alerts/{alert_id}`, and `POST /api/v1/alerts/{alert_id}/review`.
+
+This is **not** the same guard as every route under `/api/v1/admin/*` (categories, source health, system
+health-summary, the Intelligence Brief CMS) — those use `require_admin` and 403 a non-admin authenticated user. Do
+not assume this section's routes and `/api/v1/admin/*` share one auth rule; see §10's route inventory for the exact
+guard per route. A separate, upcoming security-hardening slice is expected to move this section's routes onto
+`require_admin` too — this document describes what runtime enforces **today**, not that future state.
 
 ### 3.1 List Alerts
 
@@ -1033,13 +549,39 @@ These endpoints return **all** alerts (published and unpublished) and are intend
 GET /api/v1/alerts
 ```
 
-**Query Parameters:**
-| Param | Type | Description | |-------|------|-------------| | `risk_level` | string | Filter: `low`, `medium`,
-`high` | | `category` | string | Filter by `primary_category` (exact match) | | `source_id` | int | Filter by source
-ID | | `source` | string | Partial, case-insensitive source name search | | `keyword` | string | Search in title or
-matched keywords | | `start_date` | datetime | ISO 8601 — alerts processed after this time | | `end_date` | datetime |
-ISO 8601 — alerts processed before this time | | `is_relevant` | bool | `true` / `false` | | `is_published` | bool |
-`true` / `false` | | `limit` | int | Default `50`, max `500` | | `offset` | int | Default `0` for pagination |
+**Query Parameters** (all optional):
+
+| Param | Type | Description |
+|---|---|---|
+| `category` | string | Filter by `primary_category` (exact match) |
+| `source_id` | int | Filter by source ID |
+| `source` | string | Partial, case-insensitive source name search |
+| `keyword` | string | Matches title OR `matched_keywords` (case-insensitive) |
+| `start_date` (alias of internal `since`) | datetime | Admin-**operational** filter on `processed_at` (when we processed the item) — not the same as `published_from` |
+| `end_date` | datetime | Also filters `processed_at` |
+| `published_from` / `published_to` | datetime | Alerts HiddenAlerts published on/after / on/before this instant (`published_at`) |
+| `source_published_from` / `source_published_to` | datetime | Alerts whose source article was published on/after / on/before this instant (`source_published_at`) |
+| `is_relevant` | bool | `true` / `false` |
+| `is_published` | bool | `true` / `false` — `true` uses the same canonical Published predicate as the Subscriber feed |
+| `publish_decision` | string | `auto_publish` \| `review` \| `exclude` \| `hold` |
+| `pending_review_reason` | string | V1 pending-review reason enum |
+| `risk_band` | enum | **The only risk filter.** `critical` \| `high` \| `medium` \| `below_60`. Typed in OpenAPI — Swagger renders a dropdown. Always the stored column; never recomputed from `signal_score_total`. There is no `risk_level` filter. |
+| `is_excluded` | bool | Filter excluded alerts |
+| `is_manual_hold` | bool | Filter manually-held alerts |
+| `published_by_rule` | bool | Filter auto-policy-published alerts |
+| `publication_state_source` | string | `auto_policy` \| `manual_admin` \| `candidate_backfill` \| `system_migration` |
+| `limit` | int | Default `50`, max `500` |
+| `offset` | int | Default `0` |
+
+An invalid `publish_decision` / `pending_review_reason` / `publication_state_source` value gets a `422` with the
+allowed set in the error detail. An invalid `risk_band` is rejected by FastAPI's enum validation before the handler
+runs.
+
+**Ordering** (no `sort` param — always one of these three, chosen by which filters are present):
+- `is_published=true` → **canonical Published ordering**, identical to the Subscriber feed:
+  `published_at DESC NULLS LAST, processed_at DESC, id DESC`.
+- `is_published=false` or a specific `publish_decision` given → `processed_at DESC, id DESC`.
+- Neither given ("All Status") → `COALESCE(published_at, processed_at) DESC, processed_at DESC, id DESC`.
 
 **Response `200 OK`** — Array of alert summaries:
 
@@ -1055,26 +597,38 @@ ISO 8601 — alerts processed before this time | | `is_relevant` | bool | `true`
     "primary_category": "Consumer Scam",
     "signal_score_total": 72,
     "relevance_score": 0.72,
-    "matched_keywords": [
-      "elder fraud",
-      "wire transfer"
-    ],
+    "matched_keywords": ["elder fraud", "wire transfer"],
     "is_relevant": true,
     "processed_at": "2026-04-22T14:00:00Z",
+    "source_published_at": "2026-04-20T09:00:00Z",
     "is_published": false,
-    "published_at": null
+    "published_at": null,
+    "risk_band": "high",
+    "publish_decision": "review",
+    "publish_decision_reason": "medium_band_manual_review",
+    "pending_review_reason": "medium_band",
+    "is_excluded": false,
+    "excluded_reason": null,
+    "is_manual_hold": false,
+    "published_by_rule": null,
+    "publishing_policy_version": "v1",
+    "publication_state_source": "auto_policy",
+    "publication_state_updated_at": "2026-04-22T14:00:05Z"
   }
 ]
 ```
 
 **Field Reference:**
-| Field | Description | |-------|-------------| | `signal_score_total` | **Risk score on the 0–100 frontend scale**
-(Ken-approved M3 final). Normalized server-side from the internal 5-factor sum so admin, subscriber, and public
-responses all agree. The internal database column still stores the raw 5–25 sum; only the API response value is
-normalized. | | `relevance_score` | Legacy ratio (`internal_sum / 25`, 0.0–1.0) preserved for backward compatibility.
-**Do not use for risk badge or risk level logic.** Prefer `signal_score_total` (0–100) for any UI display. | |
-`is_published` | Whether admin has approved and published this alert | | `is_relevant` | Whether AI determined the alert
-is relevant (Tier 1/2 vs Tier 3) |
+
+| Field | Description |
+|---|---|
+| `risk_band` | **Canonical.** Straight off the stored `processed_alerts.risk_band` column, verbatim — `null` means the row hasn't been normalized yet, never guessed from score. This is what review-queue filtering and Critical/High/Medium badges are driven by. |
+| `risk_level` | Legacy, **display-only**. On this endpoint it's re-derived from `signal_score_total` at read time purely so an admin reviewer always sees a score-consistent value even for a pre-normalization row — this has **no** effect on badges/filtering/eligibility, which are `risk_band`-only. Do not treat this field as authoritative for anything. |
+| `signal_score_total` | Risk score on the 0–100 frontend scale, normalized server-side from the internal 5-factor sum (DB column stays 5–25 internally). |
+| `relevance_score` | Legacy ratio (`internal_sum / 25`, 0.0–1.0). Not for risk badge/level logic — prefer `signal_score_total` / `risk_band`. |
+| `publish_decision`, `publish_decision_reason`, `pending_review_reason`, `is_excluded`, `excluded_reason`, `is_manual_hold`, `published_by_rule`, `publishing_policy_version`, `publication_state_source`, `publication_state_updated_at` | V1 publication-state fields, admin-only visibility, mirroring the `processed_alerts` columns so a review queue can see *why* an alert is in its current state without opening the detail page. |
+| `is_published` | Whether the alert is currently published to the Subscriber feed |
+| `is_relevant` | Whether AI determined the alert is relevant |
 
 ---
 
@@ -1084,7 +638,8 @@ is relevant (Tier 1/2 vs Tier 3) |
 GET /api/v1/alerts/{alert_id}
 ```
 
-**Response `200 OK`** — Full alert detail including AI output and score breakdown:
+**Response `200 OK`** — Everything from §3.1 plus AI output, score breakdown, event linkage, and a deterministic
+`risk_explanation` object:
 
 ```json
 {
@@ -1094,25 +649,21 @@ GET /api/v1/alerts/{alert_id}
   "source_name": "FBI Press Releases",
   "item_url": "https://www.fbi.gov/news/...",
   "risk_level": "high",
+  "risk_band": "high",
   "primary_category": "Consumer Scam",
   "secondary_category": "Wire Fraud",
   "signal_score_total": 72,
   "relevance_score": 0.72,
-  "matched_keywords": [
-    "elder fraud",
-    "wire transfer"
-  ],
+  "matched_keywords": ["elder fraud", "wire transfer"],
   "is_relevant": true,
   "processed_at": "2026-04-22T14:00:00Z",
+  "source_published_at": "2026-04-20T09:00:00Z",
   "is_published": false,
   "published_at": null,
+  "publish_decision": "review",
+  "pending_review_reason": "medium_band",
   "summary": "The FBI reports...",
-  "entities_json": {
-    "names": [
-      "FBI",
-      "Western Union"
-    ]
-  },
+  "entities_json": { "names": ["FBI", "Western Union"] },
   "financial_impact_estimate": "$3.4 billion",
   "victim_scale_raw": "nationwide",
   "ai_model": "gpt-4o-mini",
@@ -1123,12 +674,37 @@ GET /api/v1/alerts/{alert_id}
   "score_trend_acceleration": 1,
   "event_id": 7,
   "event_title": "Elder Fraud Wave Q1 2026",
-  "review_status": "approved"
+  "review_status": "approved",
+  "published_by_user_id": null,
+  "risk_explanation": {
+    "score_total": 18,
+    "score_100": 72,
+    "risk_level": "high",
+    "risk_band": "high",
+    "factors": {
+      "source_credibility": 5,
+      "financial_impact": 5,
+      "victim_scale": 4,
+      "cross_source": 3,
+      "trend_acceleration": 1
+    },
+    "publication_decision": "review",
+    "publication_reason": "medium_band_manual_review",
+    "pending_review_reason": "medium_band",
+    "source": "FBI Press Releases",
+    "source_credibility": 5
+  }
 }
 ```
 
+`risk_explanation.risk_band` is the stored column reported verbatim (never guessed from `score_100`); `null` means
+not-yet-normalized, not "unqualified." `risk_explanation.risk_level` is still score-derived here too — it's part of
+the same display-only explanation, not an eligibility signal.
+
 **Errors:**
-| Code | Reason | |------|--------| | `404` | Alert not found |
+| Code | Reason |
+|---|---|
+| `404` | Alert not found |
 
 ---
 
@@ -1138,11 +714,11 @@ GET /api/v1/alerts/{alert_id}
 POST /api/v1/alerts/{alert_id}/review
 ```
 
-Admin review action. Approving a relevant alert publishes it to the subscriber feed.
+Admin review action. Approving a relevant alert publishes it (and reconciles its V1 publication state — sets
+`risk_band` from the stored score, `publish_decision=auto_publish`, `publication_state_source=manual_admin`, etc.).
+Marking `false_positive` unpublishes and excludes it.
 
-**Auth required:** Admin role
-
-**Request Body:**
+**Request body — `AlertReviewCreate`:**
 
 ```json
 {
@@ -1152,11 +728,13 @@ Admin review action. Approving a relevant alert publishes it to the subscriber f
 }
 ```
 
-**`review_status` values:**
-| Value | Effect | |-------|--------| | `approved` | Publishes alert if `is_relevant=true` and not already published | |
-`false_positive` | Marks as not relevant; does NOT publish | | `edited` | Saves edits without publishing |
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `review_status` | enum | yes | `approved` \| `false_positive` \| `edited`. `approved` publishes the alert if `is_relevant=true` and not already published. `false_positive` marks it not relevant and unpublishes/excludes it. `edited` saves edits without touching publication state. |
+| `edited_summary` | string \| null | no | Replacement summary, applied for any decision when present. |
+| `adjusted_risk_level` | enum \| null | no | `low` \| `medium` \| `high` \| `critical`. Case-insensitive, stored lower-cased. **Overrides the alert's legacy `risk_level` field only** — display metadata for the reviewer, not a `risk_band` write and not what drives the Critical/High badge. Do not describe this field as controlling publication badges. |
 
-**Response `200 OK`:**
+**Response `200 OK` — `AlertReviewRead`:**
 
 ```json
 {
@@ -1165,97 +743,117 @@ Admin review action. Approving a relevant alert publishes it to the subscriber f
   "user_id": 1,
   "review_status": "approved",
   "edited_summary": null,
-  "adjusted_risk_level": null,
+  "adjusted_risk_level": "high",
   "reviewed_at": "2026-04-22T14:30:00Z"
 }
 ```
 
 **Errors:**
-| Code | Reason | |------|--------| | `404` | Alert not found | | `422` | Invalid `review_status` value |
+| Code | Reason |
+|---|---|
+| `404` | Alert not found |
+| `422` | Invalid `review_status` or `adjusted_risk_level` value |
 
 ---
 
-### 3.4 Trigger Pipeline (Admin)
+### 3.4 Trigger Pipeline (Admin) — hidden from Swagger
 
 ```
 POST /api/v1/alerts/process
 ```
 
-Manually triggers the AI processing pipeline for unprocessed raw items. Runs in background.
-
-**Auth required:** Any authenticated user
+`include_in_schema=False` — still fully live and admin-authenticated at runtime, just not shown in the Swagger UI.
+Operational/internal; not something Hasnain should wire into the frontend. Manually triggers the AI processing
+pipeline for unprocessed raw items, in the background.
 
 **Response `202 Accepted`:**
 
 ```json
-{
-  "message": "Alert processing started",
-  "status": "accepted"
-}
+{ "message": "Alert processing started", "status": "accepted" }
 ```
 
 **Errors:**
-| Code | Reason | |------|--------| | `409` | Pipeline already running |
+| Code | Reason |
+|---|---|
+| `409` | Pipeline already running |
 
 ---
 
-## 4. Alerts — Subscriber (Public Feed)
+## 4. Alerts — Subscriber
 
-These endpoints only return **published** alerts (`is_published = true`). Safe for subscriber-facing mobile/web apps.
+`GET /api/v1/subscriber/*` — the real subscriber alert surface. Only ever returns **published** alerts. Requires a
+**Supabase JWT** (different token system from Admin's Internal JWT) plus, on every route in this section, an
+**active subscription** (`require_active_subscription`).
 
-**Auth required:** Bearer token OR cookie (`subscriber` or `admin` role)
+> Do not confuse this with `GET /api/v1/client/alerts*` — a separate, hidden-from-Swagger, transitional internal API
+> with no known frontend consumer. It is not documented further here; `GET /api/v1/subscriber/alerts*` below is the
+> path to integrate against.
 
-> **Score fields on subscriber endpoints are already normalized** to the
-> 0–100 frontend scale (Ken-approved M3 final). `signal_score_total` carries
-> the same 0–100 value the public feed exposes. `risk_level` is server-derived
-> from that value with the bands ≥70 high, 40–69 medium, <40 low. No
-> client-side normalization is required.
+> **Risk fields:** `signal_score_total` / `signal_score` are already normalized to the 0–100 frontend scale.
+> `risk_band` (`critical`/`high`/`medium`/`below_60`) is the canonical, stored-column badge/filter field — never
+> recomputed from score. `risk_level` (legacy `low`/`medium`/`high`) is present on some items purely for backward
+> display compatibility; it is not authoritative and there is no `risk_level` filter on this API.
 
 ### 4.1 List Published Alerts
 
 ```
-GET /api/v1/client/alerts
+GET /api/v1/subscriber/alerts
 ```
 
-**Query Parameters:**
-| Param | Type | Description | |-------|------|-------------| | `risk_level` | string | Filter: `low`, `medium`,
-`high` | | `category` | string | Filter by `primary_category` | | `source` | string | Partial source name search | |
-`limit` | int | Default `50`, max `500` | | `offset` | int | Default `0` |
+**Query Parameters** (all optional):
+
+| Param | Type | Description |
+|---|---|---|
+| `risk_band` | enum | `critical` \| `high` \| `medium` \| `below_60`. The same canonical parameter Admin accepts. Typed enum in OpenAPI. **No `risk_level` filter exists.** |
+| `category` | string | Exact match |
+| `source` | string | Partial source name search |
+| `published_from` / `published_to` | datetime | Filters `published_at` |
+| `source_published_from` / `source_published_to` | datetime | Filters `source_published_at` |
+| `limit` | int | Default `50`, max `500` |
+| `offset` | int | Default `0` |
+
+**No default freshness window** — omitting every filter returns the full historical Published inventory, not just
+recent alerts.
+
+**Ordering:** canonical Published ordering, identical to Admin's `is_published=true` view:
+`published_at DESC NULLS LAST, processed_at DESC, id DESC`.
 
 **Response `200 OK`:**
 
 ```json
-[
-  {
-    "id": 42,
-    "title": "FBI warns of rising elder fraud losses...",
-    "source_name": "FBI Press Releases",
-    "item_url": "https://www.fbi.gov/news/...",
-    "risk_level": "high",
-    "primary_category": "Consumer Scam",
-    "signal_score_total": 72,
-    "summary": "The FBI reports a significant increase...",
-    "processed_at": "2026-04-22T14:00:00Z",
-    "published_at": "2026-04-22T14:35:00Z",
-    "matched_keywords": [
-      "elder fraud",
-      "wire transfer"
-    ]
-  }
-]
+{
+  "alerts": [
+    {
+      "id": 42,
+      "title": "FBI warns of rising elder fraud losses...",
+      "summary": "The FBI reports a significant increase...",
+      "category": "Consumer Scam",
+      "risk_level": "high",
+      "signal_score": 72,
+      "source_name": "FBI Press Releases",
+      "source_url": "https://www.fbi.gov/news/...",
+      "source_published_at": "2026-04-20T09:00:00Z",
+      "published_at": "2026-04-22T14:35:00Z",
+      "risk_band": "high",
+      "processed_at": "2026-04-22T14:00:00Z"
+    }
+  ]
+}
 ```
 
-> Results are ordered by `published_at DESC` — newest published alerts first.
+`risk_band` is the Critical/High/Medium badge field. `risk_level` is legacy display-only. All three timestamps
+(`published_at`, `source_published_at`, `processed_at`) are present and never aliased to one another (see the
+three-timestamp table near the top of this document).
 
 ---
 
 ### 4.2 Get Published Alert Detail
 
 ```
-GET /api/v1/client/alerts/{alert_id}
+GET /api/v1/subscriber/alerts/{alert_id}
 ```
 
-Returns `404` if the alert exists but is not published (subscriber cannot see unpublished alerts).
+Returns `404` if the alert doesn't exist or isn't published.
 
 **Response `200 OK`:**
 
@@ -1263,36 +861,166 @@ Returns `404` if the alert exists but is not published (subscriber cannot see un
 {
   "id": 42,
   "title": "FBI warns of rising elder fraud losses...",
-  "source_name": "FBI Press Releases",
-  "item_url": "https://www.fbi.gov/news/...",
-  "risk_level": "high",
-  "primary_category": "Consumer Scam",
-  "secondary_category": "Wire Fraud",
-  "signal_score_total": 72,
   "summary": "The FBI reports a significant increase...",
-  "processed_at": "2026-04-22T14:00:00Z",
+  "category": "Consumer Scam",
+  "risk_level": "high",
+  "signal_score": 72,
+  "source_name": "FBI Press Releases",
+  "source_url": "https://www.fbi.gov/news/...",
+  "source_published_at": "2026-04-20T09:00:00Z",
   "published_at": "2026-04-22T14:35:00Z",
-  "matched_keywords": [
-    "elder fraud",
-    "wire transfer"
-  ],
-  "entities": [
-    "FBI",
-    "Western Union",
-    "AARP"
+  "secondary_category": "Wire Fraud",
+  "entities": ["FBI", "Western Union", "AARP"],
+  "risk_band": "high",
+  "risk_explanation": {
+    "score": 72,
+    "risk_band": "high",
+    "risk_level": "high",
+    "confidence": "High",
+    "factors": {"source_credibility": 5, "financial_impact": 5, "victim_scale": 4, "cross_source": 3, "trend_acceleration": 1},
+    "factor_labels": {"source_credibility": "High", "financial_impact": "High", "victim_scale": "Medium", "cross_source": "Medium", "trend_acceleration": "Low"},
+    "primary_exposure": ["Elderly consumers"],
+    "reason_for_score": ["Reported by a highly credible source.", "Significant estimated financial impact."]
+  }
+}
+```
+
+`entities` is a flat `string[]` (unwrapped from the internal `{"names": [...]}` format). `risk_explanation` contains
+**no** internal V1 moderation fields (`publish_decision`, `pending_review_reason`, `publication_state_source`,
+`is_excluded`, …) — it's curated for subscriber display. `risk_explanation.risk_band` is the canonical badge value;
+`risk_explanation.risk_level` is legacy display only.
+
+**Errors:**
+| Code | Reason |
+|---|---|
+| `404` | Alert not found or not published |
+
+---
+
+### 4.3 Alert Stats
+
+```
+GET /api/v1/subscriber/alerts/stats
+```
+
+**Response `200 OK`:**
+
+```json
+{
+  "total_alerts": 142,
+  "critical_count": 9,
+  "high_count": 23,
+  "medium_count": 47,
+  "low_count": 63,
+  "category_breakdown": [
+    {"category": "Investment Fraud", "count": 40},
+    {"category": "Cybercrime", "count": 31}
   ]
 }
 ```
 
-**Note:** `entities` is a flat `string[]` (unwrapped from the internal `{"names": [...]}` format). Internal scoring
-fields (`score_*`, `entities_json`, `ai_model`) are intentionally hidden from this endpoint.
-
-**Errors:**
-| Code | Reason | |------|--------| | `404` | Alert not found or not published |
+The four count buckets are grouped **directly on the stored `risk_band` column** — `critical_count` = `risk_band ==
+"critical"`, `high_count` = `"high"`, `medium_count` = `"medium"`, `low_count` = `"below_60"` — exactly the same
+column the list filter and Admin API use. **Never recomputed from `signal_score_total`.** Because banding is a
+one-time write-time operation, a published row whose `risk_band` is still `null` (pre-normalization legacy data)
+falls into none of the four buckets, so their sum can be less than `total_alerts` — that's accurate uncertainty
+about un-normalized legacy rows, not a bug.
 
 ---
 
-## 5. Events
+### 4.4 Categories
+
+```
+GET /api/v1/subscriber/alerts/categories
+```
+
+Always returns all six canonical categories, in canonical order, including any with a count of `0` — safe to build a
+stable filter dropdown from. `value` is the exact string to pass to `category` on §4.1.
+
+```json
+{
+  "categories": [
+    {"value": "Investment Fraud", "count": 40},
+    {"value": "Cybercrime", "count": 31},
+    {"value": "Consumer Scam", "count": 28},
+    {"value": "Money Laundering", "count": 19},
+    {"value": "Cryptocurrency Fraud", "count": 15},
+    {"value": "Other", "count": 9}
+  ],
+  "total": 142
+}
+```
+
+---
+
+### 4.5 Top Alerts
+
+```
+GET /api/v1/subscriber/alerts/top
+```
+
+See §0.2 above for the full contract (7-day `published_at` window, stored-`risk_band`-gated eligibility, no padding,
+historical fallback, identical field mapper to §4.1).
+
+---
+
+### 4.6 Search
+
+```
+GET /api/v1/subscriber/search/alerts
+```
+
+Free-text search across **published** alerts only, backed by `app/api/search.py`. Powered by PostgreSQL `ILIKE` —
+no fuzzy/typo/semantic search, no Elasticsearch, no vector DB. Case-insensitive; multi-word `q` is a literal phrase,
+not tokenized.
+
+**Query Parameters:**
+
+| Param | Type | Required | Default | Behavior |
+|---|---|---|---|---|
+| `q` | string | yes | — | Trimmed; empty/whitespace → `422`. |
+| `min_score` | int | no | `0` | Normalized 0–100 minimum `signal_score`. Values outside 0–100 are clamped. **There is no `risk_band` filter on search** — `min_score` is the only risk-related knob this endpoint has. |
+| `limit` | int | no | `50` | Cap on the top-level `alerts` list, max `100` (clamped above, rejected `422` below 1). |
+| `group_limit` | int | no | `20` | Cap on alerts inside each group, max `50` (same clamp/reject rules). |
+
+**Matching:** case-insensitive `ILIKE %q%` on `RawItem.title`, `ProcessedAlert.summary`, `Source.name`, and
+`cast(entities_json AS TEXT)` (candidate filter only — `matched_entity` always comes from the parsed entity list,
+never raw JSON text).
+
+**Grouping (entity-first, mixed):** alerts whose parsed entities contain `q` produce one `group_type="entity"` group
+per distinct matched entity; alerts matching only via title/summary/source collect into a single
+`group_type="keyword"` fallback group (never dropped). An alert with multiple matching entities appears in every
+relevant entity group, so `sum(groups[*].alertCount)` can exceed `total_alerts` (which counts unique alerts).
+
+**Ranking** (groups and the flat list): `signal_score` DESC, then effective recency DESC
+(`source_published_at` ?? `published_at` ?? `processed_at`).
+
+**Response shape** — identical to the retired `GET /api/search/alerts` documented in §0.5 below (same
+`SearchResponse` envelope: `query`, `normalized_query`, `total_alerts`, `group_count`, `groups[]`, `alerts[]`); only
+the route and its auth changed, not the behavior. Each alert item carries `risk_level` (legacy, display-only,
+derived from `signal_score`) — search results do **not** carry `risk_band` at all; there is no `risk_band` field or
+filter anywhere in the search response or query parameters. Auth: Supabase JWT + active subscription, same as every
+other route in this section.
+
+**Quick Test:**
+
+```bash
+curl -G "http://localhost:8000/api/v1/subscriber/search/alerts" \
+  --data-urlencode "q=Dimitriy" \
+  --data-urlencode "min_score=0" \
+  -H "Authorization: Bearer <SUPABASE_JWT>"
+```
+
+---
+
+## 5. Events (hidden/internal)
+
+> **Hidden from Swagger** (`include_in_schema=False`). Still fully live and callable, just not shown in the docs UI —
+> operational/internal, not something Hasnain should integrate against.
+>
+> **Note the separate `risk_level`:** this route's `risk_level` query param and response field belong to the
+> `Event` model — an entirely different feature from alert `risk_band`/`risk_level` documented in §3/§4 above. Do not
+> conflate the two; nothing here contradicts the canonical alert risk_band contract because it isn't the same field.
 
 Events group related alerts about the same fraud incident across multiple sources.
 
@@ -1364,7 +1092,12 @@ GET /api/v1/events/{event_id}
 
 ---
 
-## 6. Sources (Admin Settings)
+## 6. Sources (Admin Settings) (hidden/internal)
+
+> **Hidden from Swagger** (`include_in_schema=False`). Still fully live and callable — operational/internal, not
+> something Hasnain should integrate against. (The Admin-facing source-health surface Hasnain *should* use is
+> documented Swagger-visible: `GET /api/v1/admin/sources/health` and `GET /api/v1/admin/sources/{source_id}/health`
+> — not covered in this legacy section, see the live OpenAPI / `README.md` for those.)
 
 Manage the scraping sources. Currently no auth guard — add auth guard before production exposure.
 
@@ -1480,7 +1213,10 @@ Triggers a scraping run for one source in the background.
 
 ---
 
-## 7. Raw Items & Stats
+## 7. Raw Items & Stats (hidden/internal)
+
+> **Hidden from Swagger** (`include_in_schema=False`), including `GET /api/v1/stats` below. Still fully live and
+> callable — operational/internal, not something Hasnain should integrate against.
 
 Internal pipeline data — useful for admin debugging.
 
@@ -1531,7 +1267,8 @@ Includes `raw_text` and `raw_html` fields (full scraped content).
 GET /api/v1/stats
 ```
 
-No auth required. Returns aggregate pipeline statistics.
+Internal Admin JWT required.
+The route is hidden from Swagger but remains mounted for operational use. Returns aggregate pipeline statistics.
 
 **Response `200 OK`:**
 
@@ -1556,7 +1293,11 @@ No auth required. Returns aggregate pipeline statistics.
 
 ---
 
-## 8. Health Check
+## 8. Health Check (hidden/internal)
+
+> **Hidden from Swagger** (`include_in_schema=False`). Still fully live and callable — infra probe, not something
+> Hasnain should integrate against. (The Admin-facing operational health surface Hasnain *should* use is
+> Swagger-visible: `GET /api/v1/admin/system/health-summary`.)
 
 ```
 GET /api/v1/health
@@ -1602,33 +1343,53 @@ No auth required. Use for uptime monitoring / readiness checks.
 
 ---
 
-## 10. Roles & Access Matrix
+## 10. Full Route Inventory & Roles/Access Matrix
 
-| Endpoint                            | `admin` | `subscriber` | No Auth    |
-|-------------------------------------|---------|--------------|------------|
-| `POST /api/v1/auth/login`           | ✅      | ✅           | ✅         |
-| `GET /api/v1/auth/me`               | ✅      | ✅           | ❌ 401     |
-| `GET /api/alerts`                   | ✅      | ✅           | ✅         |
-| `GET /api/alerts/{id}`              | ✅      | ✅           | ✅         |
-| ~~`GET /api/alerts/top`~~           | —       | —            | *retired * |
-| ~~`GET /api/alerts/stats`~~         | —       | —            | *retired * |
-| `POST /api/v1/auth/change-password` | ✅      | ✅           | ❌ 401     |
-| `GET /api/v1/alerts`                | ✅      | ✅           | ❌ 401     |
-| `GET /api/v1/alerts/{id}`           | ✅      | ✅           | ❌ 401     |
-| `POST /api/v1/alerts/{id}/review`   | ✅      | ✅*          | ❌ 401     |
-| `POST /api/v1/alerts/process`       | ✅      | ✅*          | ❌ 401     |
-| `GET /api/v1/client/alerts`         | ✅      | ✅           | ❌ 401     |
-| `GET /api/v1/client/alerts/{id}`    | ✅      | ✅           | ❌ 401     |
-| `GET /api/v1/events`                | ✅      | ✅           | ❌ 401     |
-| `GET /api/v1/events/{id}`           | ✅      | ✅           | ❌ 401     |
-| `GET /api/v1/sources`               | ✅      | ✅           | ✅         |
-| `PATCH /api/v1/sources/{id}`        | ✅      | ✅           | ✅         |
-| `POST /api/v1/sources/{id}/trigger` | ✅      | ✅           | ✅         |
-| `GET /api/v1/raw-items`             | ✅      | ✅           | ✅         |
-| `GET /api/v1/stats`                 | ✅      | ✅           | ✅         |
-| `GET /api/v1/health`                | ✅      | ✅           | ✅         |
+Rewritten 18 August 2026 from the live `app.openapi()` output plus `app/main.py`'s router mounts — 55 routes total, 34
+documented (Swagger-visible) paths. **Admin and Subscriber use different token systems** — Internal JWT vs. Supabase
+JWT — they are not interchangeable, unlike the old admin/subscriber/no-auth matrix below implied.
 
-> *`✅*`* = technically allowed by current auth guard but admin-intended functionality.
+### Documented (Swagger-visible)
+
+| Endpoint | Auth |
+|---|---|
+| `GET /api/alerts` | None — public marketing teaser (§0.1) |
+| `GET /api/v1/alerts`, `POST /api/v1/alerts`, `GET /api/v1/alerts/{alert_id}`, `POST /api/v1/alerts/{alert_id}/review` | JWT cookie or Bearer, **any valid authenticated user** (`get_current_user`) — no role check today. Not the same guard as the row below; see §16 note. §3 |
+| `GET /api/v1/admin/alerts/categories`, `GET /api/v1/admin/sources/health`, `GET /api/v1/admin/sources/{source_id}/health`, `GET /api/v1/admin/system/health-summary` | JWT cookie or Bearer, **`role == "admin"` required** (`require_admin`) — a non-admin authenticated user gets 403, not 401. **Not** the same guard as the row above. |
+| `POST/GET /api/v1/admin/intelligence-briefs`, `GET/PUT /api/v1/admin/intelligence-briefs/{brief_id}`, plus `/archive`, `/feature`, `/unfeature`, `/publish`, `/featured-image` (POST+DELETE) | Same as the `/api/v1/admin/*` row above (`require_admin`) — Admin Intelligence Brief CMS, out of scope for this document; see Swagger |
+| `GET /api/v1/subscriber/access`, `GET /api/v1/subscriber/me` | Supabase JWT only |
+| `GET /api/v1/subscriber/alerts`, `/alerts/categories`, `/alerts/stats`, `/alerts/top`, `/alerts/{alert_id}`, `/search/alerts` | Supabase JWT + active subscription — §4 |
+| `GET /api/v1/subscriber/intelligence-briefs`, `/intelligence-briefs/featured`, `/intelligence-briefs/{slug}` | Supabase JWT + active subscription — out of scope for this document; see Swagger |
+| `POST /api/v1/auth/login` | None (credentials in body) |
+| `POST /api/v1/auth/change-password`, `GET /api/v1/auth/me` | JWT cookie or Bearer |
+| `POST /api/v1/billing/checkout`, `/portal`, `GET /api/v1/billing/status`, `POST /api/v1/billing/sync` | Supabase JWT — out of scope for this document; see Swagger |
+| `POST /api/v1/stripe/webhook` | Stripe signature verification, not JWT |
+
+### Hidden from Swagger (`include_in_schema=False`) — still live, operational/internal only
+
+Not for frontend integration. Listed for developer awareness, not as things Hasnain should call:
+
+`GET /api/v1/client/alerts`, `GET /api/v1/client/alerts/{alert_id}` (retained transitional API, no known frontend
+consumer — do **not** use as the subscriber path; `GET /api/v1/subscriber/alerts` is the real one) · `GET/POST
+/api/v1/events`, `GET /api/v1/events/{event_id}` (§5) · `GET /api/v1/health` (§8) · `GET/PATCH /api/v1/sources`,
+`GET /api/v1/sources/{source_id}`, `GET /api/v1/sources/{source_id}/runs`, `POST /api/v1/sources/{source_id}/trigger`
+(§6) · `GET /api/v1/raw-items`, `GET /api/v1/raw-items/{item_id}`, `GET /api/v1/stats` (§7) · `POST
+/api/v1/alerts/process` (§3.4, manual pipeline trigger, 202).
+
+### Legacy access matrix (kept for the endpoints it still describes correctly)
+
+| Endpoint | `admin` (Internal JWT) | `subscriber` (Supabase JWT) | No Auth |
+|---|---|---|---|
+| `POST /api/v1/auth/login` | ✅ | ✅ | ✅ |
+| `GET /api/v1/auth/me` | ✅ | ✅ | ❌ 401 |
+| `POST /api/v1/auth/change-password` | ✅ | ✅ | ❌ 401 |
+| `GET /api/alerts` | ✅ | ✅ | ✅ |
+| ~~`GET /api/alerts/top`~~ | — | — | *retired, 404* |
+| ~~`GET /api/alerts/{id}`~~ | — | — | *retired, 404* |
+| ~~`GET /api/alerts/stats`~~ | — | — | *retired, 404* |
+| ~~`GET /api/search/alerts`~~ | — | — | *retired, 404* |
+| `GET/POST /api/v1/alerts`, `GET /api/v1/alerts/{id}`, `POST /api/v1/alerts/{id}/review` | ✅ (any authenticated user, not role-gated) | ❌ 401 (different token system) | ❌ 401 |
+| `GET /api/v1/subscriber/*` (alerts, top, stats, categories, search, me, access) | ❌ 401 (different token system) | ✅ (+ active subscription on content routes) | ❌ 401 |
 
 ---
 
@@ -1673,7 +1434,8 @@ running) | | `422` | Validation error — check request body/params | | `500` | 
 ### Setting Up Auth (Recommended Pattern)
 
 ```js
-// auth.js
+// auth.js — Admin surface (Internal JWT). Subscriber surface uses a separate
+// Supabase JWT obtained through Supabase auth, not this endpoint.
 const API_BASE = 'http://localhost:8000/api/v1';
 
 export async function login(email, password) {
@@ -1685,7 +1447,6 @@ export async function login(email, password) {
     });
     if (!res.ok) throw new Error('Login failed');
     const data = await res.json();
-    // Save token for Bearer auth fallback
     localStorage.setItem('access_token', data.access_token);
     return data; // { access_token, user: { id, email, role, ... } }
 }
@@ -1694,46 +1455,35 @@ export function getAuthHeaders() {
     const token = localStorage.getItem('access_token');
     return token ? {Authorization: `Bearer ${token}`} : {};
 }
-
-export async function logout() {
-    localStorage.removeItem('access_token');
-    // Cookie is HttpOnly so clear it server-side if needed,
-    // or just navigate to /login (cookie expires with max-age)
-}
 ```
 
-### Role-Based Routing
-
-```js
-// After login, check role to determine which UI to show:
-if (user.role === 'admin') {
-    // Show admin dashboard: alerts list with review actions, sources settings
-} else if (user.role === 'subscriber') {
-    // Show subscriber feed: only published alerts via /client/alerts
-}
-```
-
-### Admin Dashboard — Recommended Data Flow
+### Admin — Recommended Data Flow
 
 ```
-1. Login → POST /api/v1/auth/login
-2. Load dashboard → GET /api/v1/alerts?is_relevant=true&limit=50
-3. Open alert → GET /api/v1/alerts/{id}
-4. Review alert → POST /api/v1/alerts/{id}/review
-5. View sources → GET /api/v1/sources
-6. Edit source → PATCH /api/v1/sources/{id}
-7. View stats → GET /api/v1/stats
+1. Login                 → POST /api/v1/auth/login
+2. Load review queue     → GET /api/v1/alerts?publish_decision=review&limit=50
+3. Load published/critical → GET /api/v1/alerts?is_published=true&risk_band=critical
+4. Open alert             → GET /api/v1/alerts/{id}
+5. Review alert            → POST /api/v1/alerts/{id}/review
 ```
 
-### Subscriber App — Recommended Data Flow
+There is no server-rendered dashboard, no `/dashboard/*` route, and no source-management flow Hasnain needs to wire
+— `GET/PATCH /api/v1/sources*` are hidden/internal (§6).
+
+### Subscriber — Recommended Data Flow
 
 ```
-1. Login → POST /api/v1/auth/login
-2. Load feed → GET /api/v1/client/alerts?limit=20
-3. Filter by risk → GET /api/v1/client/alerts?risk_level=high
-4. Open alert → GET /api/v1/client/alerts/{id}
-5. Filter by category → GET /api/v1/client/alerts?category=Cybercrime
+1. Authenticate via Supabase, obtain the Supabase JWT
+2. Check access         → GET /api/v1/subscriber/access
+3. Load feed             → GET /api/v1/subscriber/alerts?limit=20
+4. Filter by risk          → GET /api/v1/subscriber/alerts?risk_band=high
+5. Open alert              → GET /api/v1/subscriber/alerts/{id}
+6. Filter by category      → GET /api/v1/subscriber/alerts?category=Cybercrime
+7. Search                  → GET /api/v1/subscriber/search/alerts?q=...
 ```
+
+`GET /api/v1/client/alerts*` is **not** part of this flow — it's a hidden/internal transitional route with no known
+consumer (§4 banner).
 
 ### Pagination
 
@@ -1742,58 +1492,121 @@ if (user.role === 'admin') {
 async function loadAlerts(page = 1, limit = 50) {
     const offset = (page - 1) * limit;
     const res = await fetch(
-        `/api/v1/client/alerts?limit=${limit}&offset=${offset}`,
+        `/api/v1/subscriber/alerts?limit=${limit}&offset=${offset}`,
         {headers: getAuthHeaders()}
     );
     return res.json();
 }
 ```
 
-### Risk Level Color Mapping (Suggested)
+### Risk Band Color Mapping (Suggested)
+
+`risk_band` is the field to key badge color off of — not `risk_level`. There is no `risk_level` filter to send on
+either the Admin or Subscriber alerts endpoint; this is final, not a transition period.
 
 ```js
-const RISK_COLORS = {
-    high: '#DC2626', // red
-    medium: '#D97706', // amber
-    low: '#2563EB', // blue
+const RISK_BAND_COLORS = {
+    critical: '#991B1B', // dark red
+    high: '#DC2626',     // red
+    medium: '#D97706',   // amber
+    below_60: '#6B7280', // gray — excluded from publication, shown only in Admin review views
 };
 
-const RISK_LABELS = {
-    high: 'High Risk',
-    medium: 'Medium Risk',
-    low: 'Low Risk',
+const RISK_BAND_LABELS = {
+    critical: 'Critical',
+    high: 'High',
+    medium: 'Medium',
+    below_60: 'Below 60',
 };
 ```
 
 ### Categories Reference
 
-The following `primary_category` values are used in the system:
+The canonical `category` / `primary_category` values (also servable dynamically from
+`GET /api/v1/subscriber/alerts/categories`, §4.4, or `GET /api/v1/admin/alerts/categories`):
 
 - `Investment Fraud`
 - `Cybercrime`
 - `Consumer Scam`
 - `Money Laundering`
 - `Cryptocurrency Fraud`
+- `Other`
+
+### Copy-Pasteable curl Examples
+
+Replace `<INTERNAL_JWT>` / `<SUPABASE_JWT>` with a real token; these are placeholders, not real credentials.
+
+**Admin — Published Critical alerts:**
+
+```bash
+curl "http://localhost:8000/api/v1/alerts?is_published=true&risk_band=critical" \
+  -H "Authorization: Bearer <INTERNAL_JWT>"
+```
+
+**Admin — Review queue:**
+
+```bash
+curl "http://localhost:8000/api/v1/alerts?publish_decision=review" \
+  -H "Authorization: Bearer <INTERNAL_JWT>"
+```
+
+**Admin — Submit a review action** (approve, with an optional summary edit and legacy display-only
+`adjusted_risk_level` — see §3.3 for why this does not drive the Critical/High badge):
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/alerts/42/review" \
+  -H "Authorization: Bearer <INTERNAL_JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "review_status": "approved",
+        "edited_summary": null,
+        "adjusted_risk_level": "high"
+      }'
+```
+
+**Subscriber — High-risk alerts:**
+
+```bash
+curl "http://localhost:8000/api/v1/subscriber/alerts?risk_band=high" \
+  -H "Authorization: Bearer <SUPABASE_JWT>"
+```
+
+**Subscriber — filtered by source and date range:**
+
+```bash
+curl -G "http://localhost:8000/api/v1/subscriber/alerts" \
+  --data-urlencode "source=FBI" \
+  --data-urlencode "published_from=2026-08-01T00:00:00Z" \
+  --data-urlencode "published_to=2026-08-18T00:00:00Z" \
+  -H "Authorization: Bearer <SUPABASE_JWT>"
+```
+
+**Subscriber — Top Alerts widget:**
+
+```bash
+curl "http://localhost:8000/api/v1/subscriber/alerts/top" \
+  -H "Authorization: Bearer <SUPABASE_JWT>"
+```
 
 ---
 
 ## Appendix: Key Field Glossary
 
-| Field                      | Type              | Description                                                                                                                |
-|----------------------------|-------------------|----------------------------------------------------------------------------------------------------------------------------|
-| `signal_score_total`       | `int` (0–100)     | **Risk score on a 0–100 scale.** Normalized server-side from the 5-factor internal sum. Use this for any UI score display. |
-| `relevance_score`          | `float` (0.0–1.0) | Legacy ratio derived from the internal sum. Prefer `signal_score_total` (0–100).                                           |
-| `risk_level`               | `string`          | M3 final bands derived from the 0–100 score: `low` (1–39), `medium` (40–69), `high` (≥70).                                 |
-| `is_relevant`              | `bool`            | AI determined this alert is actionable                                                                                     |
-| `is_published`             | `bool`            | Admin approved and published to subscriber feed                                                                            |
-| `primary_category`         | `string`          | Main fraud category                                                                                                        |
-| `secondary_category`       | `string\|null`    | Secondary category if applicable                                                                                           |
-| `entities`                 | `string[]`        | Named entities extracted by AI (subscriber view)                                                                           |
-| `entities_json`            | `object\|null`    | Raw AI entity output `{"names": [...]}` (admin view)                                                                       |
-| `matched_keywords`         | `string[]`        | Keywords that triggered this alert                                                                                         |
-| `source_count`             | `int`             | How many sources reported the same event                                                                                   |
-| `score_source_credibility` | `int` (1–5)       | Credibility of originating source                                                                                          |
-| `score_financial_impact`   | `int` (1–5)       | Estimated financial damage score                                                                                           |
-| `score_victim_scale`       | `int` (1–5)       | Number/scale of victims                                                                                                    |
-| `score_cross_source`       | `int` (1–5)       | How many sources corroborate                                                                                               |
-| `score_trend_acceleration` | `int` (1–5)       | Rate of increase in reports                                                                                                |
+| Field | Type | Description |
+|---|---|---|
+| `risk_band` | `string\|null` (`critical`\|`high`\|`medium`\|`below_60`) | **Canonical.** Straight off the stored `processed_alerts.risk_band` column. Never recomputed from score at read time on any endpoint. The only field that should drive badge color, filtering, or eligibility logic. `null` means the row hasn't been normalized yet. |
+| `risk_level` | `string\|null` (legacy `low`\|`medium`\|`high`, sometimes `critical` in review payloads) | **Display-only.** Retained on some response models for backward compatibility. Not filterable on the Admin or Subscriber alerts APIs (there is no `risk_level` query param on either), and not authoritative for badges — use `risk_band` instead. On Admin responses it's re-derived from score at read time purely for reviewer display; that has no effect on publication/badge behavior. |
+| `signal_score_total` / `signal_score` / `score` | `int` (0–100) | Risk score on a 0–100 scale. Normalized server-side from the 5-factor internal sum (DB column stays 5–25 internally). Use for any UI score display. |
+| `relevance_score` | `float` (0.0–1.0) | Legacy ratio derived from the internal sum. Prefer `signal_score_total` (0–100). |
+| `published_at` | `datetime\|null` | When **HiddenAlerts itself** published the alert. Canonical Published ordering sorts on this; `published_from`/`published_to` filter it. Never aliased to the other two timestamps below. |
+| `source_published_at` | `datetime\|null` | The original source article's own publish date. `source_published_from`/`source_published_to` filter it. Never substituted for `published_at`. |
+| `processed_at` | `datetime\|null` | When HiddenAlerts processed/ingested the item. Admin's `start_date`/`end_date` (`since`) filter it — an operational filter, distinct from the two above. |
+| `is_relevant` | `bool` | AI determined this alert is actionable |
+| `is_published` | `bool` | Admin approved and published to the subscriber feed |
+| `publish_decision`, `pending_review_reason`, `is_excluded`, `is_manual_hold`, `published_by_rule`, `publication_state_source` | various | V1 publication-state fields, Admin-only visibility — see §3.1 |
+| `primary_category` / `category` | `string` | Main fraud category — one of the six canonical values (§12 Categories Reference) |
+| `secondary_category` / `subcategory` | `string\|null` | Secondary category if applicable |
+| `entities` | `string[]` | Named entities extracted by AI (subscriber/public view) |
+| `entities_json` | `object\|null` | Raw AI entity output `{"names": [...]}` (admin view only) |
+| `matched_keywords` | `string[]` | Keywords that triggered this alert |
+| `score_source_credibility`, `score_financial_impact`, `score_victim_scale`, `score_cross_source`, `score_trend_acceleration` | `int` (1–5) | Per-factor score breakdown, admin/risk-explanation only |

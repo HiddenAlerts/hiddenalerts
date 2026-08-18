@@ -27,16 +27,15 @@ from app.models.review import AlertReview
 from app.models.event import Event, EventSource
 from app.models.processed_alert import ProcessedAlert
 from app.models.raw_item import RawItem
-from app.models.source import Source
 from app.models.user import User
 from app.pipeline.publishing.constants import (
     DECISION_SOURCES,
     PENDING_REVIEW_REASONS,
     PUBLISH_DECISIONS,
-    RISK_BANDS,
     DecisionSource,
     PendingReviewReason,
     PublishDecisionValue,
+    RiskBandValue,
 )
 from app.pipeline.publishing.publishing_policy import DEFAULT_V1_POLICY
 from app.pipeline.publishing.risk_bands import compute_risk_band
@@ -49,9 +48,12 @@ from app.schemas.alert import (
     ProcessedAlertRead,
     RiskExplanation,
 )
+from app.services.alert_category_service import published_alert_filter
 from app.services.alert_query import (
     PUBLISHED_ORDER_BY,
+    apply_category_filter,
     apply_published_at_filters,
+    apply_source_name_filter,
     apply_source_published_at_filters,
     risk_band_filter,
 )
@@ -300,6 +302,7 @@ def _alert_to_detail(
 _ADMIN_MIXED_STATE_ORDER_BY = (
     func.coalesce(ProcessedAlert.published_at, ProcessedAlert.processed_at).desc(),
     ProcessedAlert.processed_at.desc(),
+    ProcessedAlert.id.desc(),
 )
 
 
@@ -314,11 +317,14 @@ def _admin_list_order_by(is_published: bool | None, publish_decision: str | None
     - Neither filter given ("All Status") — the mixed COALESCE ordering, so a
       brand-new Draft/Review item surfaces near the top rather than behind the
       entire Published history.
+
+    Every branch ends in ``id DESC`` as a deterministic tie-breaker — same
+    reasoning as ``PUBLISHED_ORDER_BY``'s trailing ``id.desc()``.
     """
     if is_published is True:
         return PUBLISHED_ORDER_BY
     if is_published is False or publish_decision is not None:
-        return (ProcessedAlert.processed_at.desc(),)
+        return (ProcessedAlert.processed_at.desc(), ProcessedAlert.id.desc())
     return _ADMIN_MIXED_STATE_ORDER_BY
 
 
@@ -342,7 +348,7 @@ async def list_alerts(
     # V1 publication-state filters (Slice 6) — additive review-queue filters.
     publish_decision: str | None = Query(None, description="V1: auto_publish|review|exclude|hold"),
     pending_review_reason: str | None = Query(None, description="V1 pending-review reason"),
-    risk_band: str | None = Query(None, description="V1 risk band: critical|high|medium|below_60"),
+    risk_band: RiskBandValue | None = Query(None, description="V1 risk band: critical|high|medium|below_60"),
     is_excluded: bool | None = Query(None, description="V1: filter excluded alerts"),
     is_manual_hold: bool | None = Query(None, description="V1: filter manually-held alerts"),
     published_by_rule: bool | None = Query(None, description="V1: filter auto-policy-published alerts"),
@@ -358,10 +364,12 @@ async def list_alerts(
     # Validate enum-like V1 filters against the canonical vocabularies (422 on a
     # bad value rather than silently returning an empty/wrong result). Reuses the
     # exported frozensets — no hardcoded value lists here.
+    # risk_band itself is no longer in this loop — it's a typed RiskBandValue
+    # Query param now, so FastAPI already 422s an invalid value before this
+    # function body ever runs.
     for value, allowed, field in (
         (publish_decision, PUBLISH_DECISIONS, "publish_decision"),
         (pending_review_reason, PENDING_REVIEW_REASONS, "pending_review_reason"),
-        (risk_band, RISK_BANDS, "risk_band"),
         (publication_state_source, DECISION_SOURCES, "publication_state_source"),
     ):
         if value is not None and value not in allowed:
@@ -388,25 +396,28 @@ async def list_alerts(
     if raw_item_join_needed:
         stmt = stmt.join(RawItem, RawItem.id == ProcessedAlert.raw_item_id)
 
-    if category is not None:
-        stmt = stmt.where(ProcessedAlert.primary_category == category)
+    stmt = apply_category_filter(stmt, category=category)
     if since is not None:
         stmt = stmt.where(ProcessedAlert.processed_at >= since)
     if end_date is not None:
         stmt = stmt.where(ProcessedAlert.processed_at <= end_date)
     if is_relevant is not None:
         stmt = stmt.where(ProcessedAlert.is_relevant == is_relevant)
-    if is_published is not None:
-        stmt = stmt.where(ProcessedAlert.is_published == is_published)
+    if is_published is True:
+        # Same canonical Published predicate Subscriber uses — not an
+        # independently-written equivalent that could drift from it.
+        stmt = stmt.where(published_alert_filter())
+    elif is_published is False:
+        stmt = stmt.where(ProcessedAlert.is_published.is_(False))
     if publish_decision is not None:
         stmt = stmt.where(ProcessedAlert.publish_decision == publish_decision)
     if pending_review_reason is not None:
         stmt = stmt.where(ProcessedAlert.pending_review_reason == pending_review_reason)
     if risk_band is not None:
         # Canonical filter (app/services/alert_query.py) — always the stored
-        # column, identical semantics to the Subscriber API and the Admin
-        # Subscriber View. Never recomputed from signal_score_total.
-        stmt = stmt.where(risk_band_filter(risk_band))
+        # column, identical semantics to the Subscriber API. Never recomputed
+        # from signal_score_total.
+        stmt = stmt.where(risk_band_filter(risk_band.value))
     if is_excluded is not None:
         stmt = stmt.where(ProcessedAlert.is_excluded == is_excluded)
     if is_manual_hold is not None:
@@ -417,10 +428,9 @@ async def list_alerts(
         stmt = stmt.where(ProcessedAlert.publication_state_source == publication_state_source)
     if source_id is not None:
         stmt = stmt.where(RawItem.source_id == source_id)
-    if source is not None:
-        stmt = stmt.join(Source, Source.id == RawItem.source_id).where(
-            Source.name.ilike(f"%{source}%")
-        )
+    stmt, _ = apply_source_name_filter(
+        stmt, source=source, raw_item_joined=raw_item_join_needed
+    )
     if keyword is not None:
         # Title OR matched_keywords JSON text contains the keyword (case-insensitive)
         stmt = stmt.where(

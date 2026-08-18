@@ -80,20 +80,21 @@ def _proposed_band(score: int | None) -> str:
 
 
 def _maybe_lock(stmt, session: AsyncSession):
-    """Add FOR UPDATE only on dialects that support it (skip SQLite tests).
+    """Add FOR UPDATE on every dialect except SQLite (no row-level locking).
 
     Mirrors the identical guard in ``app/tools/v1_candidate_backfill_apply.py``
     — same stack, same reason: SQLite (the isolated test DB) has no row-level
-    locking, and the tests never run concurrently against it, so the guard is
-    a no-op there and a real lock against production Postgres.
+    locking, and the tests never run concurrently against it, so it's the one
+    deliberate no-op. This must fail closed: if dialect resolution itself
+    raises, that exception is left to propagate (into ``run()``'s existing
+    apply try/except, which rolls back and reports ``apply_refused``) rather
+    than being swallowed into a silent unlocked continuation. An apply that
+    can't even confirm what database it's talking to must refuse, not guess.
     """
-    try:
-        name = session.get_bind().dialect.name
-    except Exception:
-        name = ""
-    if name and name != "sqlite":
-        return stmt.with_for_update()
-    return stmt
+    name = session.get_bind().dialect.name
+    if name == "sqlite":
+        return stmt
+    return stmt.with_for_update()
 
 
 async def _select_candidates(
@@ -195,8 +196,16 @@ async def run(
         # commit, nothing can change these specific rows underneath us: the
         # values we validate below are guaranteed to be the values still
         # there when we write.
+        # Deterministic acquisition order (id ASC) on every apply invocation —
+        # if two operators ever launch normalization concurrently, both lock
+        # rows in the same order, which avoids the classic two-transactions-
+        # locking-in-opposite-order deadlock rather than leaving lock order to
+        # whatever ``all_ids`` happened to be built in.
         stmt = _maybe_lock(
-            select(ProcessedAlert).where(ProcessedAlert.id.in_(all_ids)), session
+            select(ProcessedAlert)
+            .where(ProcessedAlert.id.in_(all_ids))
+            .order_by(ProcessedAlert.id.asc()),
+            session,
         )
         alerts = {a.id: a for a in (await session.execute(stmt)).scalars().all()}
         missing = [i for i in all_ids if i not in alerts]
