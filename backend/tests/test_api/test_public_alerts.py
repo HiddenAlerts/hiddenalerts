@@ -1,34 +1,26 @@
-"""Tests for the public read-only alerts API — GET /api/alerts/*.
+"""Tests for the unauthenticated Landing Page teaser and the shared
+public/subscriber alert serializers in ``app/api/public_alerts.py``.
 
-Covers M3 Slice 4 new endpoints alongside existing list behaviour:
+Two distinct things share this module because they share implementation:
 
-Public list  (existing):
-  - No auth required
-  - Only published alerts returned
-  - Unpublished alerts never returned
-  - Response shape: { "alerts": [...] }
-  - Correct field mapping
-  - Ordering: newest published_at first
-  - Optional filters (risk_level, category, source, limit/offset)
-  - Backwards compatibility: protected endpoints still require auth
+1. **The real unauthenticated route** — ``GET /api/alerts``, the Landing Page
+   marketing teaser (see the "landing-page teaser" section further down): at
+   most 3 items, a narrow field set, Critical/High only by the stored
+   ``risk_band``. This is the only route in this file that is actually public.
 
-Public detail  (NEW — GET /api/v1/subscriber/alerts/{id}):
-  - No auth required
-  - Returns 200 for a published alert
-  - Returns 404 for an unpublished alert
-  - Returns 404 for a non-existent alert
-  - Response contains only safe public fields
-  - Field mapping is correct (incl. secondary_category, entities, processed_at)
-  - Internal / moderation fields are NOT present
-
-Public stats  (NEW — GET /api/v1/subscriber/alerts/stats):
-  - No auth required
-  - Counts use only published alerts
-  - high_count, medium_count, low_count are correct
-  - total_alerts is the sum of the three
-  - category_breakdown is grouped + ordered correctly
-  - null-category rows are excluded from breakdown
-  - Empty state (no published alerts) returns zeros and empty breakdown list
+2. **Shared-serializer coverage** for the mappers/aggregation helpers this
+   module exports (``_to_public_detail``, ``published_stats_impl``, the
+   enrichment functions). They are no longer reached by any unauthenticated
+   route — the old public detail/stats/search routes they used to back were
+   retired by Slice 3B.2P (see git history) — but they are still exercised
+   today through the Subscriber API endpoints (``GET /api/v1/subscriber/alerts/*``).
+   The module-level, autouse ``_bypass_subscription_gate`` fixture overrides
+   ``require_active_subscription`` to a no-op specifically so those tests
+   exercise serialization/mapping rather than the Subscriber auth stack — the
+   subscription gate itself has its own coverage in the subscriber test
+   modules. A test here succeeding against a Subscriber path with no
+   ``Authorization`` header proves the shared serializer is correct; it does
+   **not** mean that route is unauthenticated in production — it is not.
 """
 from __future__ import annotations
 

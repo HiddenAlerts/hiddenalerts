@@ -133,7 +133,7 @@ hiddenalerts/
 │   │   ├── alerts.py                   # M2: alerts + events REST API
 │   │   ├── auth.py                     # M3: JSON auth endpoints (login, me, change-password)
 │   │   ├── client_alerts.py           # M3: subscriber-safe published alert feed
-│   │   ├── public_alerts.py           # M3 Slice 4: public feed (list, detail, stats) — no auth
+│   │   ├── public_alerts.py           # GET /api/alerts (no-auth teaser) + shared serializers reached via Subscriber routes
 │   │       ├── index.html              # HIGH/MEDIUM/LOW alert panels
 │   │       ├── alert_detail.html       # Score breakdown + review form
 │   │       └── monitoring.html         # Source health + run logs
@@ -150,7 +150,7 @@ hiddenalerts/
 │       ├── test_health.py              # API smoke tests
 │       ├── test_auth.py                # JWT, bcrypt, login endpoint
 │       ├── test_alerts_api.py          # Alerts + events REST API
-│       └── test_public_alerts.py      # M3 Slice 4: public list, detail, stats — no auth
+│       └── test_public_alerts.py      # Landing teaser (no auth) + shared-serializer coverage via Subscriber routes
 ├── .env.example                        # All config variables with defaults
 ├── .env.production.example             # Production config template
 ├── alembic.ini
@@ -288,7 +288,7 @@ http://localhost:8000/docs           → OpenAPI documentation
 | `score_cross_source` | INTEGER | 1–5 |
 | `score_trend_acceleration` | INTEGER | 1–5 |
 | `signal_score_total` | INTEGER | Internal sum of 5 factors (5–25). API responses normalize this to 0–100 before exposing it (the field name in the response is also `signal_score` / `signal_score_total`, but the value is on a 0–100 scale). |
-| `risk_level` | VARCHAR | Legacy `low`/`medium`/`high` band, **display-only**. Not used for filtering, badges, or publication eligibility on any endpoint. |
+| `risk_level` | VARCHAR | Legacy `low`/`medium`/`high` band, **display-only**. Not used for V1 filtering, badges, or publication eligibility on the active Admin and Subscriber Alerts APIs. (The retained hidden Client API is a documented exception — see the Client APIs table below.) |
 | `risk_band` | VARCHAR | **Canonical** V1 band: `critical` / `high` / `medium` / `below_60`. The sole source of truth for badge/filter/eligibility purposes on both the Admin and Subscriber alert APIs — materialized once at write time (pipeline scoring, manual review, or the one-time legacy-row normalization tool) and never recomputed from `signal_score_total` at read time. A `NULL` value means the row hasn't been normalized yet. |
 
 ### Migrations

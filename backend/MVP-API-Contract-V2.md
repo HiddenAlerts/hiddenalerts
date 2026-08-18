@@ -174,16 +174,20 @@ see §3.3). It is **not** authoritative for any badge, filter, or eligibility de
 cosmetic field if your UI still references it, and prefer `risk_band` for anything that drives logic. Where
 `risk_level` is returned, it is still derived from `signal_score_total` for **display purposes on the Admin surface
 only** (so an admin reviewer sees a live score-consistent value even for a pre-normalization row) — this has no
-bearing on badges/filtering, which are `risk_band`-only everywhere.
+bearing on badges/filtering on the **active Admin and Subscriber Alerts APIs**, which are `risk_band`-only. (The
+hidden, transitional Client API is a documented exception — see directly below.)
 
 > The unrelated `GET /api/v1/events` route (hidden/internal, §5) has its own separate `risk_level` query param — a
 > different feature, different field, not part of this contract. Don't conflate the two.
 >
 > **Exception, do not build against this:** the hidden, transitional `GET /api/v1/client/alerts` (§10 — no known
 > frontend consumer, `include_in_schema=False`) still has its own separate, untouched `risk_level` list filter
-> (matching the stored `risk_level` column, not a score recomputation). It predates this contract and was
-> intentionally left alone — it is not part of the Admin/Subscriber `risk_band` contract above and must not be used
-> as a model for either. Use `GET /api/v1/subscriber/alerts` instead.
+> (`_score_filter_for_risk_level` in `app/api/client_alerts.py`). For `low`/`medium`/`high` it is **score-derived**
+> from `signal_score_total` (the same internal 5–25 thresholds as the old M3 bands) — **not** a match against the
+> stored `risk_level` column; any other value falls back to a literal `risk_level` column comparison, which matches
+> nothing for the three documented values. It predates this contract and was intentionally left alone — it is not
+> part of the Admin/Subscriber `risk_band` contract above and must not be used as a model for either. Use
+> `GET /api/v1/subscriber/alerts` instead.
 
 **Three distinct timestamps, never aliased** — this recurs on every alert-bearing endpoint below:
 
