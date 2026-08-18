@@ -76,7 +76,8 @@ export type AdminBriefListItem = {
 export type AdminAlert = {
   id: string;
   title: string;
-  riskScore: number;
+  /** Backend `signal_score_total`. `null` means the alert was not scored. */
+  riskScore: number | null;
   riskLevel?: string;
   riskBand?: string;
   category: string;
@@ -113,7 +114,8 @@ export type AdminAlertDetail = {
   title: string;
   sourceName: string;
   itemUrl: string;
-  riskScore: number;
+  /** Backend `signal_score_total`. `null` means the alert was not scored. */
+  riskScore: number | null;
   riskLevel: string;
   riskBand: string;
   category: string;

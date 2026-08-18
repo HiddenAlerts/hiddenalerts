@@ -2,11 +2,16 @@ import { cn } from '@/lib/utils';
 import type { FC } from 'react';
 
 export type ScoreBadgeProps = {
-  score: number;
+  /** Numeric score. `null` means the backend never scored this item. */
+  score: number | null;
   riskLevel?: string | null;
   riskBand?: string | null;
   className?: string;
 };
+
+function hasNumericScore(score: number | null | undefined): score is number {
+  return typeof score === 'number' && Number.isFinite(score);
+}
 
 /** Numeric score chip whose tone follows backend classification fields. */
 function riskToneClasses(
@@ -34,14 +39,23 @@ export const ScoreBadge: FC<ScoreBadgeProps> = ({
   riskLevel,
   riskBand,
   className,
-}) => (
-  <span
-    className={cn(
-      'inline-flex h-8 min-w-12 items-center justify-center rounded-md border px-2 text-sm font-semibold tabular-nums',
-      riskToneClasses(riskBand, riskLevel),
-      className,
-    )}
-  >
-    {score}
-  </span>
-);
+}) => {
+  const scored = hasNumericScore(score);
+
+  return (
+    <span
+      className={cn(
+        'inline-flex h-8 min-w-12 items-center justify-center rounded-md border px-2 text-sm font-semibold',
+        scored ? 'tabular-nums' : 'text-muted font-medium',
+        scored
+          ? riskToneClasses(riskBand, riskLevel)
+          : 'border-border bg-surface-muted',
+        className,
+      )}
+      title={scored ? undefined : 'Not scored'}
+      aria-label={scored ? undefined : 'Not scored'}
+    >
+      {scored ? score : 'N/A'}
+    </span>
+  );
+};

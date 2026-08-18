@@ -76,7 +76,7 @@ export function mapApiAlertToAdminAlert(record: AdminAlertApiRecord): AdminAlert
   return {
     id: String(record.id),
     title: record.title,
-    riskScore: record.signal_score_total ?? 0,
+    riskScore: record.signal_score_total ?? null,
     riskLevel: record.risk_level,
     riskBand: record.risk_band,
     category: record.primary_category ?? '',
@@ -101,7 +101,7 @@ export function mapApiAlertDetailToAdminAlertDetail(
     title: record.title,
     sourceName: record.source_name,
     itemUrl: record.item_url,
-    riskScore: record.signal_score_total ?? 0,
+    riskScore: record.signal_score_total ?? null,
     riskLevel: record.risk_level,
     riskBand: record.risk_band,
     category: record.primary_category ?? '',

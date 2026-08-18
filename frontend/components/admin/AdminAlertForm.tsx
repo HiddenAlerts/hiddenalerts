@@ -108,8 +108,11 @@ export const AdminAlertForm: FC<AdminAlertFormProps> = ({
               type="number"
               min={0}
               max={100}
-              value={String(alert.riskScore)}
-              onChange={e => update('riskScore', Number(e.target.value) || 0)}
+              value={alert.riskScore == null ? '' : String(alert.riskScore)}
+              onChange={e => {
+                const next = e.target.value;
+                update('riskScore', next === '' ? null : Number(next) || 0);
+              }}
             />
             <Select
               label="Category"

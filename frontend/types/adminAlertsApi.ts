@@ -7,7 +7,7 @@ export type AdminAlertApiRecord = {
   item_url: string;
   risk_level: string;
   primary_category: string;
-  signal_score_total: number;
+  signal_score_total: number | null;
   relevance_score: number;
   matched_keywords: string[];
   is_relevant: boolean;
