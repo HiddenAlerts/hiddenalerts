@@ -104,7 +104,7 @@ unlike an earlier draft of this document implied.
     - [GET /api/alerts *(marketing teaser)*](#01-get-apialerts--public-marketing-teaser)
     - [GET /api/v1/subscriber/alerts/top *(primary + fallback)*](#02-get-apiv1subscriberalertstop--top-alerts-this-week)
     - [Retired public endpoints *(404, historical)*](#03-retired-public-endpoints)
-1. [Authentication Overview](#1-authentication-overview)
+1. [Internal JWT Authentication Overview](#1-authentication-overview)
 2. [Auth Endpoints](#2-auth-endpoints)
 3. [Alerts — Admin](#3-alerts--admin)
 4. [Alerts — Subscriber](#4-alerts--subscriber)
@@ -348,8 +348,17 @@ the list. Otherwise show no notice. Alert rendering is otherwise unchanged.
   `Other`.
   `Other` is a real value — when shown, render it as a low-emphasis label (don't promote it to a primary fraud-type
   badge).
-- **Use `source_published_at` for the date shown on list cards** (it's the article/press-release date — what readers
-  expect). `published_at` is the platform publish time and is mainly an internal/sort key.
+- **`published_at` and `source_published_at` are both real, displayable dates with distinct meanings — do not
+  substitute one for the other, and do not treat `published_at` as merely an internal sort key:**
+  - `published_at` = **Published by HiddenAlerts** — when HiddenAlerts itself published the alert. This is also
+    what canonical Published ordering sorts on (`published_at DESC NULLS LAST, processed_at DESC, id DESC`), so
+    the field that orders the feed and the field you'd label "Published by HiddenAlerts" are the same one.
+  - `source_published_at` = **Original Source Date** — the original article/press-release date, per the source.
+  - `processed_at` = when HiddenAlerts processed the source item (a backend timestamp — useful for a fuller detail
+    view, not usually the headline date on a card).
+  - Which one to feature on a card is a product/UX choice, not a backend constraint — either is a legitimate,
+    intentional display date. Whichever is shown, label it accurately (e.g. "Published by HiddenAlerts" vs.
+    "Original Source Date") rather than presenting one as if it were the other or leaving it unlabeled.
 
 ---
 
@@ -374,7 +383,11 @@ merely deprecated.
 ---
 
 
-## 1. Authentication Overview
+## 1. Internal JWT Authentication Overview
+
+The Internal Admin/account API uses the HiddenAlerts JWT described below.
+The paid Subscriber API uses the separate Supabase JWT system documented
+in Section 4. The two token systems are not interchangeable.
 
 ### How Auth Works
 
@@ -1117,7 +1130,10 @@ GET /api/v1/events/{event_id}
 > documented Swagger-visible: `GET /api/v1/admin/sources/health` and `GET /api/v1/admin/sources/{source_id}/health`
 > — not covered in this legacy section, see the live OpenAPI / `README.md` for those.)
 
-Manage the scraping sources. Currently no auth guard — add auth guard before production exposure.
+Manage the scraping sources.
+
+Auth required: Internal JWT with role == "admin" via require_admin.
+These routes are hidden from Swagger but remain mounted for operational use.
 
 ### 6.1 List Sources
 
@@ -1372,7 +1388,7 @@ JWT — they are not interchangeable, unlike the old admin/subscriber/no-auth ma
 | Endpoint | Auth |
 |---|---|
 | `GET /api/alerts` | None — public marketing teaser (§0.1) |
-| `GET /api/v1/alerts`, `POST /api/v1/alerts`, `GET /api/v1/alerts/{alert_id}`, `POST /api/v1/alerts/{alert_id}/review` | JWT cookie or Bearer, **`role == "admin"` required** (`require_admin`) — a non-admin authenticated user gets 403, not 401. §3 |
+| `GET /api/v1/alerts`, `GET /api/v1/alerts/{alert_id}`, `POST /api/v1/alerts/{alert_id}/review` | JWT cookie or Bearer, **`role == "admin"` required** (`require_admin`) — a non-admin authenticated user gets 403, not 401. §3. (The manual processing trigger `POST /api/v1/alerts/process` uses the same guard but is hidden from Swagger — see the Hidden section below.) |
 | `GET /api/v1/admin/alerts/categories`, `GET /api/v1/admin/sources/health`, `GET /api/v1/admin/sources/{source_id}/health`, `GET /api/v1/admin/system/health-summary` | Same guard as the row above (`require_admin`) |
 | `POST/GET /api/v1/admin/intelligence-briefs`, `GET/PUT /api/v1/admin/intelligence-briefs/{brief_id}`, plus `/archive`, `/feature`, `/unfeature`, `/publish`, `/featured-image` (POST+DELETE) | Same guard as the row above (`require_admin`) — Admin Intelligence Brief CMS, out of scope for this document; see Swagger |
 | `GET /api/v1/subscriber/access`, `GET /api/v1/subscriber/me` | Supabase JWT only |
@@ -1388,8 +1404,8 @@ JWT — they are not interchangeable, unlike the old admin/subscriber/no-auth ma
 Not for frontend integration. Listed for developer awareness, not as things Hasnain should call:
 
 `GET /api/v1/client/alerts`, `GET /api/v1/client/alerts/{alert_id}` (retained transitional API, no known frontend
-consumer — do **not** use as the subscriber path; `GET /api/v1/subscriber/alerts` is the real one) · `GET/POST
-/api/v1/events`, `GET /api/v1/events/{event_id}` (§5) · `GET /api/v1/health` (§8) · `GET/PATCH /api/v1/sources`,
+consumer — do **not** use as the subscriber path; `GET /api/v1/subscriber/alerts` is the real one) ·
+`GET /api/v1/events`, `GET /api/v1/events/{event_id}` (§5) · `GET /api/v1/health` (§8) · `GET/PATCH /api/v1/sources`,
 `GET /api/v1/sources/{source_id}`, `GET /api/v1/sources/{source_id}/runs`, `POST /api/v1/sources/{source_id}/trigger`
 (§6) · `GET /api/v1/raw-items`, `GET /api/v1/raw-items/{item_id}`, `GET /api/v1/stats` (§7) · `POST
 /api/v1/alerts/process` (§3.4, manual pipeline trigger, 202).
@@ -1406,7 +1422,7 @@ consumer — do **not** use as the subscriber path; `GET /api/v1/subscriber/aler
 | ~~`GET /api/alerts/{id}`~~ | — | — | *retired, 404* |
 | ~~`GET /api/alerts/stats`~~ | — | — | *retired, 404* |
 | ~~`GET /api/search/alerts`~~ | — | — | *retired, 404* |
-| `GET/POST /api/v1/alerts`, `GET /api/v1/alerts/{id}`, `POST /api/v1/alerts/{id}/review` | ✅ role=admin only — a role=subscriber Internal JWT gets 403, not ✅ | ❌ 401 (different token system) | ❌ 401 |
+| `GET /api/v1/alerts`, `GET /api/v1/alerts/{id}`, `POST /api/v1/alerts/{id}/review` | ✅ role=admin only — a role=subscriber Internal JWT gets 403, not ✅ | ❌ 401 (different token system) | ❌ 401 |
 | `GET /api/v1/subscriber/*` (alerts, top, stats, categories, search, me, access) | ❌ 401 (different token system) | ✅ (+ active subscription on content routes) | ❌ 401 |
 
 ---

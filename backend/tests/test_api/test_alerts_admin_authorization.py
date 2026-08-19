@@ -42,6 +42,12 @@ from app.models.user import User
 #: (e.g. test_alerts_api.py::test_list_alerts_empty_db).
 _SOURCE_NAME_PREFIX = "AuthzSrc "
 
+#: Every User this module creates uses this email prefix, distinct from the
+#: "{role}_{hex}@test.com" pattern other test modules use (test_alerts_api.py,
+#: test_internal_route_security.py) — so cleanup here can never touch a user
+#: row another module created and still needs within the same test session.
+_USER_EMAIL_PREFIX = "authz_"
+
 
 @pytest.fixture(autouse=True)
 async def _cleanup_seeded_alerts(db_session):
@@ -52,24 +58,36 @@ async def _cleanup_seeded_alerts(db_session):
             select(Source.id).where(Source.name.startswith(_SOURCE_NAME_PREFIX))
         )
     ).scalars().all()
-    if not source_ids:
-        return
-    raw_ids = (
-        await db_session.execute(
-            select(RawItem.id).where(RawItem.source_id.in_(source_ids))
-        )
-    ).scalars().all()
-    if raw_ids:
-        await db_session.execute(
-            delete(AlertReview).where(
-                AlertReview.alert_id.in_(
-                    select(ProcessedAlert.id).where(ProcessedAlert.raw_item_id.in_(raw_ids))
+    if source_ids:
+        raw_ids = (
+            await db_session.execute(
+                select(RawItem.id).where(RawItem.source_id.in_(source_ids))
+            )
+        ).scalars().all()
+        if raw_ids:
+            await db_session.execute(
+                delete(AlertReview).where(
+                    AlertReview.alert_id.in_(
+                        select(ProcessedAlert.id).where(ProcessedAlert.raw_item_id.in_(raw_ids))
+                    )
                 )
             )
+            await db_session.execute(delete(ProcessedAlert).where(ProcessedAlert.raw_item_id.in_(raw_ids)))
+            await db_session.execute(delete(RawItem).where(RawItem.id.in_(raw_ids)))
+        await db_session.execute(delete(Source).where(Source.id.in_(source_ids)))
+
+    # Any AlertReview a *forbidden* request might unexpectedly have created
+    # references a user_id from this module — delete those before the users
+    # themselves, in case the negative-mutation test ever regresses.
+    module_user_ids = (
+        await db_session.execute(
+            select(User.id).where(User.email.startswith(_USER_EMAIL_PREFIX))
         )
-        await db_session.execute(delete(ProcessedAlert).where(ProcessedAlert.raw_item_id.in_(raw_ids)))
-        await db_session.execute(delete(RawItem).where(RawItem.id.in_(raw_ids)))
-    await db_session.execute(delete(Source).where(Source.id.in_(source_ids)))
+    ).scalars().all()
+    if module_user_ids:
+        await db_session.execute(delete(AlertReview).where(AlertReview.user_id.in_(module_user_ids)))
+        await db_session.execute(delete(User).where(User.id.in_(module_user_ids)))
+
     await db_session.commit()
 
 # (method, path) for every hardened admin-only Alert/Event route, concrete ids.
@@ -84,7 +102,7 @@ PROTECTED_ROUTES = [
 
 async def _make_user(db_session, role: str = "admin", is_active: bool = True) -> User:
     user = User(
-        email=f"{role}_{uuid.uuid4().hex[:8]}@test.com",
+        email=f"{_USER_EMAIL_PREFIX}{role}_{uuid.uuid4().hex[:8]}@test.com",
         password_hash=hash_password("pw"),
         is_active=is_active,
         role=role,
@@ -243,6 +261,88 @@ async def test_admin_gets_404_for_unknown_event(client, db_session):
     admin = await _make_user(db_session, role="admin")
     resp = await client.get("/api/v1/events/99999999", headers=_auth(admin))
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Review endpoint — complete 401/403/success matrix (Final Polish item 3).
+# POST /api/v1/alerts/{alert_id}/review is not in the generic PROTECTED_ROUTES
+# parametrization above (those requests send no body, and this route always
+# needs one) — each identity/token scenario is proven explicitly here instead,
+# against a real alert id and a valid review payload, so only the auth
+# boundary is under test.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_review_no_token_is_401(client, db_session):
+    alert = await _seed_alert(db_session)
+    resp = await client.post(
+        f"/api/v1/alerts/{alert.id}/review", json={"review_status": "approved"}
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_review_invalid_internal_token_is_401(client, db_session):
+    alert = await _seed_alert(db_session)
+    resp = await client.post(
+        f"/api/v1/alerts/{alert.id}/review",
+        json={"review_status": "approved"},
+        headers={"Authorization": "Bearer not-a-real-token"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_review_inactive_admin_token_is_401(client, db_session):
+    """get_current_user rejects an inactive account with 401 before
+    require_admin's role check ever runs — the 403 branch is unreachable."""
+    alert = await _seed_alert(db_session)
+    admin = await _make_user(db_session, role="admin", is_active=False)
+    resp = await client.post(
+        f"/api/v1/alerts/{alert.id}/review",
+        json={"review_status": "approved"},
+        headers=_auth(admin),
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_review_supabase_shaped_token_is_401(client, db_session):
+    """Subscriber token isolation: a Supabase JWT must not become an Internal
+    Admin credential for the review mutation either."""
+    alert = await _seed_alert(db_session)
+    resp = await client.post(
+        f"/api/v1/alerts/{alert.id}/review",
+        json={"review_status": "approved"},
+        headers={"Authorization": f"Bearer {_supabase_shaped_token()}"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_review_active_non_admin_internal_jwt_is_403(client, db_session):
+    alert = await _seed_alert(db_session)
+    subscriber = await _make_user(db_session, role="subscriber")
+    resp = await client.post(
+        f"/api/v1/alerts/{alert.id}/review",
+        json={"review_status": "approved"},
+        headers=_auth(subscriber),
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_review_admin_gets_existing_success_behavior(client, db_session):
+    alert = await _seed_alert(db_session, is_relevant=True)
+    admin = await _make_user(db_session, role="admin")
+    resp = await client.post(
+        f"/api/v1/alerts/{alert.id}/review",
+        json={"review_status": "approved"},
+        headers=_auth(admin),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["review_status"] == "approved"
 
 
 # ---------------------------------------------------------------------------

@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # listed here.
 OPENAPI_TAGS = [
     {"name": "public", "description": "Unauthenticated Landing Page teaser. No token required."},
-    {"name": "auth", "description": "Admin login and profile. `POST /auth/login` issues the internal Admin JWT."},
+    {"name": "auth", "description": "Internal account login and profile. `POST /api/v1/auth/login` issues the Internal HiddenAlerts JWT."},
     {"name": "subscriber", "description": "Subscriber account and alert APIs. Supabase authentication required; paid-content routes additionally require an active subscription."},
     {"name": "subscriber-intelligence-briefs", "description": "Published Intelligence Briefs for subscribers."},
     {"name": "billing", "description": "Stripe checkout, customer portal and subscription status."},

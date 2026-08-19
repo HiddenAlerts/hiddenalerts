@@ -531,9 +531,10 @@ both the Admin and Subscriber alert APIs:
 | `medium` | 60–69 | 15–17 |
 | `below_60` | <60 (or unset) | ≤14 / `NULL` |
 
-The legacy `risk_level` column (`low`/`medium`/`high`) still exists and is
-returned on some responses for backward display compatibility, but it is
-**not** used for filtering, badges, or publish eligibility anywhere.
+The legacy `risk_level` column is not used for V1 filtering, badges, or
+publication eligibility on the active Admin and Subscriber Alerts APIs.
+
+The retained hidden Client API has its own documented legacy risk_level filter.
 
 **V1 auto-publish policy (`DEFAULT_V1_POLICY`):** an alert is auto-published only when **all** conditions hold:
 
@@ -559,7 +560,12 @@ Shared Internal JWT authentication is unchanged — `POST /api/v1/auth/login`,
 ## API Endpoints
 
 Base URL: `http://localhost:8000`  
-Authenticated endpoints accept either a valid `access_token` cookie **or** an `Authorization: Bearer <token>` header. Cookie takes priority when both are present.
+**Internal JWT APIs** (`/api/v1/alerts*`, `/api/v1/events*`, `/api/v1/admin/*`, `/api/v1/auth/*`, Sources, Raw Items,
+Stats) accept either a valid `access_token` cookie **or** an `Authorization: Bearer <token>` header carrying the
+Internal HiddenAlerts JWT. Cookie takes priority when both are present. **Subscriber APIs**
+(`/api/v1/subscriber/*`, billing) are a separate token system: `Authorization: Bearer <token>` carrying a Supabase
+JWT, no cookie. The two systems are not interchangeable — an Internal JWT is rejected by Subscriber routes and a
+Supabase JWT is rejected by Internal JWT routes.
 
 > **Subscriber vs internal endpoints:**  
 > `/api/v1/subscriber/alerts` and `/api/v1/subscriber/alerts/{id}` (Supabase JWT + active subscription) are the
@@ -722,22 +728,14 @@ Tests use an in-memory SQLite database — no PostgreSQL or OpenAI key required.
 pytest tests/ -v
 ```
 
-**265 tests, 0 failures.** Test breakdown:
-
-| File | Tests | What it covers |
-|------|-------|---------------|
-| `test_normalizer.py` | 13 | URL normalization, SHA-256 hashing, text extraction, date parsing |
-| `test_keyword_filter.py` | 13 | Word boundary matching, case sensitivity, multi-word phrases, deduplication |
-| `test_ai_processor.py` | 8 | Mock OpenAI, rate-limit retry, max retries exhaustion, short text skip; SYSTEM_PROMPT financial-risk-intelligence scope (OFAC, sanctions, governance, liquidity, network exposure); cybercrime/organized-crime conditional relevance |
-| `test_alert_pipeline.py` | 7 | Tier1 auto-publish guard (allowed category + score + credibility + is_relevant); Other category never auto-publishes; irrelevant alert never auto-publishes; manual admin can publish Other; M3 final tier1 — Medium score auto-publishes from credible source, Medium score from low-credibility source does NOT auto-publish, Low score never auto-publishes |
-| `test_event_grouper.py` | 6 | Event creation, entity overlap matching, 7-day window, cross-source recalculation |
-| `test_health.py` | 5 | API health, sources, raw-items, stats smoke tests |
-| `test_auth.py` | 29 | Password/JWT utilities; JSON login (admin + subscriber); Bearer + cookie auth; change-password; role enforcement; inactive-account handling. Since 06 August 2026: asserts the removed Jinja `/login`, `/logout` and `/dashboard*` routes return 404 while `POST /api/v1/auth/login` still authenticates and still rejects bad credentials. |
-| `test_alerts_api.py` | 21 | Auth gate, list/filter/detail, 202 trigger, 409 lock, review validation; publication state; approval publish; client feed access control |
-| `test_public_alerts.py` | 71 | Public Landing feed `GET /api/alerts` (no auth, published-only, field mapping, ordering, filters, pagination). Since 06 August 2026 the shared-serializer coverage (`_to_public_read`, `_to_public_detail`, `published_stats_impl`, enrichment) runs through the retained Subscriber endpoints, plus regression tests asserting the four removed public routes return 404 — the detail check uses a known-existing alert id. |
-| `test_signal_scorer.py` | 42 | All 5 scoring factors; M3 final 0–100-aligned bands (≤9 low, 10–17 medium, ≥18 high); boundary tests including the new band-shift cases (16/17 now Medium, 18 is the new High floor); recalibrated victim/financial buckets; realistic alert scenarios |
-| `test_search_api.py` | 37 | Alert search via `GET /api/v1/subscriber/search/alerts` — matching across title/summary/source/parsed entities (case-insensitive, partial, multi-word literal phrase), unpublished excluded, entity grouping with multi-entity dedup, mixed-mode entity + keyword fallback, group ordering, `alertCount`/`sourceCount`, `group_limit` cap, `signal_score` DESC + recency tiebreaker, `min_score` boundaries, clamping and 422s. The public `/api/search/alerts` route was removed on 06 August 2026; these assertions were repointed to the subscriber route and one asserts the old path now 404s. |
-| **Total** | **265** | |
+Major areas covered: pipeline (normalizer, keyword filter, AI processor, signal scorer, event grouper, publish
+policy), Admin/Subscriber Alerts APIs (auth, filters, ordering, review, risk_band alignment), the public Landing
+teaser, search, auth/JWT/role enforcement, the risk_band normalization tool, and the OpenAPI/route-inventory
+contract tests. The suite grows with the codebase — treat any specific test count here as a snapshot that goes
+stale immediately, not a contract. **A release candidate requires the full suite to run with zero failures and
+zero errors** (intentional, individually-understood skips may remain); run `pytest tests/ -v` from a checkout with
+the complete repository/build context (not a partial copy — the Docker-build-context tests need the root
+`.dockerignore`/`Dockerfile`/etc. to exist) and treat anything short of that as not release-ready.
 
 ---
 
