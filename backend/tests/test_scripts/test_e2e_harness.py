@@ -530,41 +530,74 @@ def test_zero_count_categories_must_be_retained():
 
 
 def test_top_alerts_empty_is_accepted():
-    assert checks.check_top_alerts({"alerts": []}) == []
+    assert checks.check_top_alerts(
+        {"alerts": [], "is_fallback": False, "message": None}
+    ) == []
 
 
 def test_top_alerts_enforces_maximum_of_three():
-    alert = {"risk_level": "critical", "published_at": "2026-08-01T00:00:00Z",
-             "source_published_at": None}
-    assert any("maximum is 3" in p for p in checks.check_top_alerts({"alerts": [alert] * 4}))
+    alert = {"risk_band": "critical", "published_at": "2026-08-01T00:00:00Z",
+             "source_published_at": None, "processed_at": "2026-08-01T00:00:00Z"}
+    payload = {"alerts": [alert] * 4, "is_fallback": False, "message": None}
+    assert any("maximum is 3" in p for p in checks.check_top_alerts(payload))
 
 
-def test_top_alerts_rejects_medium_risk():
-    alert = {"risk_level": "medium", "published_at": "2026-08-01T00:00:00Z",
-             "source_published_at": None}
-    problems = checks.check_top_alerts({"alerts": [alert]})
+def test_top_alerts_rejects_medium_band():
+    alert = {"risk_band": "medium", "published_at": "2026-08-01T00:00:00Z",
+             "source_published_at": None, "processed_at": "2026-08-01T00:00:00Z"}
+    payload = {"alerts": [alert], "is_fallback": False, "message": None}
+    problems = checks.check_top_alerts(payload)
     assert any("neither critical nor high" in p for p in problems)
 
 
-def test_top_alerts_display_date_rule():
-    """published_at must equal source_published_at when the source date exists."""
-    good = {"risk_level": "high", "published_at": "2026-07-01T00:00:00Z",
-            "source_published_at": "2026-07-01T00:00:00Z"}
-    assert checks.check_top_alerts({"alerts": [good]}) == []
+def test_top_alerts_allows_published_at_and_source_published_at_to_differ():
+    """Final contract: the two timestamps are independent — never required to
+    match, and published_at must never be overwritten with source_published_at."""
+    differing = {"risk_band": "high", "published_at": "2026-08-02T00:00:00Z",
+                 "source_published_at": "2026-01-14T10:30:00Z",
+                 "processed_at": "2026-08-02T00:05:00Z"}
+    payload = {"alerts": [differing], "is_fallback": False, "message": None}
+    assert checks.check_top_alerts(payload) == []
 
-    bad = {"risk_level": "high", "published_at": "2026-08-02T00:00:00Z",
-           "source_published_at": "2026-07-01T00:00:00Z"}
-    assert any("should equal source_published_at" in p
-               for p in checks.check_top_alerts({"alerts": [bad]}))
+    matching = {"risk_band": "high", "published_at": "2026-07-01T00:00:00Z",
+                "source_published_at": "2026-07-01T00:00:00Z",
+                "processed_at": "2026-07-01T00:05:00Z"}
+    payload_matching = {"alerts": [matching], "is_fallback": False, "message": None}
+    assert checks.check_top_alerts(payload_matching) == []
 
-    fallback = {"risk_level": "high", "published_at": "2026-08-02T00:00:00Z",
-                "source_published_at": None}
-    assert checks.check_top_alerts({"alerts": [fallback]}) == []
+    no_source_date = {"risk_band": "high", "published_at": "2026-08-02T00:00:00Z",
+                       "source_published_at": None,
+                       "processed_at": "2026-08-02T00:05:00Z"}
+    payload_no_source = {"alerts": [no_source_date], "is_fallback": False, "message": None}
+    assert checks.check_top_alerts(payload_no_source) == []
 
 
 def test_top_alerts_requires_source_published_at_field_present():
-    alert = {"risk_level": "high", "published_at": "2026-08-02T00:00:00Z"}
-    assert any("separately present" in p for p in checks.check_top_alerts({"alerts": [alert]}))
+    alert = {"risk_band": "high", "published_at": "2026-08-02T00:00:00Z",
+             "processed_at": "2026-08-02T00:05:00Z"}
+    payload = {"alerts": [alert], "is_fallback": False, "message": None}
+    assert any("separately present" in p for p in checks.check_top_alerts(payload))
+
+
+def test_top_alerts_fallback_flag_requires_a_message():
+    alert = {"risk_band": "high", "published_at": "2026-01-01T00:00:00Z",
+             "source_published_at": None, "processed_at": "2026-01-01T00:05:00Z"}
+    missing_message = {"alerts": [alert], "is_fallback": True, "message": None}
+    assert any("message is missing" in p for p in checks.check_top_alerts(missing_message))
+
+    with_message = {"alerts": [alert], "is_fallback": True,
+                     "message": "No new Critical or High alerts this week."}
+    assert checks.check_top_alerts(with_message) == []
+
+
+def test_top_alerts_non_fallback_must_not_carry_a_message():
+    payload = {"alerts": [], "is_fallback": False, "message": "should not be here"}
+    assert any("is not null" in p for p in checks.check_top_alerts(payload))
+
+
+def test_top_alerts_fallback_true_with_no_alerts_is_a_problem():
+    payload = {"alerts": [], "is_fallback": True, "message": "stale message"}
+    assert any("must only be claimed" in p for p in checks.check_top_alerts(payload))
 
 
 def test_public_alerts_must_not_leak_private_fields():
@@ -1258,7 +1291,9 @@ def _smoke_handler(missing: tuple[str, ...] = ()):
         if path == production_smoke.SUBSCRIBER_SEARCH_PATH:
             return httpx.Response(200, json={"alerts": []})
         if path == production_smoke.SUBSCRIBER_TOP_PATH:
-            return httpx.Response(200, json={"alerts": []})
+            return httpx.Response(
+                200, json={"alerts": [], "is_fallback": False, "message": None}
+            )
         if path == production_smoke.CLIENT_ALERTS_PATH:
             if not _admin_authed(request):
                 return unauthenticated
@@ -1482,10 +1517,15 @@ def test_legacy_top_alerts_pass_pre_deploy():
 
 
 def test_legacy_top_alerts_fail_post_deploy():
+    """Legacy payloads have no risk_band or is_fallback/message — the final
+    contract's fields, not the (removed) date-equality rule."""
     problems = checks.check_top_alerts(
         PRODUCTION_LEGACY_TOP_ALERTS, weekly_contract=True)
-    assert len(problems) == 3
-    assert all("should equal source_published_at" in p for p in problems)
+    assert any("is_fallback is not present" in p for p in problems)
+    assert all("risk_band" in p and "neither critical nor high" in p
+               for p in problems if "risk_band" in p)
+    assert sum("risk_band" in p for p in problems) == 3
+    assert not any("should equal source_published_at" in p for p in problems)
 
 
 def test_shape_rules_apply_in_both_modes():
@@ -1503,7 +1543,7 @@ def test_shape_rules_apply_in_both_modes():
 
 def test_medium_risk_allowed_pre_deploy_rejected_post_deploy():
     """The legacy implementation admits Medium; the weekly contract does not."""
-    medium = {"alerts": [{"risk_level": "medium",
+    medium = {"alerts": [{"risk_band": "medium",
                           "published_at": "2026-08-01T00:00:00Z",
                           "source_published_at": "2026-08-01T00:00:00Z"}]}
     assert checks.check_top_alerts(medium, weekly_contract=False) == []

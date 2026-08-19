@@ -29,9 +29,9 @@ HEALTH_EXTERNAL_COUNTERS = (
 #: Invalid-content telemetry on a `SourceHealthRead`, kept deliberately separate.
 HEALTH_INVALID_COUNTER = "items_skipped_invalid_24h"
 
-#: Subscriber Top Alerts shows at most three, Critical and High only.
+#: Subscriber Top Alerts shows at most three, Critical and High only (stored
+#: risk_band eligibility — see check_top_alerts).
 TOP_ALERTS_MAX = 3
-HIGH_MIN_SCORE_100 = 72  # public payloads expose the 0–100 scale
 
 
 class Problem(str):
@@ -256,29 +256,59 @@ def missing_zero_count_categories(payload: Any) -> list[str]:
 
 
 def check_top_alerts(payload: Any, *, weekly_contract: bool = True) -> list[str]:
-    """Validate Subscriber Top Alerts.
+    """Validate Subscriber Top Alerts against the final 18 August contract.
 
-    An **empty list is a valid result**, not a failure: the window is the last
-    seven days and a genuinely quiet week qualifies nothing. The contract
-    deliberately has no fallback to older alerts.
+    An **empty ``alerts`` list is a valid primary-window result**, not a
+    failure: the primary window is the last seven days and a genuinely quiet
+    week qualifies nothing there. Unlike an earlier revision of this check, the
+    contract does **not** mean "no fallback exists" — when the primary 7-day
+    result is empty, the endpoint falls back to the latest qualifying
+    historical (stored ``risk_band`` critical/high) alerts, setting
+    ``is_fallback: true`` and a non-null ``message``. An empty ``alerts`` list
+    with ``is_fallback: false`` means no qualifying alert exists at all, ever —
+    that is the only case with nothing to show.
 
     ``weekly_contract`` selects which release's semantics apply. The endpoint
     path exists in both, so presence alone cannot tell them apart:
 
-    * **True** (post-deploy) — the Slice 3B.2J contract: Critical/High only, and
-      ``published_at`` mirrors ``source_published_at`` when the source date is
-      known.
-    * **False** (pre-deploy) — the legacy all-time implementation, which admits
-      Medium and reports the platform publication date. Only the shape-level
-      rules are asserted, so a correct pre-deployment API does not read as broken.
+    * **True** (post-deploy, current) — the final contract: eligibility is the
+      **stored** ``risk_band`` column (critical/high only, never recomputed
+      from score), and ``published_at`` is HiddenAlerts' own publish time —
+      **never** overwritten with ``source_published_at``, which remains its
+      own independent field. The two are legitimately allowed to differ (and
+      very often do); this check does not require them to match.
+    * **False** (pre-deploy / legacy) — the pre-alignment all-time
+      implementation, which admits Medium and reports the platform publication
+      date. Only the shape-level rules are asserted, so a correct
+      pre-deployment API does not read as broken.
     """
     problems: list[str] = []
     if isinstance(payload, dict):
         alerts = payload.get("alerts")
+        is_fallback = payload.get("is_fallback")
+        message = payload.get("message")
     else:
         alerts = payload
+        is_fallback = None
+        message = None
     if not isinstance(alerts, list):
         return [f"expected an alerts list, got {type(payload).__name__}"]
+
+    if isinstance(payload, dict) and weekly_contract:
+        if not isinstance(is_fallback, bool):
+            problems.append("is_fallback is not present or not a boolean")
+        else:
+            if is_fallback and not (isinstance(message, str) and message.strip()):
+                problems.append("is_fallback is true but message is missing/empty")
+            if not is_fallback and message is not None:
+                problems.append(
+                    f"is_fallback is false but message is not null (got {message!r})"
+                )
+            if is_fallback and not alerts:
+                problems.append(
+                    "is_fallback is true but alerts is empty — a fallback must "
+                    "only be claimed when it actually produced something"
+                )
 
     # Both implementations cap at three.
     if len(alerts) > TOP_ALERTS_MAX:
@@ -290,34 +320,32 @@ def check_top_alerts(payload: Any, *, weekly_contract: bool = True) -> list[str]
             problems.append(f"{where}: not an object")
             continue
 
-        # The field must be exposed in both releases.
+        # The field must be exposed in both releases, and independently of
+        # published_at — never a copy of it.
         if "source_published_at" not in alert:
             problems.append(f"{where}: source_published_at is not separately present")
 
-        published_at = alert.get("published_at")
-        if published_at is None:
+        if alert.get("published_at") is None:
             problems.append(f"{where}: published_at is missing")
 
         if not weekly_contract:
             continue
 
-        # Critical and High only. Public payloads carry the 0–100 scale.
-        risk = str(alert.get("risk_level") or "").lower()
-        score = alert.get("signal_score")
-        if risk and risk not in ("critical", "high"):
-            problems.append(f"{where}: risk_level {risk!r} is neither critical nor high")
-        elif not risk and _is_int(score) and score < HIGH_MIN_SCORE_100:
-            problems.append(f"{where}: signal_score {score} is below the High floor")
+        # processed_at is part of the final contract's three-timestamp shape,
+        # not something the legacy (pre-deploy) endpoint ever returned.
+        if "processed_at" not in alert:
+            problems.append(f"{where}: processed_at is not present")
 
-        source_published_at = alert.get("source_published_at")
-        if (
-            published_at is not None
-            and source_published_at is not None
-            and published_at != source_published_at
-        ):
+        # Eligibility is the stored risk_band column — critical/high only,
+        # never recomputed from score. risk_level is legacy display-only and
+        # was never the gating field; checking it here would silently pass
+        # regardless of actual eligibility, since a critical-band alert's
+        # legacy risk_level displays as "high", not "critical".
+        band = str(alert.get("risk_band") or "").lower()
+        if band not in ("critical", "high"):
             problems.append(
-                f"{where}: published_at should equal source_published_at when "
-                f"available ({published_at!r} != {source_published_at!r})"
+                f"{where}: risk_band {alert.get('risk_band')!r} is neither "
+                f"critical nor high"
             )
 
     return problems

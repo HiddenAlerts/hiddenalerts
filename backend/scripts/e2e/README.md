@@ -12,7 +12,7 @@ plus the two POST logins needed to obtain tokens.
 ## Setup
 
 ```bash
-cp backend/scripts/e2e/.env.e2e.example /secure/path/e2e.env
+cp backend/scripts/e2e/.env.e2e.example /secure/path/e2e.env (/root/.config/hiddenalerts-e2e.env)
 chmod 600 /secure/path/e2e.env
 $EDITOR /secure/path/e2e.env          # fill in real values
 ```
