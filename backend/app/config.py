@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     # Frontend (Auth/Payment Phase 1)
     frontend_base_url: str = ""
 
+    # CORS — comma-separated exact origins allowed to make cross-origin
+    # requests, e.g. "https://hiddenalerts.com,http://localhost:3000". Takes
+    # precedence over frontend_base_url for CORS purposes only;
+    # frontend_base_url remains the canonical production frontend URL used
+    # elsewhere (Stripe redirects). See resolve_cors_origins().
+    cors_allowed_origins: str = ""
+
     # Access control tuning (Auth/Payment Phase 1)
     subscription_access_grace_seconds: int = 0
 
@@ -87,3 +94,31 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def resolve_cors_origins(settings: Settings) -> list[str]:
+    """The deterministic list of origins CORSMiddleware should allow.
+
+    ``cors_allowed_origins`` (comma-separated exact origins) takes precedence
+    when set — this is how multiple explicit frontend origins (the production
+    domain, local dev) are expressed at once. Each entry is stripped of
+    surrounding whitespace and a trailing slash, empty entries are ignored,
+    and duplicates are dropped while preserving first-seen order. Falls back
+    to the single ``frontend_base_url`` origin when ``cors_allowed_origins``
+    is unset or resolves to nothing usable, and to ``["*"]`` — the pre-existing
+    behavior — only when neither is configured. Never adds ``"*"`` itself;
+    that only happens as this last-resort fallback, unchanged from before.
+    """
+    origins: list[str] = []
+    seen: set[str] = set()
+    for candidate in settings.cors_allowed_origins.split(","):
+        origin = candidate.strip().rstrip("/")
+        if not origin or origin in seen:
+            continue
+        seen.add(origin)
+        origins.append(origin)
+    if origins:
+        return origins
+    if settings.frontend_base_url:
+        return [settings.frontend_base_url.rstrip("/")]
+    return ["*"]

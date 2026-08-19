@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.config import settings
+from app.config import resolve_cors_origins, settings
 
 # Configure basic logging with timestamp
 logging.basicConfig(
@@ -80,15 +80,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS: lock to the frontend origin when ``FRONTEND_BASE_URL`` is configured,
-# else stay open for the MVP public feed. GET/POST/PUT cover the read feeds,
+# CORS: lock to explicit frontend origins via CORS_ALLOWED_ORIGINS (comma-
+# separated — e.g. "https://hiddenalerts.com,http://localhost:3000"), falling
+# back to the single FRONTEND_BASE_URL origin, and to "*" only when neither is
+# configured (see resolve_cors_origins()). GET/POST/PUT cover the read feeds,
 # billing/checkout, and the admin CMS write endpoints. Subscriber auth uses
 # Authorization: Bearer (Supabase token); no cookies → allow_credentials stays
 # at its False default.
-_cors_origins = [settings.frontend_base_url.rstrip("/")] if settings.frontend_base_url else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
+    allow_origins=resolve_cors_origins(settings),
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )

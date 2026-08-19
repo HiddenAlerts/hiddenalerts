@@ -37,7 +37,7 @@ translation layer here, and none should be reintroduced.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Select, select
 from sqlalchemy.orm import selectinload
@@ -122,6 +122,34 @@ def apply_source_name_filter(
     return stmt, raw_item_joined
 
 
+def _as_naive_utc(value: datetime | None) -> datetime | None:
+    """Normalize a datetime for comparison against ``RawItem.published_at``.
+
+    That column is genuinely ``TIMESTAMP WITH TIME ZONE`` in PostgreSQL, but
+    ``app/models/raw_item.py`` declares it with a bare ``mapped_column(...)``
+    and no explicit ``DateTime(timezone=True)`` — so SQLAlchemy compiles bind
+    parameters against it as a naive ``DateTime``, and asyncpg's naive
+    ``timestamp_encode`` codec raises ``TypeError: can't subtract
+    offset-naive and offset-aware datetimes`` when handed the timezone-aware
+    datetime FastAPI parses from an ISO 8601 query parameter (e.g.
+    ``2026-08-17T12:00:00Z``). This is a model/column type-declaration
+    mismatch, not a naive database column — production's Postgres session
+    runs with ``TimeZone=UTC`` (verified), so a naive value sent through that
+    encoder is interpreted as a UTC wall-clock instant. Converting to UTC
+    before stripping ``tzinfo`` therefore preserves the exact instant
+    requested, not just avoids the crash.
+
+    ``None`` passes through unchanged. An already-naive input is assumed to
+    already be UTC — the convention used everywhere else in this codebase —
+    and is returned unchanged rather than re-interpreted, since re-stamping it
+    to a different offset would silently shift the instant. Does not mutate
+    its argument: ``astimezone``/``replace`` both return new objects.
+    """
+    if value is None or value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def apply_source_published_at_filters(
     stmt: Select,
     *,
@@ -135,6 +163,11 @@ def apply_source_published_at_filters(
     the caller hasn't already joined it for another reason (``source=`` search,
     for instance) — ``raw_item_joined`` is threaded through so the join is
     never added twice.
+
+    Bounds are normalized through :func:`_as_naive_utc` before binding — see
+    its docstring for why ``RawItem.published_at`` specifically needs this and
+    ``ProcessedAlert.published_at`` (in :func:`apply_published_at_filters`)
+    does not.
     """
     if source_published_from is None and source_published_to is None:
         return stmt, raw_item_joined
@@ -142,9 +175,9 @@ def apply_source_published_at_filters(
         stmt = stmt.join(RawItem, RawItem.id == ProcessedAlert.raw_item_id)
         raw_item_joined = True
     if source_published_from is not None:
-        stmt = stmt.where(RawItem.published_at >= source_published_from)
+        stmt = stmt.where(RawItem.published_at >= _as_naive_utc(source_published_from))
     if source_published_to is not None:
-        stmt = stmt.where(RawItem.published_at <= source_published_to)
+        stmt = stmt.where(RawItem.published_at <= _as_naive_utc(source_published_to))
     return stmt, raw_item_joined
 
 

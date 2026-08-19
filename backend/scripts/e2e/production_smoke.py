@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -504,6 +505,152 @@ async def discover_known_alert_id(
     return None
 
 
+def _parse_instant(value: str) -> datetime:
+    """Parse an API-returned or requested ISO 8601 timestamp into an aware
+    UTC-comparable instant. Never compare these strings lexicographically —
+    ``Z`` and an equivalent ``+02:00`` offset sort completely differently as
+    text despite naming the same instant."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+async def check_source_published_date_filters(
+    client: httpx.AsyncClient,
+    results: ResultSet,
+    *,
+    admin_header: dict[str, str],
+    subscriber_header: dict[str, str],
+) -> None:
+    """GET-only regression for the source_published_from/source_published_to
+    hotfix (app/services/alert_query.py::_as_naive_utc).
+
+    Finds a real published alert with a non-null source_published_at, then
+    exercises both the lower bound (source_published_from) and the upper
+    bound (source_published_to) at that exact instant — expressed once as a
+    ``Z`` timestamp and once as an equivalent non-UTC offset — on both Admin
+    (Published view) and Subscriber. Requires 200 (not 500), that every
+    returned row's source_published_at *instant* (parsed, never compared as a
+    string) actually falls inside the requested range, and — via a separate
+    exact-boundary request per surface — that the sample alert itself, which
+    sits precisely on the boundary, is still returned, proving both bounds
+    are inclusive. All requests are GET; nothing is persisted beyond the
+    standard sanitized report.
+    """
+    if not admin_header:
+        results.skip("source date filters", "no admin token available")
+        return
+
+    sample, _ = await _get(
+        client, ADMIN_ALERTS_PATH, results, "source date filter sample",
+        headers=admin_header, params={"is_published": "true", "limit": 20},
+    )
+    if sample is None or sample.status_code != 200:
+        results.skip("source date filters", "could not fetch a published sample")
+        return
+    rows = parse_json(sample, "source date filter sample")
+    candidate = next(
+        (r for r in rows if isinstance(r, dict) and r.get("source_published_at")),
+        None,
+    ) if isinstance(rows, list) else None
+    if candidate is None:
+        results.skip("source date filters", "no published alert with a non-null source_published_at")
+        return
+
+    candidate_id = candidate.get("id")
+    boundary = candidate["source_published_at"]
+    instant = _parse_instant(boundary)
+    # A non-UTC offset naming the exact same instant as `boundary` (the API
+    # always returns Z/+00:00) — the regression this hotfix exists for.
+    offset_equivalent = instant.astimezone(timezone(timedelta(hours=2))).isoformat()
+
+    surfaces = [
+        ("admin", ADMIN_ALERTS_PATH, admin_header, {"is_published": "true"}),
+    ]
+    if subscriber_header:
+        surfaces.append(("subscriber", SUBSCRIBER_ALERTS_PATH, subscriber_header, {}))
+
+    range_checks = (
+        ("from", "source_published_from", "z", boundary),
+        ("from", "source_published_from", "offset", offset_equivalent),
+        ("to", "source_published_to", "z", boundary),
+        ("to", "source_published_to", "offset", offset_equivalent),
+    )
+
+    for label, path, header, base_params in surfaces:
+        for bound_kind, param_name, bound_repr, bound_value in range_checks:
+            check_name = f"{label} {param_name} ({bound_repr})"
+            resp, _ = await _get(
+                client, path, results, check_name,
+                headers=header,
+                params={**base_params, param_name: bound_value, "limit": 50},
+            )
+            if resp is None:
+                continue
+            if resp.status_code != 200:
+                results.record(
+                    check_name, False,
+                    f"expected 200, got {resp.status_code} — the naive/aware "
+                    f"datetime hotfix may not be deployed",
+                    endpoint=path, status_code=resp.status_code,
+                )
+                continue
+            body = parse_json(resp, f"{label} source date filter")
+            result_rows = body.get("alerts") if isinstance(body, dict) else body
+            if not isinstance(result_rows, list):
+                results.record(
+                    check_name, False, "response body was not a list of alerts",
+                    endpoint=path, status_code=200,
+                )
+                continue
+            out_of_range = []
+            for r in result_rows:
+                if not isinstance(r, dict) or not r.get("source_published_at"):
+                    continue
+                row_instant = _parse_instant(r["source_published_at"])
+                if bound_kind == "from" and row_instant < instant:
+                    out_of_range.append(r.get("id"))
+                elif bound_kind == "to" and row_instant > instant:
+                    out_of_range.append(r.get("id"))
+            results.record(
+                check_name, not out_of_range,
+                f"rows outside the requested range: {out_of_range}" if out_of_range else "",
+                endpoint=path, status_code=200,
+            )
+
+        # Exact-boundary request (from == to == the sample's own instant):
+        # proves both bounds are inclusive without depending on where the
+        # sample alert would otherwise land in an unfiltered, paginated list.
+        check_name = f"{label} source_published_at exact boundary (inclusive)"
+        resp, _ = await _get(
+            client, path, results, check_name,
+            headers=header,
+            params={
+                **base_params,
+                "source_published_from": boundary,
+                "source_published_to": boundary,
+                "limit": 50,
+            },
+        )
+        if resp is None:
+            continue
+        if resp.status_code != 200:
+            results.record(
+                check_name, False,
+                f"expected 200, got {resp.status_code}",
+                endpoint=path, status_code=resp.status_code,
+            )
+            continue
+        body = parse_json(resp, f"{label} source date exact boundary")
+        result_rows = body.get("alerts") if isinstance(body, dict) else body
+        ids = {r.get("id") for r in result_rows if isinstance(r, dict)} if isinstance(result_rows, list) else set()
+        results.record(
+            check_name, candidate_id in ids,
+            "" if candidate_id in ids else
+            f"sample alert {candidate_id} sits exactly on the boundary but was "
+            f"excluded — a bound is not inclusive",
+            endpoint=path, status_code=200,
+        )
+
+
 async def check_removed_surface(
     client: httpx.AsyncClient,
     results: ResultSet,
@@ -656,6 +803,11 @@ async def run_smoke(config: E2EConfig, *, post_deploy: bool) -> ResultSet:
         if subscriber_header:
             await check_subscriber(client, results, subscriber_header,
                                    post_deploy=post_deploy)
+
+        await check_source_published_date_filters(
+            client, results,
+            admin_header=admin_header, subscriber_header=subscriber_header,
+        )
 
         # Runs last: it needs a real alert id from a retained endpoint.
         known_alert_id = await discover_known_alert_id(

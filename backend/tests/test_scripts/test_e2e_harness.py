@@ -1429,6 +1429,133 @@ async def test_category_round_trip_uses_a_returned_value_against_the_real_filter
 
 
 @pytest.mark.asyncio
+async def test_source_published_date_filter_check_skips_without_a_dated_sample():
+    """KNOWN_ALERT has source_published_at=None — the default mock has nothing
+    to build a boundary from, so the check must skip, not fail or error."""
+    results = await _run_smoke(_smoke_handler(), post_deploy=True)
+    checks_run = [r for r in results.results if "source date filters" in r.name]
+    assert checks_run and all(r.skipped for r in checks_run)
+    assert not any(
+        "source_published_from" in r.name or "source_published_to" in r.name
+        or "exact boundary" in r.name
+        for r in results.results
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_published_date_filter_check_passes_with_a_dated_sample():
+    """A published row with a real source_published_at lets the check build a
+    Z boundary and a non-UTC-offset boundary for the same instant, exercise
+    both source_published_from (lower bound) and source_published_to (upper
+    bound), call both Admin and Subscriber, confirm every returned row is
+    inside the range, and confirm the sample itself is still returned at the
+    exact inclusive boundary — proving the hotfix's own E2E addition actually
+    exercises its logic end to end."""
+    dated_alert = {**KNOWN_ALERT, "id": 9001, "source_published_at": "2026-06-01T00:00:00Z"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == production_smoke.ADMIN_ALERTS_PATH:
+            return httpx.Response(200, json=[dated_alert])
+        if path == production_smoke.SUBSCRIBER_ALERTS_PATH:
+            if request.headers.get("authorization") != f"Bearer {FAKE_SUPABASE_JWT}":
+                return httpx.Response(401, json={"detail": "Not authenticated"})
+            return httpx.Response(200, json={"alerts": [dated_alert]})
+        return _smoke_handler()(request)
+
+    results = await _run_smoke(handler, post_deploy=True)
+    checks_run = [
+        r for r in results.results
+        if "source_published_from" in r.name or "source_published_to" in r.name
+        or "exact boundary" in r.name
+    ]
+    # admin+subscriber x (from/to x z/offset) = 8, plus one exact-boundary
+    # check per surface = 10.
+    assert len(checks_run) == 10, [r.name for r in checks_run]
+    assert all(r.passed and not r.skipped for r in checks_run), [
+        (r.name, r.detail) for r in checks_run
+    ]
+
+    names = {r.name for r in checks_run}
+    for label in ("admin", "subscriber"):
+        assert f"{label} source_published_at exact boundary (inclusive)" in names
+        for param in ("source_published_from", "source_published_to"):
+            for bound_repr in ("z", "offset"):
+                assert f"{label} {param} ({bound_repr})" in names, names
+
+
+@pytest.mark.asyncio
+async def test_source_published_date_filter_check_fails_loudly_on_a_from_500():
+    """If source_published_from itself 500s, the check must FAIL — not skip,
+    not silently pass — so a post-deploy run cannot go green over the bug."""
+    dated_alert = {**KNOWN_ALERT, "id": 9002, "source_published_at": "2026-06-01T00:00:00Z"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        params = request.url.params
+        if path == production_smoke.ADMIN_ALERTS_PATH and "source_published_from" in params:
+            return httpx.Response(500, text="Internal Server Error")
+        if path == production_smoke.ADMIN_ALERTS_PATH:
+            return httpx.Response(200, json=[dated_alert])
+        return _smoke_handler()(request)
+
+    results = await _run_smoke(handler, post_deploy=True)
+    checks_run = [r for r in results.results if r.name.startswith("admin source_published_from")]
+    assert checks_run and all(not r.passed and not r.skipped for r in checks_run), [
+        (r.name, r.detail) for r in checks_run
+    ]
+
+
+@pytest.mark.asyncio
+async def test_source_published_date_filter_check_fails_loudly_on_a_to_500():
+    """If source_published_to itself 500s, the check must FAIL — not skip, not
+    silently pass — so a post-deploy run cannot go green over the bug."""
+    dated_alert = {**KNOWN_ALERT, "id": 9005, "source_published_at": "2026-06-01T00:00:00Z"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        params = request.url.params
+        if path == production_smoke.ADMIN_ALERTS_PATH and "source_published_to" in params:
+            return httpx.Response(500, text="Internal Server Error")
+        if path == production_smoke.ADMIN_ALERTS_PATH:
+            return httpx.Response(200, json=[dated_alert])
+        return _smoke_handler()(request)
+
+    results = await _run_smoke(handler, post_deploy=True)
+    checks_run = [r for r in results.results if r.name.startswith("admin source_published_to")]
+    assert checks_run and all(not r.passed and not r.skipped for r in checks_run), [
+        (r.name, r.detail) for r in checks_run
+    ]
+
+
+@pytest.mark.asyncio
+async def test_source_published_date_filter_check_fails_when_a_returned_row_is_out_of_range():
+    """If the backend returns a row whose source_published_at instant falls
+    outside the requested source_published_from range, the check must FAIL —
+    proving the assertion actually parses and compares real datetime instants
+    rather than trusting whatever the backend sends back."""
+    dated_alert = {**KNOWN_ALERT, "id": 9003, "source_published_at": "2026-06-01T00:00:00Z"}
+    stale_alert = {**KNOWN_ALERT, "id": 9004, "source_published_at": "2025-01-01T00:00:00Z"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        params = request.url.params
+        if path == production_smoke.ADMIN_ALERTS_PATH:
+            if "source_published_from" in params and "source_published_to" not in params:
+                # A from-only request: the backend wrongly includes a row
+                # that predates the requested lower bound.
+                return httpx.Response(200, json=[dated_alert, stale_alert])
+            return httpx.Response(200, json=[dated_alert])
+        return _smoke_handler()(request)
+
+    results = await _run_smoke(handler, post_deploy=True)
+    from_checks = [r for r in results.results if r.name.startswith("admin source_published_from")]
+    assert from_checks and all(not r.passed for r in from_checks), [
+        (r.name, r.detail) for r in from_checks
+    ]
+
+
+@pytest.mark.asyncio
 async def test_backend_transport_failure_becomes_one_recorded_failure():
     """A dead backend must not abort the run with a traceback."""
 

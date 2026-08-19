@@ -352,3 +352,85 @@ class TestCreatePortalSession:
                 await stripe_service.create_customer_portal_session(fresh_profile)
         assert exc.value.status_code == 502
         assert exc.value.detail == "stripe_customer_portal_failed"
+
+
+# ---------------------------------------------------------------------------
+# Production redirect URL alignment (Stripe Redirect URL Alignment task) —
+# the actual https://hiddenalerts.com values prepared for production, using
+# the real current frontend routes (/dashboard, /subscribe, /settings; NOT
+# the old /pricing or /account, which don't exist in the current frontend).
+# No live Stripe calls: _sync_create_checkout_session/_sync_create_portal_session
+# are patched exactly as in the rest of this file.
+# ---------------------------------------------------------------------------
+
+PROD_SUCCESS_URL = "https://hiddenalerts.com/dashboard"
+PROD_CANCEL_URL = "https://hiddenalerts.com/subscribe"
+PROD_RETURN_URL = "https://hiddenalerts.com/settings"
+
+
+class TestProductionRedirectUrls:
+    def test_resolve_checkout_urls_returns_the_prepared_production_values(self):
+        settings.stripe_checkout_success_url = PROD_SUCCESS_URL
+        settings.stripe_checkout_cancel_url = PROD_CANCEL_URL
+        settings.frontend_base_url = "https://hiddenalerts.com"
+        assert stripe_service.resolve_checkout_urls() == (PROD_SUCCESS_URL, PROD_CANCEL_URL)
+
+    def test_resolve_portal_return_url_returns_the_prepared_production_value(self):
+        settings.stripe_portal_return_url = PROD_RETURN_URL
+        settings.frontend_base_url = "https://hiddenalerts.com"
+        assert stripe_service.resolve_portal_return_url() == PROD_RETURN_URL
+
+    def test_explicit_production_urls_win_over_the_frontend_base_url_fallback(self):
+        """Even with FRONTEND_BASE_URL correctly set to the production domain,
+        the explicit STRIPE_*_URL settings — not the derived /billing/success,
+        /pricing, /account/billing paths, none of which exist in the current
+        frontend — must be what's actually used."""
+        settings.stripe_checkout_success_url = PROD_SUCCESS_URL
+        settings.stripe_checkout_cancel_url = PROD_CANCEL_URL
+        settings.stripe_portal_return_url = PROD_RETURN_URL
+        settings.frontend_base_url = "https://hiddenalerts.com"
+
+        success, cancel = stripe_service.resolve_checkout_urls()
+        assert success == PROD_SUCCESS_URL
+        assert cancel == PROD_CANCEL_URL
+        assert "/billing/success" not in success
+        assert "/pricing" not in cancel
+
+        return_url = stripe_service.resolve_portal_return_url()
+        assert return_url == PROD_RETURN_URL
+        assert "/account/billing" not in return_url
+
+
+@pytest.mark.asyncio
+class TestCheckoutSessionReceivesProductionUrls:
+    async def test_checkout_session_is_created_with_the_hiddenalerts_com_urls(
+        self, fresh_profile, db_session
+    ):
+        settings.stripe_checkout_success_url = PROD_SUCCESS_URL
+        settings.stripe_checkout_cancel_url = PROD_CANCEL_URL
+        fresh_profile.stripe_customer_id = "cus_prod"
+        await db_session.commit()
+        fake_session = SimpleNamespace(url="https://checkout.stripe.com/c/prod", id="cs_prod")
+        with patch.object(
+            stripe_service, "_sync_create_checkout_session", return_value=fake_session,
+        ) as mock:
+            await stripe_service.create_checkout_session(db_session, fresh_profile, "monthly")
+        kwargs = mock.call_args.kwargs
+        assert kwargs["success_url"] == PROD_SUCCESS_URL
+        assert kwargs["cancel_url"] == PROD_CANCEL_URL
+
+
+@pytest.mark.asyncio
+class TestPortalSessionReceivesProductionUrl:
+    async def test_portal_session_is_created_with_the_hiddenalerts_com_return_url(
+        self, fresh_profile, db_session
+    ):
+        settings.stripe_portal_return_url = PROD_RETURN_URL
+        fresh_profile.stripe_customer_id = "cus_prod_portal"
+        await db_session.commit()
+        fake_session = SimpleNamespace(url="https://billing.stripe.com/p/prod")
+        with patch.object(
+            stripe_service, "_sync_create_portal_session", return_value=fake_session,
+        ) as mock:
+            await stripe_service.create_customer_portal_session(fresh_profile)
+        assert mock.call_args.kwargs["return_url"] == PROD_RETURN_URL
