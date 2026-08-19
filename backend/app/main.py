@@ -133,7 +133,9 @@ app.include_router(
     source_health_router, prefix="/api/v1", responses=ADMIN_AUTH_RESPONSES
 )  # Admin read-only observability
 app.include_router(raw_items_router, prefix="/api/v1", include_in_schema=False)  # ingestion internals
-app.include_router(alerts_router, prefix="/api/v1", responses=UNAUTHORIZED)
+app.include_router(
+    alerts_router, prefix="/api/v1", responses=ADMIN_AUTH_RESPONSES
+)  # Admin Alerts/Events — require_admin (Pre-Launch Admin Authorization Hardening)
 app.include_router(
     alerts_admin_router, prefix="/api/v1", responses=ADMIN_AUTH_RESPONSES
 )  # Admin alert metadata

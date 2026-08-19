@@ -150,6 +150,18 @@ def test_the_two_schemes_are_described_as_distinct_token_systems():
 # ===========================================================================
 
 
+#: Every operation reached through `get_current_user` (directly, or nested
+#: inside `require_admin`'s chain) — i.e. everything that carries the
+#: `AdminBearer` scheme, meaning "an Internal JWT from POST /api/v1/auth/login
+#: was presented." That is an authentication-mechanism grouping, not a role
+#: grouping: `auth/me` and `change-password` are any-authenticated-user routes
+#: (`get_current_user` only, no role check — see app/auth/__init__.py), while
+#: `/api/v1/alerts*` and every `/api/v1/admin/*` route below additionally
+#: require `role == "admin"` (`require_admin`) since the Pre-Launch Admin
+#: Authorization Hardening slice (18 August 2026). The role-level distinction
+#: is covered separately by `test_403_is_documented_only_where_a_role_or_subscription_check_exists`
+#: below and by `test_route_inventory.py::test_admin_api_routes_keep_the_admin_guard`
+#: — this list only proves the shared bearer scheme.
 ADMIN_OPERATIONS = [
     ("GET", "/api/v1/auth/me"),
     ("POST", "/api/v1/auth/change-password"),
@@ -201,6 +213,37 @@ def test_admin_operations_require_the_admin_bearer(method, path):
 def test_subscriber_and_billing_operations_require_the_subscriber_bearer(method, path):
     assert (method, path) in OPERATIONS, f"{method} {path} vanished from Swagger"
     assert _schemes_for(OPERATIONS[(method, path)]) == {SUBSCRIBER_SCHEME}
+
+
+#: Pre-Launch Admin Authorization Hardening: the Swagger-visible Alert
+#: operations that moved from get_current_user-only to require_admin.
+HARDENED_ADMIN_ALERT_OPERATIONS = [
+    ("GET", "/api/v1/alerts"),
+    ("GET", "/api/v1/alerts/{alert_id}"),
+    ("POST", "/api/v1/alerts/{alert_id}/review"),
+]
+
+
+@pytest.mark.parametrize("method,path", HARDENED_ADMIN_ALERT_OPERATIONS)
+def test_hardened_alert_operations_document_both_401_and_403(method, path):
+    """These used to document 401 only (get_current_user, no role check).
+    They now require the admin role (require_admin), so Swagger must show both:
+    401 for no/invalid token, 403 for a valid-but-non-admin Internal JWT.
+    """
+    responses = OPERATIONS[(method, path)]["responses"]
+    assert "401" in responses
+    assert "403" in responses
+    assert _schemes_for(OPERATIONS[(method, path)]) == {ADMIN_SCHEME}
+
+
+def test_auth_me_and_change_password_do_not_claim_admin_role_enforcement():
+    """These stay any-authenticated-Internal-JWT-user routes (get_current_user
+    only, no require_admin) — hardening the Alert surface must not spread to
+    account/identity operations that were never Admin-role-gated."""
+    for key in (("GET", "/api/v1/auth/me"), ("POST", "/api/v1/auth/change-password")):
+        responses = OPERATIONS[key]["responses"]
+        assert "401" in responses
+        assert "403" not in responses, f"{key} must not claim role enforcement it doesn't have"
 
 
 def test_admin_and_subscriber_operation_lists_cover_every_protected_operation():

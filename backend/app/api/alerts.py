@@ -1,6 +1,9 @@
 """REST API endpoints for processed alerts and events.
 
-All endpoints require authentication via JWT cookie (get_current_user dependency).
+All endpoints require an Internal JWT (cookie or Bearer) whose user has
+role == "admin" (require_admin dependency) — same auth pattern as
+Sources/Raw Items/Stats/Admin Alert Categories/Source Health/Intelligence
+Brief CMS. A valid non-admin Internal JWT gets 403; no/invalid token gets 401.
 
 Routes:
   GET  /api/v1/alerts                  — list processed alerts with filters
@@ -21,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api._risk import risk_level_from_score, risk_score_100
-from app.auth import get_current_user
+from app.auth import require_admin
 from app.database import get_db, AsyncSessionLocal
 from app.models.review import AlertReview
 from app.models.event import Event, EventSource
@@ -358,7 +361,7 @@ async def list_alerts(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> list[ProcessedAlertRead]:
     """List processed alerts with optional filtering."""
     # Validate enum-like V1 filters against the canonical vocabularies (422 on a
@@ -460,7 +463,7 @@ async def list_alerts(
 async def get_alert(
     alert_id: int,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> ProcessedAlertDetail:
     """Get full alert detail including score breakdown, event linkage, and review status."""
     result = await db.execute(
@@ -494,7 +497,7 @@ async def get_alert(
 
 # Hidden from Swagger (Slice 3B.2AJ): manual AI-processing trigger, an
 # operational route with no frontend consumer. Still registered and still
-# admin-authenticated at runtime.
+# require_admin-guarded at runtime — hidden from docs is not weakly protected.
 @router.post(
     "/alerts/process",
     status_code=status.HTTP_202_ACCEPTED,
@@ -502,7 +505,7 @@ async def get_alert(
 )
 async def trigger_processing(
     background_tasks: BackgroundTasks,
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> dict:
     """Manually trigger the AI processing pipeline for unprocessed items.
 
@@ -540,7 +543,7 @@ async def submit_review(
     alert_id: int,
     payload: AlertReviewCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ) -> AlertReviewRead:
     """Submit a review action for an alert (approve, mark false positive, or edit)."""
     valid_statuses = {"approved", "false_positive", "edited"}
@@ -598,7 +601,10 @@ async def submit_review(
 
 # Hidden from Swagger (Slice 3B.2AJ): event grouping is populated by the
 # pipeline but no frontend, external or internal consumer reads these two
-# routes. Retained in the backend pending a product decision.
+# routes. Retained in the backend pending a product decision. require_admin
+# guarded like the rest of this module — hidden from docs is not weakly
+# protected, and EventDetail.linked_alerts carries the same internal alert
+# data the Admin Alerts detail route does.
 @router.get("/events", response_model=list[EventRead], include_in_schema=False)
 async def list_events(
     category: str | None = Query(None),
@@ -606,7 +612,7 @@ async def list_events(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> list[EventRead]:
     """List grouped events with optional filtering."""
     stmt = (
@@ -645,7 +651,7 @@ async def list_events(
 async def get_event(
     event_id: int,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
 ) -> EventDetail:
     """Get full event detail including all linked alerts."""
     result = await db.execute(

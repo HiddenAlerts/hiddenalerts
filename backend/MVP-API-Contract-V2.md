@@ -80,8 +80,10 @@ the marketing site at `https://hiddenalerts.com` is a separate frontend, not the
 ## Overview
 
 - **Admin surface** — Ken and internal admins. Full access to all alerts, review workflow, and the Intelligence Brief
-  CMS. Served by the React Admin UI over the Internal-JWT Admin APIs (`get_current_user` — any valid JWT
-  cookie/Bearer token, not role-gated beyond authentication unless a section below says otherwise). The
+  CMS. Served by the React Admin UI over the Internal-JWT Admin APIs, which require an Internal JWT (cookie or
+  Bearer) **and** `role == "admin"` (`require_admin`) — a valid Internal JWT for a non-admin account gets 403.
+  This became uniform across the whole Admin surface with the Pre-Launch Admin Authorization Hardening slice
+  (18 August 2026); see §3's auth note and §10's route inventory for the exact per-route guard. The
   server-rendered `/dashboard` was retired by 06 August 2026 and there is no server-rendered UI anymore — do not
   reference "the dashboard" as a real current surface.
 - **Subscriber surface** — Paying end users. Curated, **published-only** alerts and Intelligence Briefs through
@@ -130,7 +132,7 @@ unlike an earlier draft of this document implied.
 > | Subscriber Top Alerts | `GET /api/v1/subscriber/alerts/top` | Supabase JWT + active subscription, §0.2 / §4.5 |
 > | Subscriber stats | `GET /api/v1/subscriber/alerts/stats` | Supabase JWT + active subscription, §4.3 |
 > | Subscriber search | `GET /api/v1/subscriber/search/alerts` | Supabase JWT + active subscription, §4.6 |
-> | Admin review (internal tooling, not the paid frontend) | `GET /api/v1/alerts`, `POST /api/v1/alerts/{alert_id}/review` | Internal JWT today (`get_current_user`, any authenticated user — see §3 and §16 note) |
+> | Admin review (internal tooling, not the paid frontend) | `GET /api/v1/alerts`, `POST /api/v1/alerts/{alert_id}/review` | Internal JWT + `role == "admin"` (`require_admin`) — see §3 |
 >
 > `GET /api/alerts` is **not** a general paginated feed — it's a narrow, unauthenticated marketing teaser (max 3
 > items) for the Landing Page only. Do not build the paid Alerts Page against it. See §0.3 for what the old
@@ -537,15 +539,24 @@ Updates the authenticated user's password.
 These endpoints return **all** alerts (published and unpublished) and are intended for the admin review workflow —
 the React Admin UI, not any server-rendered page.
 
-**Auth required:** requires authentication via JWT cookie or Bearer token — any valid user (checked against
-`get_current_user`). This is **not** admin-role-gated today: any authenticated user, not just an admin, can call
-`GET /api/v1/alerts`, `GET /api/v1/alerts/{alert_id}`, and `POST /api/v1/alerts/{alert_id}/review`.
+**Auth required:** Internal JWT (cookie or Bearer) **and** `role == "admin"` (`require_admin`) — the same guard
+every other Admin management surface uses (`/api/v1/admin/*`, Sources, Raw Items, Stats, Source Health, the
+Intelligence Brief CMS). Applies to `GET /api/v1/alerts`, `GET /api/v1/alerts/{alert_id}`,
+`POST /api/v1/alerts/{alert_id}/review`, and — hidden from Swagger but still live, see §5/§7 — the manual
+processing trigger `POST /api/v1/alerts/process` and the Event routes `GET /api/v1/events*`.
 
-This is **not** the same guard as every route under `/api/v1/admin/*` (categories, source health, system
-health-summary, the Intelligence Brief CMS) — those use `require_admin` and 403 a non-admin authenticated user. Do
-not assume this section's routes and `/api/v1/admin/*` share one auth rule; see §10's route inventory for the exact
-guard per route. A separate, upcoming security-hardening slice is expected to move this section's routes onto
-`require_admin` too — this document describes what runtime enforces **today**, not that future state.
+- **401** — missing, invalid, or expired Internal JWT.
+- **403** — a valid Internal JWT for an authenticated account whose role is not `admin`.
+- **200** (or the route's normal success status) — a valid Internal JWT for an `admin` account, exactly the
+  existing query/response behavior.
+
+This was hardened from an any-authenticated-Internal-JWT-user guard (`get_current_user`, no role check) to
+`require_admin` by the Pre-Launch Admin Authorization Hardening slice (18 August 2026), closing the one
+inconsistency against the rest of the Admin surface. No path, method, query parameter, request body, or response
+field changed — the only consumer-visible difference is that a non-admin Internal account that previously
+succeeded now correctly gets 403. `GET /api/v1/auth/me` and `POST /api/v1/auth/change-password` are the one
+legitimate exception left on the older `get_current_user` guard — they are account/identity operations available
+to any authenticated Internal JWT user, not Admin management operations, and were deliberately left unchanged.
 
 ### 3.1 List Alerts
 
@@ -1028,7 +1039,10 @@ curl -G "http://localhost:8000/api/v1/subscriber/search/alerts" \
 
 Events group related alerts about the same fraud incident across multiple sources.
 
-**Auth required:** Any authenticated user
+**Auth required:** Internal JWT + `role == "admin"` (`require_admin`) — hardened alongside the rest of the Alert
+surface (Pre-Launch Admin Authorization Hardening, 18 August 2026). `EventDetail.linked_alerts` carries the same
+internal alert data the Admin Alerts detail route does, so this is the same guard as §3, not the older
+any-authenticated-user guard.
 
 ### 5.1 List Events
 
@@ -1358,9 +1372,9 @@ JWT — they are not interchangeable, unlike the old admin/subscriber/no-auth ma
 | Endpoint | Auth |
 |---|---|
 | `GET /api/alerts` | None — public marketing teaser (§0.1) |
-| `GET /api/v1/alerts`, `POST /api/v1/alerts`, `GET /api/v1/alerts/{alert_id}`, `POST /api/v1/alerts/{alert_id}/review` | JWT cookie or Bearer, **any valid authenticated user** (`get_current_user`) — no role check today. Not the same guard as the row below; see §16 note. §3 |
-| `GET /api/v1/admin/alerts/categories`, `GET /api/v1/admin/sources/health`, `GET /api/v1/admin/sources/{source_id}/health`, `GET /api/v1/admin/system/health-summary` | JWT cookie or Bearer, **`role == "admin"` required** (`require_admin`) — a non-admin authenticated user gets 403, not 401. **Not** the same guard as the row above. |
-| `POST/GET /api/v1/admin/intelligence-briefs`, `GET/PUT /api/v1/admin/intelligence-briefs/{brief_id}`, plus `/archive`, `/feature`, `/unfeature`, `/publish`, `/featured-image` (POST+DELETE) | Same as the `/api/v1/admin/*` row above (`require_admin`) — Admin Intelligence Brief CMS, out of scope for this document; see Swagger |
+| `GET /api/v1/alerts`, `POST /api/v1/alerts`, `GET /api/v1/alerts/{alert_id}`, `POST /api/v1/alerts/{alert_id}/review` | JWT cookie or Bearer, **`role == "admin"` required** (`require_admin`) — a non-admin authenticated user gets 403, not 401. §3 |
+| `GET /api/v1/admin/alerts/categories`, `GET /api/v1/admin/sources/health`, `GET /api/v1/admin/sources/{source_id}/health`, `GET /api/v1/admin/system/health-summary` | Same guard as the row above (`require_admin`) |
+| `POST/GET /api/v1/admin/intelligence-briefs`, `GET/PUT /api/v1/admin/intelligence-briefs/{brief_id}`, plus `/archive`, `/feature`, `/unfeature`, `/publish`, `/featured-image` (POST+DELETE) | Same guard as the row above (`require_admin`) — Admin Intelligence Brief CMS, out of scope for this document; see Swagger |
 | `GET /api/v1/subscriber/access`, `GET /api/v1/subscriber/me` | Supabase JWT only |
 | `GET /api/v1/subscriber/alerts`, `/alerts/categories`, `/alerts/stats`, `/alerts/top`, `/alerts/{alert_id}`, `/search/alerts` | Supabase JWT + active subscription — §4 |
 | `GET /api/v1/subscriber/intelligence-briefs`, `/intelligence-briefs/featured`, `/intelligence-briefs/{slug}` | Supabase JWT + active subscription — out of scope for this document; see Swagger |
@@ -1392,7 +1406,7 @@ consumer — do **not** use as the subscriber path; `GET /api/v1/subscriber/aler
 | ~~`GET /api/alerts/{id}`~~ | — | — | *retired, 404* |
 | ~~`GET /api/alerts/stats`~~ | — | — | *retired, 404* |
 | ~~`GET /api/search/alerts`~~ | — | — | *retired, 404* |
-| `GET/POST /api/v1/alerts`, `GET /api/v1/alerts/{id}`, `POST /api/v1/alerts/{id}/review` | ✅ (any authenticated user, not role-gated) | ❌ 401 (different token system) | ❌ 401 |
+| `GET/POST /api/v1/alerts`, `GET /api/v1/alerts/{id}`, `POST /api/v1/alerts/{id}/review` | ✅ role=admin only — a role=subscriber Internal JWT gets 403, not ✅ | ❌ 401 (different token system) | ❌ 401 |
 | `GET /api/v1/subscriber/*` (alerts, top, stats, categories, search, me, access) | ❌ 401 (different token system) | ✅ (+ active subscription on content routes) | ❌ 401 |
 
 ---

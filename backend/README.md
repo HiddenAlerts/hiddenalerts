@@ -566,11 +566,12 @@ Authenticated endpoints accept either a valid `access_token` cookie **or** an `A
 > **subscriber-safe** published feed to use in the frontend — see the Subscriber Feed table below.
 > `/api/v1/client/alerts` and `/api/v1/client/alerts/{id}` are a retained **transitional internal** API with no known
 > frontend consumer, hidden from Swagger (`include_in_schema=False`) — do not build against these.
-> `/api/v1/alerts` and `/api/v1/alerts/{id}` are **internal, any-authenticated-user** endpoints — they return all
-> alerts regardless of publication state and expose internal review and scoring fields. Auth is `get_current_user`
-> (a valid JWT cookie/Bearer token), **not** role-gated to admins specifically today — see the note in
-> `MVP-API-Contract-V2.md` §3. That's a distinct guard from the `/api/v1/admin/*`, Sources, Raw Items and Stats
-> routes below, which do require the `admin` role (`require_admin`).
+> `/api/v1/alerts` and `/api/v1/alerts/{id}` — plus `POST /api/v1/alerts/{id}/review`, the hidden manual processing
+> trigger `POST /api/v1/alerts/process`, and the hidden Event routes `GET /api/v1/events*` — are **Admin-role-gated**
+> (`require_admin`): they return all alerts regardless of publication state and expose internal review, scoring and
+> event-grouping data. A valid Internal JWT for a non-admin account gets 403; no/invalid token gets 401. Same guard
+> as `/api/v1/admin/*`, Sources, Raw Items and Stats below (Pre-Launch Admin Authorization Hardening, 18 August
+> 2026 — this surface used to accept any authenticated Internal JWT user, not just admins; that gap is closed).
 
 ### System
 
@@ -659,17 +660,17 @@ Authenticated endpoints accept either a valid `access_token` cookie **or** an `A
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/v1/alerts` | Yes | List alerts (filter: `risk_band` — no `risk_level` filter — plus `category`, `source_id`, `since`, `is_published`, `publish_decision`, and more; see `MVP-API-Contract-V2.md` §3.1) |
-| `GET` | `/api/v1/alerts/{id}` | Yes | Alert detail with score breakdown |
-| `POST` | `/api/v1/alerts/process` | Yes | Manually trigger AI pipeline (202) |
-| `POST` | `/api/v1/alerts/{id}/review` | Yes | Submit review action |
+| `GET` | `/api/v1/alerts` | Admin (`require_admin`) | List alerts (filter: `risk_band` — no `risk_level` filter — plus `category`, `source_id`, `since`, `is_published`, `publish_decision`, and more; see `MVP-API-Contract-V2.md` §3.1) |
+| `GET` | `/api/v1/alerts/{id}` | Admin (`require_admin`) | Alert detail with score breakdown |
+| `POST` | `/api/v1/alerts/process` | Admin (`require_admin`) | Manually trigger AI pipeline (202) |
+| `POST` | `/api/v1/alerts/{id}/review` | Admin (`require_admin`) | Submit review action |
 
 ### Events (M2)
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/v1/events` | Yes | List fraud events with source counts |
-| `GET` | `/api/v1/events/{id}` | Yes | Event detail with linked alerts |
+| `GET` | `/api/v1/events` | Admin (`require_admin`) | List fraud events with source counts |
+| `GET` | `/api/v1/events/{id}` | Admin (`require_admin`) | Event detail with linked alerts |
 
 ### Auth (M3)
 

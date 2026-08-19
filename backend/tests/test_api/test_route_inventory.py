@@ -296,30 +296,26 @@ def _api_routes():
     ("GET", "/api/v1/stats"),
     ("GET", "/api/v1/admin/alerts/categories"),
     ("GET", "/api/v1/admin/intelligence-briefs"),
+    # Pre-Launch Admin Authorization Hardening (18 August 2026): the old Alert
+    # surface used to accept any authenticated Internal JWT user (get_current_user
+    # only) even though it exposes unpublished alerts, internal moderation state,
+    # and mutation operations — an inconsistent boundary against every other
+    # administrative surface above, which already required the admin role. Now
+    # aligned onto the same require_admin dependency, including the two hidden
+    # Events routes (EventDetail.linked_alerts carries the same internal alert
+    # data the Admin Alerts detail route does) and the hidden manual processing
+    # trigger.
+    ("GET", "/api/v1/alerts"),
+    ("GET", "/api/v1/alerts/{alert_id}"),
+    ("POST", "/api/v1/alerts/{alert_id}/review"),
+    ("POST", "/api/v1/alerts/process"),
+    ("GET", "/api/v1/events"),
+    ("GET", "/api/v1/events/{event_id}"),
 ])
 def test_admin_api_routes_keep_the_admin_guard(method, path):
     """Target administrative surface — retained, never a cleanup candidate."""
     assert (method, path) in ROUTES
     assert ADMIN_GUARD in _auth_deps(method, path)
-
-
-@pytest.mark.parametrize("method,path", [
-    ("GET", "/api/v1/alerts"),
-    ("GET", "/api/v1/alerts/{alert_id}"),
-    ("POST", "/api/v1/alerts/{alert_id}/review"),
-])
-def test_older_alerts_surface_requires_authentication_but_not_the_admin_role(method, path):
-    """`GET/POST /api/v1/alerts*` uses `get_current_user` only — any authenticated
-    user, not `require_admin`. This is the exact distinction a future
-    security-hardening slice is expected to close (moving these onto
-    `require_admin` too) — until then, documentation must not claim this
-    surface shares one auth rule with `/api/v1/admin/*` above, which does
-    already require the admin role. This test is what makes that claim
-    checkable instead of asserted by hand.
-    """
-    deps = _auth_deps(method, path)
-    assert "get_current_user" in deps
-    assert ADMIN_GUARD not in deps
 
 
 @pytest.mark.parametrize("method,path", [
