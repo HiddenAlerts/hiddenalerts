@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthProvider';
 import {
-  subscriberAlertsApiRiskLevel,
+  subscriberAlertsApiRiskBand,
   type AlertsRiskFilterValue,
 } from '@/data/alertRiskFilterOptions';
 import { ALERTS_PAGE_SIZE, fetchAlertsPage } from '@/lib/api/alerts';
@@ -17,8 +17,8 @@ export function alertsListQueryKey(args: {
 }
 
 /**
- * Subscriber browse list — forwards the selected V1 risk band to the API
- * (`risk_level=critical|high`). "All" omits the param so the published
+ * Subscriber browse list — forwards the selected risk band to the API
+ * (`risk_band=critical|high`). "All" omits the param so the published
  * Critical+High pool is returned.
  */
 export function useAlertsPageQuery(
@@ -30,7 +30,7 @@ export function useAlertsPageQuery(
   const offset = (page - 1) * ALERTS_PAGE_SIZE;
   const { getAccessToken } = useAuth();
   const token = getAccessToken();
-  const riskLevel = subscriberAlertsApiRiskLevel(risk);
+  const riskBand = subscriberAlertsApiRiskBand(risk);
 
   return useQuery({
     queryKey: alertsListQueryKey({ page, risk, category }),
@@ -39,7 +39,7 @@ export function useAlertsPageQuery(
         {
           limit: ALERTS_PAGE_SIZE,
           offset,
-          ...(riskLevel ? { risk_level: riskLevel } : {}),
+          ...(riskBand ? { risk_band: riskBand } : {}),
           ...(category !== 'all' ? { category } : {}),
         },
         token!,

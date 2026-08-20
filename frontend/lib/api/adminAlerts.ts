@@ -22,7 +22,6 @@ export function buildAdminAlertPath(alertId: string) {
 export type FetchAdminAlertsParams = {
   keyword?: string;
   category?: string;
-  risk_level?: string;
   risk_band?: string;
   is_published?: boolean;
   limit?: number;
@@ -33,7 +32,6 @@ export function buildAdminAlertsListPath(params: FetchAdminAlertsParams) {
   const search = new URLSearchParams();
   if (params.keyword) search.set('keyword', params.keyword);
   if (params.category) search.set('category', params.category);
-  if (params.risk_level) search.set('risk_level', params.risk_level);
   if (params.risk_band) search.set('risk_band', params.risk_band);
   if (params.is_published !== undefined) {
     search.set('is_published', String(params.is_published));

@@ -26,14 +26,13 @@ function mapStatusFilter(
   return {};
 }
 
-function mapRiskFilter(risk: string): Pick<
-  Parameters<typeof fetchAdminAlertsPage>[0],
-  'risk_level' | 'risk_band'
-> {
+function mapRiskFilter(
+  risk: string,
+): Pick<Parameters<typeof fetchAdminAlertsPage>[0], 'risk_band'> {
   if (risk === 'critical') return { risk_band: 'critical' };
   if (risk === 'high') return { risk_band: 'high' };
-  if (risk === 'medium') return { risk_level: 'medium' };
-  if (risk === 'low') return { risk_level: 'low' };
+  if (risk === 'medium') return { risk_band: 'medium' };
+  if (risk === 'below_60') return { risk_band: 'below_60' };
   return {};
 }
 

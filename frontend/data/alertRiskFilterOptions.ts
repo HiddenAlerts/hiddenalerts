@@ -15,13 +15,13 @@ export type AlertsRiskFilterValue =
   (typeof ALERTS_RISK_FILTER_OPTIONS)[number]['value'];
 
 /**
- * Maps the UI risk pill to the subscriber list `risk_level` query param.
- * Backend V1 bands are mutually exclusive: critical / high / medium / low.
- * - critical → risk_level=critical
- * - high → risk_level=high
+ * Maps the UI risk pill to the subscriber list `risk_band` query param.
+ * Backend bands: critical / high / medium / below_60.
+ * - critical → risk_band=critical
+ * - high → risk_band=high
  * - all → omit param (published Critical+High pool; client still filters)
  */
-export function subscriberAlertsApiRiskLevel(
+export function subscriberAlertsApiRiskBand(
   risk: AlertsRiskFilterValue | string,
 ): 'critical' | 'high' | undefined {
   if (risk === 'critical' || risk === 'high') return risk;

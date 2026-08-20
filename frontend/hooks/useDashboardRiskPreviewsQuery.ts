@@ -8,7 +8,8 @@ import { useMemo } from 'react';
 
 export const DASHBOARD_RISK_PREVIEW_LIMIT = 3;
 
-const PREVIEW_RISKS = ['high', 'medium', 'low'] as const;
+/** Canonical subscriber `risk_band` values for dashboard previews. */
+const PREVIEW_RISKS = ['critical', 'high', 'medium', 'below_60'] as const;
 
 export type DashboardPreviewRisk = (typeof PREVIEW_RISKS)[number];
 
@@ -31,7 +32,7 @@ export function useDashboardRiskPreviewsQuery(options?: {
           {
             limit: DASHBOARD_RISK_PREVIEW_LIMIT,
             offset: 0,
-            risk_level: risk,
+            risk_band: risk,
           },
           token!,
         ),
@@ -40,7 +41,12 @@ export function useDashboardRiskPreviewsQuery(options?: {
     })),
   });
 
-  const [highQuery, mediumQuery, lowQuery] = results;
+  const [criticalQuery, highQuery, mediumQuery, below60Query] = results;
+
+  const criticalAlerts = useMemo(() => {
+    const items = (criticalQuery.data?.alerts ?? []).map(mapApiAlertToAlertItem);
+    return [...items].sort(sortAlertsByDisplayedAtDesc);
+  }, [criticalQuery.data]);
 
   const highAlerts = useMemo(() => {
     const items = (highQuery.data?.alerts ?? []).map(mapApiAlertToAlertItem);
@@ -52,21 +58,23 @@ export function useDashboardRiskPreviewsQuery(options?: {
     return [...items].sort(sortAlertsByDisplayedAtDesc);
   }, [mediumQuery.data]);
 
-  const lowAlerts = useMemo(() => {
-    const items = (lowQuery.data?.alerts ?? []).map(mapApiAlertToAlertItem);
+  const below60Alerts = useMemo(() => {
+    const items = (below60Query.data?.alerts ?? []).map(mapApiAlertToAlertItem);
     return [...items].sort(sortAlertsByDisplayedAtDesc);
-  }, [lowQuery.data]);
+  }, [below60Query.data]);
 
   const refetchAll = () =>
     Promise.all(results.map(q => q.refetch())).then(() => undefined);
 
   return {
+    criticalQuery,
     highQuery,
     mediumQuery,
-    lowQuery,
+    below60Query,
+    criticalAlerts,
     highAlerts,
     mediumAlerts,
-    lowAlerts,
+    below60Alerts,
     refetchAll,
   };
 }

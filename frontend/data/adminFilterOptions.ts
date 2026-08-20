@@ -55,6 +55,17 @@ export const ADMIN_RISK_LEVEL_OPTIONS = [
   { value: 'low', label: 'Low' },
 ] as const;
 
+/**
+ * Admin alerts list risk filter — `risk_band` values only.
+ * Low is omitted (do not send legacy `risk_level=low`); Below 60 is not exposed in Admin UI.
+ */
+export const ADMIN_ALERT_RISK_BAND_OPTIONS = [
+  { value: 'all', label: 'All Risk Levels' },
+  { value: 'critical', label: 'Critical' },
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+] as const;
+
 /** Brief list/filter categories (intelligence briefs, not alerts). */
 export const ADMIN_CATEGORY_OPTIONS = [
   { value: 'all', label: 'All Categories' },

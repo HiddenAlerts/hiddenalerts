@@ -29,7 +29,7 @@ export type FetchAlertsParams = {
   limit: number;
   offset: number;
   category?: string;
-  risk_level?: string;
+  risk_band?: string;
   source?: string;
 };
 
@@ -86,7 +86,7 @@ export function buildAlertsListPath(params: FetchAlertsParams) {
   search.set('limit', String(params.limit));
   search.set('offset', String(params.offset));
   if (params.category) search.set('category', params.category);
-  if (params.risk_level) search.set('risk_level', params.risk_level);
+  if (params.risk_band) search.set('risk_band', params.risk_band);
   if (params.source) search.set('source', params.source);
   return `${SUBSCRIBER_BASE}/alerts?${search.toString()}`;
 }

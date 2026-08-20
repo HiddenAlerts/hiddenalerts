@@ -14,8 +14,8 @@ import {
 import { HoverTip } from '@/components/ui/HoverTip';
 import {
   ADMIN_ALERT_CATEGORY_OPTIONS,
+  ADMIN_ALERT_RISK_BAND_OPTIONS,
   ADMIN_ALERT_STATUS_OPTIONS,
-  ADMIN_RISK_LEVEL_OPTIONS,
 } from '@/data/adminFilterOptions';
 import {
   ADMIN_ALERTS_PAGE_SIZE,
@@ -262,8 +262,8 @@ export const AdminAlertsScreen: FC = () => {
           {
             id: 'alerts-risk',
             value: risk,
-            ariaLabel: 'Filter by risk level',
-            options: ADMIN_RISK_LEVEL_OPTIONS,
+            ariaLabel: 'Filter by risk band',
+            options: ADMIN_ALERT_RISK_BAND_OPTIONS,
             onChange: value => {
               setRisk(value);
               resetPage();
