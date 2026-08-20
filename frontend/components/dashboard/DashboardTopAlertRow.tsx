@@ -168,13 +168,6 @@ export const DashboardTopAlertRow: FC<DashboardTopAlertRowProps> = ({
           aria-hidden
         />
         <div className="flex shrink-0 flex-row items-center justify-between gap-3 sm:flex-col sm:items-end sm:gap-2">
-          {alert.isNew ? (
-            <span className="bg-danger inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold text-white">
-              NEW
-            </span>
-          ) : (
-            <span aria-hidden className="hidden sm:block sm:h-5" />
-          )}
           <div className="text-muted inline-flex items-center gap-2 text-sm leading-snug">
             <Calendar
               className="text-muted-foreground size-4 shrink-0"
