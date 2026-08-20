@@ -7,7 +7,7 @@ import { FOOTER_CONTENT } from '@/data/landing';
 
 import { LandingLogo } from './LandingLogo';
 import { LandingNewsletterForm } from './LandingNewsletterForm';
-import { LinkedInIcon, XIcon } from './SocialIcons';
+import { LinkedInIcon } from './SocialIcons';
 
 const linkClass =
   'text-muted-foreground hover:text-body text-sm transition-colors focus-visible:ring-primary-500 rounded-sm focus-visible:ring-2 focus-visible:outline-none';
@@ -87,18 +87,7 @@ export function LandingFooter() {
               </a>
               <a
                 href={c.socialLinks[1].href}
-                target="_blank"
-                rel="noopener noreferrer"
                 aria-label={c.socialLinks[1].label}
-                className={cn(
-                  'text-muted hover:text-foreground border-border bg-surface/50 flex size-9 items-center justify-center rounded-full border transition-colors',
-                )}
-              >
-                <XIcon />
-              </a>
-              <a
-                href={c.socialLinks[2].href}
-                aria-label={c.socialLinks[2].label}
                 className={cn(
                   'text-muted hover:text-foreground border-border bg-surface/50 flex size-9 items-center justify-center rounded-full border transition-colors',
                 )}
