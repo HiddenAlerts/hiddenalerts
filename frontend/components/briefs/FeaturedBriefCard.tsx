@@ -33,8 +33,8 @@ export type FeaturedBriefCardProps = {
 
 /**
  * Large hero card highlighting the featured intelligence brief.
- * Heading sits above the cover; the cover uses object-contain so CMS
- * infographics are not cropped into an unrecognizable strip.
+ * Heading sits above the cover; the cover uses a 16:9 frame so the
+ * standard 1200×675 thumbnail fills the image area without letterboxing.
  */
 export const FeaturedBriefCard: FC<FeaturedBriefCardProps> = ({
   brief,
@@ -75,19 +75,19 @@ export const FeaturedBriefCard: FC<FeaturedBriefCardProps> = ({
     </div>
 
     {brief.featuredImage ? (
-      <div className="bg-surface-muted relative flex max-h-[22rem] items-center justify-center overflow-hidden sm:max-h-[26rem]">
+      <div className="bg-surface-muted relative aspect-[16/9] w-full overflow-hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={brief.featuredImage}
           alt=""
-          className="max-h-[22rem] w-full object-contain object-center sm:max-h-[26rem]"
+          className="size-full object-cover object-center"
         />
       </div>
     ) : (
       <BriefCover
         theme={brief.coverTheme}
         iconSizeClassName="size-48"
-        className="aspect-[16/9] max-h-[22rem] w-full sm:max-h-[26rem]"
+        className="aspect-[16/9] w-full"
       />
     )}
 
