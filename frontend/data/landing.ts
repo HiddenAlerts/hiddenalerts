@@ -291,10 +291,9 @@ export const FOOTER_CONTENT = {
   ],
   socialLinks: [
     {
-      href: 'https://www.linkedin.com/company/covertlytics',
+      href: 'https://www.linkedin.com/in/ken-sather-b7a72419',
       label: 'LinkedIn',
     },
-    { href: 'https://x.com/covertlytics', label: 'X (Twitter)' },
     { href: 'mailto:hello@hiddenalerts.com', label: 'Email' },
   ],
   copyright: '© 2026 HiddenAlerts. All rights reserved.',
