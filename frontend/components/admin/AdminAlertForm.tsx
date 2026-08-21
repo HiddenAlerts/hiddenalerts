@@ -29,6 +29,7 @@ const EMPTY_ALERT: AdminAlert = {
   briefId: undefined,
   tags: [],
   status: 'draft',
+  isRelevant: true,
 };
 
 export type AdminAlertFormProps = {

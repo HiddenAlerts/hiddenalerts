@@ -1,3 +1,4 @@
+import { resolveAdminAlertPublicationStatus } from '@/lib/adminAlertStatus';
 import type { AdminAlert, AdminAlertDetail, AdminAlertRiskExplanation } from '@/types/admin';
 import type {
   AdminAlertApiRecord,
@@ -71,6 +72,8 @@ export function mapApiAlertToAdminAlert(record: AdminAlertApiRecord): AdminAlert
     record.published_at ??
     '';
 
+  const excludedReason = record.excluded_reason ?? undefined;
+
   return {
     id: String(record.id),
     title: record.title,
@@ -81,7 +84,15 @@ export function mapApiAlertToAdminAlert(record: AdminAlertApiRecord): AdminAlert
     date,
     summary: record.publish_decision_reason ?? '',
     tags: record.matched_keywords ?? [],
-    status: record.is_published ? 'published' : 'draft',
+    status: resolveAdminAlertPublicationStatus({
+      is_published: record.is_published,
+      is_excluded: record.is_excluded,
+      is_manual_hold: record.is_manual_hold,
+      publish_decision: record.publish_decision,
+      excluded_reason: record.excluded_reason,
+    }),
+    isRelevant: record.is_relevant,
+    ...(excludedReason ? { excludedReason } : {}),
   };
 }
 
@@ -109,7 +120,14 @@ export function mapApiAlertDetailToAdminAlertDetail(
     publishedAt: record.published_at ?? undefined,
     summary: record.summary?.trim() ?? '',
     tags: record.matched_keywords ?? [],
-    status: record.is_published ? 'published' : 'draft',
+    status: resolveAdminAlertPublicationStatus({
+      is_published: record.is_published,
+      is_excluded: record.is_excluded,
+      is_manual_hold: record.is_manual_hold,
+      publish_decision: record.publish_decision,
+      excluded_reason: record.excluded_reason,
+    }),
+    isRelevant: record.is_relevant,
     publishDecision: record.publish_decision,
     publishDecisionReason: record.publish_decision_reason ?? undefined,
     pendingReviewReason: record.pending_review_reason ?? undefined,

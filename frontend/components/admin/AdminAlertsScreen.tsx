@@ -24,6 +24,13 @@ import {
   useDebouncedValue,
 } from '@/hooks';
 import { getApiErrorMessage } from '@/lib/api/queryError';
+import {
+  adminAlertStatusTone,
+  canAdminAlertApprove,
+  canAdminAlertMarkFalsePositive,
+  formatAdminAlertPublicationStatusLabel,
+  hasAdminAlertReviewActions,
+} from '@/lib/adminAlertStatus';
 import { formatAdminDate } from '@/lib/formatAdminDate';
 import { cn } from '@/lib/utils';
 import type { AdminAlert } from '@/types/admin';
@@ -34,16 +41,6 @@ import { toast } from 'sonner';
 
 import { AdminPagination } from './AdminPagination';
 import { AdminTableToolbar } from './AdminTableToolbar';
-
-const STATUS_TONE = {
-  published: 'success',
-  draft: 'neutral',
-} as const;
-
-const STATUS_LABEL = {
-  published: 'Published',
-  draft: 'Draft',
-} as const;
 
 type AlertReviewAction = 'approved' | 'false_positive';
 
@@ -141,38 +138,51 @@ function buildAlertColumns({
       id: 'status',
       header: 'Status',
       cell: row => (
-        <StatusTag tone={STATUS_TONE[row.status]}>
-          {STATUS_LABEL[row.status]}
+        <StatusTag tone={adminAlertStatusTone(row.status)}>
+          {formatAdminAlertPublicationStatusLabel(
+            row.status,
+            row.excludedReason,
+          )}
         </StatusTag>
       ),
-      className: 'w-[120px]',
+      className: 'w-[140px]',
     },
     {
       id: 'actions',
       header: 'Actions',
-      cell: row =>
-        row.status === 'published' ? (
-          <span className="text-muted text-sm">—</span>
-        ) : (
+      cell: row => {
+        const showApprove = canAdminAlertApprove(row.status, row.isRelevant);
+        const showFalsePositive = canAdminAlertMarkFalsePositive(row.status);
+
+        if (!hasAdminAlertReviewActions(row.status, row.isRelevant)) {
+          return <span className="text-muted text-sm">—</span>;
+        }
+
+        return (
           <div className="flex items-center gap-1">
-            <ReviewIconButton
-              label="Approve"
-              disabled={reviewDisabled}
-              tone="success"
-              onClick={() => onReview(row, 'approved')}
-            >
-              <Check className="size-4" strokeWidth={2} aria-hidden />
-            </ReviewIconButton>
-            <ReviewIconButton
-              label="False Positive"
-              disabled={reviewDisabled}
-              tone="danger"
-              onClick={() => onReview(row, 'false_positive')}
-            >
-              <Ban className="size-4" strokeWidth={2} aria-hidden />
-            </ReviewIconButton>
+            {showApprove ? (
+              <ReviewIconButton
+                label="Approve"
+                disabled={reviewDisabled}
+                tone="success"
+                onClick={() => onReview(row, 'approved')}
+              >
+                <Check className="size-4" strokeWidth={2} aria-hidden />
+              </ReviewIconButton>
+            ) : null}
+            {showFalsePositive ? (
+              <ReviewIconButton
+                label="False Positive"
+                disabled={reviewDisabled}
+                tone="danger"
+                onClick={() => onReview(row, 'false_positive')}
+              >
+                <Ban className="size-4" strokeWidth={2} aria-hidden />
+              </ReviewIconButton>
+            ) : null}
           </div>
-        ),
+        );
+      },
       className: 'w-[100px]',
     },
   ];

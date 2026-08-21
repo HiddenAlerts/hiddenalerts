@@ -167,6 +167,7 @@ export const ADMIN_MOCK_ALERTS: AdminAlert[] = SEED.map(s => ({
   summary: s.summary ?? '',
   briefId: s.briefId,
   tags: s.tags ?? [],
+  isRelevant: true,
 }));
 
 export function findAdminAlert(id: string): AdminAlert | undefined {

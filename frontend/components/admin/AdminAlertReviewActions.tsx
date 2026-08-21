@@ -3,6 +3,10 @@
 import { Button, Select, Textarea } from '@/components';
 import { useAdminAlertReviewMutation } from '@/hooks';
 import { getApiErrorMessage } from '@/lib/api/queryError';
+import {
+  canAdminAlertApprove,
+  canAdminAlertMarkFalsePositive,
+} from '@/lib/adminAlertStatus';
 import type { AdminAlertDetail } from '@/types/admin';
 import { type FC, useEffect, useState } from 'react';
 
@@ -33,6 +37,8 @@ export const AdminAlertReviewActions: FC<AdminAlertReviewActionsProps> = ({
   }, [alert.summary, alert.riskLevel]);
 
   const isPending = reviewMutation.isPending;
+  const showApprove = canAdminAlertApprove(alert.status, alert.isRelevant);
+  const showFalsePositive = canAdminAlertMarkFalsePositive(alert.status);
 
   async function submitApprovedOrFalsePositive(
     reviewStatus: 'approved' | 'false_positive',
@@ -95,7 +101,7 @@ export const AdminAlertReviewActions: FC<AdminAlertReviewActionsProps> = ({
         <h2 className="text-foreground text-base font-semibold">Review Actions</h2>
         <p className="text-muted mt-1 text-sm">
           Approve to publish, mark as false positive to exclude, or edit the
-          summary and risk level.
+          summary and risk level. Edit does not change publication status.
         </p>
       </div>
 
@@ -108,25 +114,33 @@ export const AdminAlertReviewActions: FC<AdminAlertReviewActionsProps> = ({
         </p>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          size="sm"
-          disabled={isPending}
-          onClick={() => void submitApprovedOrFalsePositive('approved')}
-        >
-          Approve
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          disabled={isPending}
-          onClick={() => void submitApprovedOrFalsePositive('false_positive')}
-        >
-          Mark False Positive
-        </Button>
-      </div>
+      {showApprove || showFalsePositive ? (
+        <div className="flex flex-wrap gap-2">
+          {showApprove ? (
+            <Button
+              type="button"
+              size="sm"
+              disabled={isPending}
+              onClick={() => void submitApprovedOrFalsePositive('approved')}
+            >
+              Approve
+            </Button>
+          ) : null}
+          {showFalsePositive ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={isPending}
+              onClick={() =>
+                void submitApprovedOrFalsePositive('false_positive')
+              }
+            >
+              Mark False Positive
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="border-border space-y-4 rounded-md border p-4">
         <p className="text-foreground text-sm font-medium">Edit</p>

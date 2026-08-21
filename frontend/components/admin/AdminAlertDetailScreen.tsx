@@ -10,6 +10,10 @@ import {
 } from '@/components';
 import { useAdminAlertDetailQuery } from '@/hooks';
 import { getApiErrorMessage } from '@/lib/api/queryError';
+import {
+  adminAlertStatusTone,
+  formatAdminAlertPublicationStatusLabel,
+} from '@/lib/adminAlertStatus';
 import { formatAdminDate, formatAdminDateTime } from '@/lib/formatAdminDate';
 import type { AdminAlertDetail, AdminAlertRiskExplanation } from '@/types/admin';
 import { ArrowLeft, ExternalLink } from 'lucide-react';
@@ -18,16 +22,6 @@ import type { FC, ReactNode } from 'react';
 
 import { AdminAlertReviewActions } from './AdminAlertReviewActions';
 import { AdminDetailField } from './AdminDetailField';
-
-const STATUS_TONE = {
-  published: 'success',
-  draft: 'neutral',
-} as const;
-
-const STATUS_LABEL = {
-  published: 'Published',
-  draft: 'Draft',
-} as const;
 
 export type AdminAlertDetailScreenProps = {
   alertId: string;
@@ -38,12 +32,6 @@ const Chip: FC<{ children: string }> = ({ children }) => (
     {children}
   </span>
 );
-
-function isAwaitingAdminReview(alert: AdminAlertDetail): boolean {
-  if (alert.status === 'published') return false;
-  if (alert.reviewStatus?.trim().toLowerCase() === 'approved') return false;
-  return true;
-}
 
 function formatEnumLabel(value?: string | null): string {
   if (!value?.trim()) return '—';
@@ -193,8 +181,11 @@ export const AdminAlertDetailScreen: FC<AdminAlertDetailScreenProps> = ({
               {formatEnumLabel(alert.riskBand)}
             </AdminDetailField>
             <AdminDetailField label="Publication Status">
-              <StatusTag tone={STATUS_TONE[alert.status]}>
-                {STATUS_LABEL[alert.status]}
+              <StatusTag tone={adminAlertStatusTone(alert.status)}>
+                {formatAdminAlertPublicationStatusLabel(
+                  alert.status,
+                  alert.excludedReason,
+                )}
               </StatusTag>
             </AdminDetailField>
           </div>
@@ -203,6 +194,12 @@ export const AdminAlertDetailScreen: FC<AdminAlertDetailScreenProps> = ({
             <AdminDetailField label="Category">{alert.category}</AdminDetailField>
             <AdminDetailField label="Publish Decision">
               {formatEnumLabel(alert.publishDecision)}
+            </AdminDetailField>
+            <AdminDetailField label="Excluded Reason">
+              {alert.excludedReason?.trim().toLowerCase() ===
+              'manual_false_positive'
+                ? 'False Positive'
+                : formatEnumLabel(alert.excludedReason)}
             </AdminDetailField>
             <AdminDetailField label="Pending Review Reason">
               {formatEnumLabel(alert.pendingReviewReason)}
@@ -275,9 +272,8 @@ export const AdminAlertDetailScreen: FC<AdminAlertDetailScreenProps> = ({
         <WhyThisDecisionPanel explanation={alert.riskExplanation} />
       ) : null}
 
-      {isAwaitingAdminReview(alert) ? (
-        <AdminAlertReviewActions alert={alert} />
-      ) : null}
+      {/* Edit is independent of Approve / False Positive visibility. */}
+      <AdminAlertReviewActions alert={alert} />
     </div>
   );
 };

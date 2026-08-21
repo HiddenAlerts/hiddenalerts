@@ -73,6 +73,13 @@ export type AdminBriefListItem = {
   updatedAt: string;
 };
 
+export type AdminAlertPublicationStatus =
+  | 'published'
+  | 'excluded'
+  | 'hold'
+  | 'review'
+  | 'draft';
+
 export type AdminAlert = {
   id: string;
   title: string;
@@ -86,7 +93,11 @@ export type AdminAlert = {
   /** ID of a related brief, if any. */
   briefId?: string;
   tags: string[];
-  status: 'published' | 'draft';
+  status: AdminAlertPublicationStatus;
+  /** Backend `excluded_reason` — used for False Positive label. */
+  excludedReason?: string;
+  /** Backend `is_relevant` — Approve only when true. */
+  isRelevant: boolean;
 };
 
 export type AdminAlertRiskExplanation = {
@@ -125,7 +136,9 @@ export type AdminAlertDetail = {
   publishedAt?: string;
   summary: string;
   tags: string[];
-  status: 'published' | 'draft';
+  status: AdminAlertPublicationStatus;
+  /** Backend `is_relevant` — Approve only when true. */
+  isRelevant: boolean;
   publishDecision: string;
   publishDecisionReason?: string;
   pendingReviewReason?: string;
