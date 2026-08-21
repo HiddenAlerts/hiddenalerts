@@ -22,7 +22,7 @@ export type AlertItem = {
   /** Used for the category filter */
   category: string;
   occurredAt: string;
-  /** From API `source_published_at` when set; drives source-facing date/time in lists. */
+  /** From API `source_published_at` when set — source article date only; not list order. */
   sourcePublishedAt?: string;
   /** From entity-aware search (`matched_entity`); omitted when absent or keyword match. */
   matchedEntity?: string;

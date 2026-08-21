@@ -66,12 +66,9 @@ function mapRiskExplanation(
 }
 
 export function mapApiAlertToAdminAlert(record: AdminAlertApiRecord): AdminAlert {
-  const date =
-    record.source_published_at ??
-    record.processed_at ??
-    record.published_at ??
-    '';
-
+  const sourcePublishedAt = record.source_published_at ?? '';
+  const processedAt = record.processed_at ?? '';
+  const publishedAt = record.published_at ?? undefined;
   const excludedReason = record.excluded_reason ?? undefined;
 
   return {
@@ -81,7 +78,11 @@ export function mapApiAlertToAdminAlert(record: AdminAlertApiRecord): AdminAlert
     riskLevel: record.risk_level,
     riskBand: record.risk_band,
     category: record.primary_category ?? '',
-    date,
+    // Form legacy field only — never fall back to source_published_at here.
+    date: publishedAt ?? processedAt,
+    sourcePublishedAt,
+    processedAt,
+    ...(publishedAt ? { publishedAt } : {}),
     summary: record.publish_decision_reason ?? '',
     tags: record.matched_keywords ?? [],
     status: resolveAdminAlertPublicationStatus({
@@ -99,11 +100,7 @@ export function mapApiAlertToAdminAlert(record: AdminAlertApiRecord): AdminAlert
 export function mapApiAlertDetailToAdminAlertDetail(
   record: AdminAlertDetailApiRecord,
 ): AdminAlertDetail {
-  const date =
-    record.source_published_at ??
-    record.processed_at ??
-    record.published_at ??
-    '';
+  const publishedAt = record.published_at ?? undefined;
 
   return {
     id: String(record.id),
@@ -115,9 +112,9 @@ export function mapApiAlertDetailToAdminAlertDetail(
     riskBand: record.risk_band,
     category: record.primary_category ?? '',
     secondaryCategory: record.secondary_category ?? undefined,
-    date,
+    sourcePublishedAt: record.source_published_at ?? '',
     processedAt: record.processed_at,
-    publishedAt: record.published_at ?? undefined,
+    ...(publishedAt ? { publishedAt } : {}),
     summary: record.summary?.trim() ?? '',
     tags: record.matched_keywords ?? [],
     status: resolveAdminAlertPublicationStatus({

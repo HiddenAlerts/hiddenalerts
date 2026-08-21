@@ -88,7 +88,17 @@ export type AdminAlert = {
   riskLevel?: string;
   riskBand?: string;
   category: string;
+  /**
+   * Form / legacy single date. Prefer `publishedAt`, `sourcePublishedAt`,
+   * and `processedAt` — do not treat this as a substitute for any of them.
+   */
   date: string;
+  /** Backend `source_published_at` — original source article date. */
+  sourcePublishedAt: string;
+  /** Backend `processed_at` — when HiddenAlerts processed the article. */
+  processedAt: string;
+  /** Backend `published_at` — when HiddenAlerts published (null if unpublished). */
+  publishedAt?: string;
   summary: string;
   /** ID of a related brief, if any. */
   briefId?: string;
@@ -131,8 +141,11 @@ export type AdminAlertDetail = {
   riskBand: string;
   category: string;
   secondaryCategory?: string;
-  date: string;
+  /** Backend `source_published_at` — original source article date. */
+  sourcePublishedAt: string;
+  /** Backend `processed_at` — when HiddenAlerts processed the article. */
   processedAt: string;
+  /** Backend `published_at` — when HiddenAlerts published (absent if unpublished). */
   publishedAt?: string;
   summary: string;
   tags: string[];

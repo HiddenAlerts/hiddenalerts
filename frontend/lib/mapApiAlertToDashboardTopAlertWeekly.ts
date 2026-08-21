@@ -83,7 +83,7 @@ export function mapApiAlertToDashboardTopAlertWeeklyItem(
   record: AlertApiRecord,
   now: number = Date.now(),
 ): DashboardTopAlertWeeklyItem {
-  const occurredAtIso = record.source_published_at || record.published_at;
+  const occurredAtIso = record.published_at;
   const occurredMs = new Date(occurredAtIso).getTime();
   const isNew =
     !Number.isNaN(occurredMs) && now - occurredMs <= NEW_ALERT_WINDOW_MS;

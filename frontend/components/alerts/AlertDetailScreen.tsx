@@ -159,8 +159,14 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
   const confidence =
     data.risk_explanation?.confidence?.trim() ||
     confidenceLabelFromRisk(formatRiskLevelLabel(data.risk_level));
-  const updatedAt = data.processed_at ?? data.published_at;
-  const updatedLabel = updatedAt ? formatAlertDatePublished(updatedAt) : '—';
+  const publishedRaw = data.published_at?.trim();
+  const publishedLabel = publishedRaw
+    ? formatAlertDatePublished(publishedRaw)
+    : null;
+  const processedRaw = data.processed_at?.trim();
+  const processedLabel = processedRaw
+    ? formatAlertDatePublished(processedRaw)
+    : null;
   const sourcePublishedRaw = data.source_published_at?.trim();
   const sourcePublishedLabel = sourcePublishedRaw
     ? formatAlertDatePublished(sourcePublishedRaw)
@@ -228,16 +234,24 @@ export function AlertDetailScreen({ alertId }: AlertDetailScreenProps) {
             <Newspaper className="text-info/90 size-4" aria-hidden="true" />
             Source: {sourceLabel}
           </span>
+          {publishedLabel ? (
+            <span className="inline-flex items-center gap-2">
+              <Clock3 className="text-warning/90 size-4" aria-hidden="true" />
+              Published: {publishedLabel}
+            </span>
+          ) : null}
           {sourcePublishedLabel ? (
             <span className="inline-flex items-center gap-2">
               <Calendar className="text-warning/90 size-4" aria-hidden="true" />
               Source published: {sourcePublishedLabel}
             </span>
           ) : null}
-          <span className="inline-flex items-center gap-2">
-            <Clock3 className="text-warning/90 size-4" aria-hidden="true" />
-            Updated: {updatedLabel}
-          </span>
+          {processedLabel ? (
+            <span className="inline-flex items-center gap-2">
+              <Clock3 className="text-body/80 size-4" aria-hidden="true" />
+              Processed: {processedLabel}
+            </span>
+          ) : null}
           {affectedLabel ? (
             <span className="inline-flex items-center gap-2">
               <Users className="text-body/80 size-4" aria-hidden="true" />

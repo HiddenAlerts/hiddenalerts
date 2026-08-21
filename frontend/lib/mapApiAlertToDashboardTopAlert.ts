@@ -39,7 +39,7 @@ export function mapApiAlertToDashboardTopAlertItem(
       { text: record.source_name || 'Unknown source' },
     ],
     description: record.summary,
-    occurredAt: record.source_published_at || record.published_at,
+    occurredAt: record.published_at,
     iconVariant: mapCategoryToDashboardTopIconVariant(record.category),
   };
 }

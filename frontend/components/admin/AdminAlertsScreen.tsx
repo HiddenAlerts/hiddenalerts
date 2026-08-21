@@ -128,9 +128,13 @@ function buildAlertColumns({
     },
     {
       id: 'date',
-      header: 'Date',
+      header: 'Published',
       cell: row => (
-        <span className="text-muted tabular-nums">{formatAdminDate(row.date)}</span>
+        <span className="text-muted tabular-nums">
+          {row.publishedAt
+            ? formatAdminDate(row.publishedAt)
+            : '—'}
+        </span>
       ),
       className: 'w-[140px]',
     },

@@ -9,8 +9,10 @@ export function isCriticalOrHighAlert(record: AlertApiRecord): boolean {
   return level === 'critical' || level === 'high';
 }
 
-function alertOccurredMs(record: AlertApiRecord): number {
-  const iso = record.source_published_at || record.published_at;
+/** HiddenAlerts `published_at` for ordering — never source_published_at. */
+function alertPublishedMs(record: AlertApiRecord): number {
+  const iso = record.published_at;
+  if (!iso) return 0;
   const ms = new Date(iso).getTime();
   return Number.isNaN(ms) ? 0 : ms;
 }
@@ -21,14 +23,15 @@ function normalizeAlertTitle(title: string): string {
 
 /**
  * Newest Critical & High alerts for the dashboard.
- * Dedupes by id and normalized title so the same story never repeats.
+ * Orders by HiddenAlerts `published_at` DESC (same as Published feed), then
+ * dedupes by id and normalized title. Does not use source_published_at.
  */
 export function pickNewestCriticalHighAlerts(
   records: AlertApiRecord[],
   limit: number,
 ): AlertApiRecord[] {
   const sorted = [...records].sort(
-    (a, b) => alertOccurredMs(b) - alertOccurredMs(a),
+    (a, b) => alertPublishedMs(b) - alertPublishedMs(a),
   );
 
   const seenIds = new Set<string>();

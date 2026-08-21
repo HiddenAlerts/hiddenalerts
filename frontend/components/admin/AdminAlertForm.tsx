@@ -25,6 +25,8 @@ const EMPTY_ALERT: AdminAlert = {
   riskScore: 0,
   category: ADMIN_ALERT_CATEGORY_FORM_OPTIONS[0].value,
   date: new Date().toISOString().slice(0, 10),
+  sourcePublishedAt: '',
+  processedAt: new Date().toISOString(),
   summary: '',
   briefId: undefined,
   tags: [],

@@ -14,7 +14,7 @@ import {
   adminAlertStatusTone,
   formatAdminAlertPublicationStatusLabel,
 } from '@/lib/adminAlertStatus';
-import { formatAdminDate, formatAdminDateTime } from '@/lib/formatAdminDate';
+import { formatAdminDateTime } from '@/lib/formatAdminDate';
 import type { AdminAlertDetail, AdminAlertRiskExplanation } from '@/types/admin';
 import { ArrowLeft, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
@@ -214,8 +214,13 @@ export const AdminAlertDetailScreen: FC<AdminAlertDetailScreenProps> = ({
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <AdminDetailField label="Source Published">
-              {formatAdminDate(alert.date)}
+            <AdminDetailField label="Published At">
+              {alert.publishedAt ? formatAdminDateTime(alert.publishedAt) : '—'}
+            </AdminDetailField>
+            <AdminDetailField label="Source Published At">
+              {alert.sourcePublishedAt
+                ? formatAdminDateTime(alert.sourcePublishedAt)
+                : '—'}
             </AdminDetailField>
             <AdminDetailField label="Processed At">
               {formatAdminDateTime(alert.processedAt)}

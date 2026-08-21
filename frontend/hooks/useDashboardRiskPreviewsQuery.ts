@@ -1,7 +1,6 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthProvider';
-import { sortAlertsByDisplayedAtDesc } from '@/lib/alertDisplay';
 import { fetchAlertsPage, mapApiAlertToAlertItem } from '@/lib/api/alerts';
 import { useQueries } from '@tanstack/react-query';
 import { useMemo } from 'react';
@@ -43,25 +42,26 @@ export function useDashboardRiskPreviewsQuery(options?: {
 
   const [criticalQuery, highQuery, mediumQuery, below60Query] = results;
 
-  const criticalAlerts = useMemo(() => {
-    const items = (criticalQuery.data?.alerts ?? []).map(mapApiAlertToAlertItem);
-    return [...items].sort(sortAlertsByDisplayedAtDesc);
-  }, [criticalQuery.data]);
+  // Preserve backend Published order (published_at DESC …); do not re-sort by source date.
+  const criticalAlerts = useMemo(
+    () => (criticalQuery.data?.alerts ?? []).map(mapApiAlertToAlertItem),
+    [criticalQuery.data],
+  );
 
-  const highAlerts = useMemo(() => {
-    const items = (highQuery.data?.alerts ?? []).map(mapApiAlertToAlertItem);
-    return [...items].sort(sortAlertsByDisplayedAtDesc);
-  }, [highQuery.data]);
+  const highAlerts = useMemo(
+    () => (highQuery.data?.alerts ?? []).map(mapApiAlertToAlertItem),
+    [highQuery.data],
+  );
 
-  const mediumAlerts = useMemo(() => {
-    const items = (mediumQuery.data?.alerts ?? []).map(mapApiAlertToAlertItem);
-    return [...items].sort(sortAlertsByDisplayedAtDesc);
-  }, [mediumQuery.data]);
+  const mediumAlerts = useMemo(
+    () => (mediumQuery.data?.alerts ?? []).map(mapApiAlertToAlertItem),
+    [mediumQuery.data],
+  );
 
-  const below60Alerts = useMemo(() => {
-    const items = (below60Query.data?.alerts ?? []).map(mapApiAlertToAlertItem);
-    return [...items].sort(sortAlertsByDisplayedAtDesc);
-  }, [below60Query.data]);
+  const below60Alerts = useMemo(
+    () => (below60Query.data?.alerts ?? []).map(mapApiAlertToAlertItem),
+    [below60Query.data],
+  );
 
   const refetchAll = () =>
     Promise.all(results.map(q => q.refetch())).then(() => undefined);

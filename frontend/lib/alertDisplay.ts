@@ -158,19 +158,20 @@ export function scoreVisualTone(
 }
 
 /**
- * ISO-ish instant for displaying source-facing dates in the UI:
- * prefers API `source_published_at`, otherwise ingest time (`published_at` / `occurredAt`).
+ * ISO instant for list/card dates on Published feeds.
+ * Uses HiddenAlerts `published_at` (`occurredAt`) — not `source_published_at`.
  */
 export function alertDisplayedAtIso(alert: {
   sourcePublishedAt?: string;
   occurredAt: string;
 }): string {
-  const s = alert.sourcePublishedAt?.trim();
-  if (s) return s;
   return alert.occurredAt;
 }
 
-/** Newest-first ordering for compact dashboard preview lists. */
+/**
+ * @deprecated Prefer preserving backend Published order instead of client re-sort.
+ * Kept for any callers that still need published_at DESC by `occurredAt`.
+ */
 export function sortAlertsByDisplayedAtDesc<
   T extends { sourcePublishedAt?: string; occurredAt: string },
 >(a: T, b: T): number {
