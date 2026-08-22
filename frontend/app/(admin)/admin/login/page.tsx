@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAdminAuth } from '@/contexts/AdminAuthProvider';
 import type { HttpRequestError } from '@/lib/api/client';
+import { isAdminAccessDeniedError } from '@/lib/auth/adminRole';
 import { Lock, Mail } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { type FormEvent, Suspense, useEffect, useState } from 'react';
@@ -96,7 +97,14 @@ function AdminLoginContent() {
       });
       window.location.replace(resolveAdminRedirect(nextParam));
     } catch (err) {
-      if (isAdminAuthFailure(err)) {
+      if (isAdminAccessDeniedError(err)) {
+        toast.error('Access denied.', {
+          description:
+            err instanceof Error
+              ? err.message
+              : 'This account does not have Admin access.',
+        });
+      } else if (isAdminAuthFailure(err)) {
         toast.error('Invalid email or password.');
       } else {
         const detail = readErrorDetail(err);

@@ -2,6 +2,10 @@
 
 import { fetchAdminMe, loginAdmin } from '@/lib/api/adminAuth';
 import {
+  AdminAccessDeniedError,
+  isAdminRole,
+} from '@/lib/auth/adminRole';
+import {
   clearAdminToken,
   getAdminToken,
   setAdminToken,
@@ -44,6 +48,13 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     }
     try {
       const me = await fetchAdminMe(token);
+      if (!isAdminRole(me)) {
+        // Valid session but not Admin — clear so they never sit in the Admin shell.
+        clearAdminToken();
+        setUser(null);
+        setStatus('unauthenticated');
+        return;
+      }
       setUser(me);
       setStatus('authenticated');
     } catch {
@@ -60,6 +71,12 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async (email: string, password: string) => {
     const res = await loginAdmin({ email, password });
+    if (!isAdminRole(res.user)) {
+      clearAdminToken();
+      setUser(null);
+      setStatus('unauthenticated');
+      throw new AdminAccessDeniedError();
+    }
     setAdminToken(res.access_token);
     setUser(res.user);
     setStatus('authenticated');
