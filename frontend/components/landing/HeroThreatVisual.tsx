@@ -1,7 +1,5 @@
 import { cn } from '@/lib/utils';
 
-import { THREAT_SIGNAL_STAT } from '@/data/landing';
-
 /** Decorative hotspots scattered over the globe (percent coordinates). */
 const HOTSPOTS = [
   { top: '24%', left: '38%', delay: '0s' },
@@ -92,25 +90,7 @@ function ThreatGlobe() {
   );
 }
 
-function StatSparkline({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 120 40"
-      className={cn('text-primary-400 h-8 w-full', className)}
-      fill="none"
-      aria-hidden
-    >
-      <polyline
-        points="0,34 14,28 26,30 40,20 54,24 68,12 82,18 96,8 110,12 120,4"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
+/** Hero globe visual — statistic card removed (hard-coded 247 was misleading). */
 export function HeroThreatVisual({ className }: { className?: string }) {
   return (
     <div className={cn('relative w-full', className)}>
@@ -126,28 +106,6 @@ export function HeroThreatVisual({ className }: { className?: string }) {
         }}
       />
       <ThreatGlobe />
-
-      <div className="border-border bg-background-alt/90 shadow-lg sm:absolute sm:right-0 sm:bottom-0 mt-4 w-full rounded-xl border p-4 backdrop-blur sm:mt-0 sm:max-w-[240px]">
-        <div className="flex items-center gap-2">
-          <span className="bg-primary-500 inline-flex size-2 animate-pulse rounded-full" />
-          <span className="text-primary-300 text-[0.65rem] font-semibold tracking-[0.12em] uppercase">
-            {THREAT_SIGNAL_STAT.label}
-          </span>
-        </div>
-
-        <p className="text-primary-500 font-heading mt-2 text-4xl leading-none font-bold tracking-tight tabular-nums">
-          {THREAT_SIGNAL_STAT.value}
-        </p>
-        <p className="text-foreground mt-1.5 text-sm font-medium">
-          {THREAT_SIGNAL_STAT.headline}
-        </p>
-
-        <StatSparkline className="mt-2" />
-
-        <p className="text-muted-foreground mt-1.5 text-xs leading-relaxed">
-          {THREAT_SIGNAL_STAT.caption}
-        </p>
-      </div>
     </div>
   );
 }

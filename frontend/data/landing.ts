@@ -65,13 +65,6 @@ export const HERO_CONTENT = {
   emailFootnote: 'No spam. Unsubscribe anytime.',
 } as const;
 
-export const THREAT_SIGNAL_STAT = {
-  label: 'Active High-Risk Signals',
-  value: '247',
-  headline: 'High-Risk Threat Signals',
-  caption: 'Updated in real-time from global sources',
-} as const;
-
 export type ValueProp = {
   icon: LucideIcon;
   title: string;
