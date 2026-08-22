@@ -91,7 +91,7 @@ export const AlertRow: FC<AlertRowProps> = ({
         </div>
 
         <div className="min-w-0 flex-1">
-          <h2 className="font-heading text-foreground line-clamp-1 text-base font-semibold tracking-tight sm:text-[1.2rem]">
+          <h2 className="font-heading text-foreground text-base font-semibold tracking-tight break-words sm:text-[1.2rem]">
             {alert.title}
           </h2>
           <p className="text-info mt-0.5 text-sm font-medium">{categoryLine}</p>
